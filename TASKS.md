@@ -289,13 +289,37 @@ simplicity and because it is the standard operationalisation of "false positive"
 negative" in the detection literature, not because the alternatives (Hungarian assignment,
 multi-threshold) were found lacking — revisit only if reviewers ask for one of those.
 
-## M0.6 — Translator interface and CPU stand-in
+## M0.6 — Translator interface and CPU stand-in ✅
 
-- [ ] Define the `Translator` protocol: `fit()` and `translate(batch) -> Tensor`
-- [ ] `translators/stub.py` — tiny CPU stand-in (e.g. a 2-layer conv) implementing it.
-      **Load-bearing, not a test fixture**: `Pix2Pix_Turbo` hardcodes `.cuda()` and cannot
-      be imported on the Mac, so this is the only way the full path stays locally testable
-- [ ] Tests: stand-in round-trips through the full data → coupling → export → eval path
+- [x] Define the `Translator` protocol: `fit()` and `translate(batch) -> Tensor`
+      (`translators/protocol.py`, `@runtime_checkable` so `isinstance()` is testable)
+- [x] `translators/stub.py` — tiny CPU stand-in (2-layer conv, `Sigmoid`-bounded to
+      `[0,1]`) implementing it. **Load-bearing, not a test fixture**: `Pix2Pix_Turbo`
+      hardcodes `.cuda()` and cannot be imported on the Mac, so this is the only way the
+      full path stays locally testable
+- [x] Tests (`tests/test_stub_translator.py`): protocol conformance; config
+      (`hidden_channels`) reaches the module; `translate()` shape/dtype/`[0,1]` range;
+      gradient connectivity from `translate()` output back to the translator's own
+      parameters (what M0.7's coupling loss will depend on); `fit()` returns a finite loss
+      and drives it down on a fixed batch; one `slow` round trip through the real
+      `dataset_root` fixture → `translate()` → `FidelityEvaluator`
+
+**Decision — round trip scoped to data → translate → fidelity-eval, not the full
+data → coupling → export → eval path.** `coupling/` (M0.7) and `engine/export.py` (M0.8)
+don't exist yet, so the wider round trip named in the original checklist item isn't
+buildable yet. The coupling and export legs will be exercised for real once those
+milestones land; this narrows what M0.6 verifies rather than leaving the item unaddressed.
+
+**Decision — each translator owns its own optimizer(s) internally; `fit()` is a complete
+step.** Keeps the `Translator` protocol backbone-agnostic: a GAN's D-then-G steps and a
+one-step diffusion model's single step both fit behind one `fit(batch) -> dict[str, float]`
+call, with no assumption from the interface about how many losses or optimizers are
+involved. `StubTranslator` builds a private `Adam` at construction as the reference case.
+
+**Deferred, not decided — how the M0.7 detection-consistency term plugs into `fit()`.**
+The likely shape is a `Translator`-conforming wrapper around any base translator that adds
+the coupling loss without changing the protocol or touching `stub.py`, but this is not
+committed to; revisit when M0.7 actually needs it.
 
 ## M0.7 — Coupling
 
