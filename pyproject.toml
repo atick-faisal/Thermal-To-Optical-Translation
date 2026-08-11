@@ -1,24 +1,49 @@
 [project]
 name = "thermal-to-optical-translation"
 version = "0.1.0"
-description = "Add your description here"
+description = "Detection-in-the-loop thermal→visible translation for power-line component inspection"
 readme = "README.md"
+requires-python = ">=3.12"
 authors = [
     { name = "Atick Faisal", email = "atickfaisal@gmail.com" }
 ]
-requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.0",
+    "pillow>=11.0",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
     "torch>=2.13.0",
     "torchvision>=0.28.0",
+    # The Detect head output format changed between 8.3 and 8.4 (dict vs list); code
+    # written against one silently does not work against the other. PLAN.md §8.
+    "ultralytics>=8.4.108,<8.5",
     "wandb>=0.28.1",
+    # Phase 2a (pix2pix-turbo). Deliberately floored, not pinned to upstream's 2023-era
+    # stack — vendoring one ~230-line file is what lets us track current releases. PLAN.md §7.
+    "diffusers>=0.31",
+    "transformers>=4.45",
+    "peft>=0.14",
+    # Fidelity metrics. Nothing to port: no PSNR/SSIM/LPIPS/FID/KID exists in any sibling
+    # repo. PLAN.md §6. The [image] extra is what pulls torch-fidelity for FID/KID.
+    "lpips>=0.1.4",
+    "torchmetrics[image]>=1.6",
+    "pycocotools>=2.0.8",
+]
+
+# torch/torchvision are declared here as well so that `--extra cpu` / `--extra gpu`
+# selects the matching index below. Exactly one must be chosen at sync time.
+[project.optional-dependencies]
+cpu = [
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
+]
+gpu = [
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
 ]
 
 [project.scripts]
-thermal-to-optical-translation = "thermal_to_optical_translation:main"
-
-[build-system]
-requires = ["uv_build>=0.12.0,<0.13.0"]
-build-backend = "uv_build"
+t2o = "t2o.cli:main"
 
 [dependency-groups]
 dev = [
@@ -27,5 +52,65 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.2",
-    "ty>=0.0.70",
+]
+
+# Conflicting extras + explicit indices are what let CPU-on-Mac and CUDA-on-Windows
+# resolve from a single uv.lock. Ported from ../RGBT-Fusion-Detection.
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "gpu" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu130", extra = "gpu" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu130", extra = "gpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/t2o"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+# ruff formats fenced Python inside markdown. PLAN.md and RESEARCH_FINDINGS.md quote
+# upstream source verbatim with `file:line` citations; reformatting those breaks the
+# citation. Docs are prose, not code we own.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: long-running tests (CPU smoke training, end-to-end runs); deselect with -m 'not slow'",
 ]
