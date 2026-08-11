@@ -366,7 +366,7 @@ path.
 
 ## M0.8 — Engine and tracking
 
-- [ ] Port `tracking.py` — `RunTracker`, rank-0 only, never raises, context manager
+- [x] Port `tracking.py` — `RunTracker`, never raises, context manager
 - [ ] Point W&B at the self-hosted base URL from env; key from env, never committed
 - [ ] Port `engine/trainer.py` — bf16/fp16 GradScaler logic, autocast restricted to CUDA,
       fully resumable checkpoints (model + optimizer + scheduler + scaler + epoch +
@@ -381,6 +381,18 @@ path.
 - [ ] Tests (`slow` marker): full end-to-end on the fixture with the stand-in translator →
       `metrics.json`; resume produces identical state; same config+seed twice → identical
       hash and metrics
+
+**Decision — `RunTracker` drops Clean-SeAFusion's `DistributedContext` parameter and
+rank-0 gate.** PLAN.md §3 rules out DDP entirely on native Windows (no NCCL; one
+experiment per GPU via `CUDA_VISIBLE_DEVICES`), and `RuntimeConfig` (M0.2) has no
+rank/world-size concept to gate on. `RunTracker(config: Config)` takes one argument;
+`enabled = config.runtime.wandb`. Everything else — lazy `wandb` import with an
+`ImportError` fallback, run-dir creation before `wandb.init`, never-raising
+`log`/`finish` that self-disables on failure, and the context-manager wrapper — ports
+unchanged. `wandb>=0.28.1` was already a dependency since M0.1.
+
+**Verify (tracking.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (155 passed, 6 new). The rest of M0.8 is still open.
 
 ## M0.9 — Dataset acquisition
 
