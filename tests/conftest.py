@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 from PIL import Image
 
 NAMES = ["Fuse", "Pole", "Switch", "Transformer"]
@@ -73,3 +74,26 @@ def dataset_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def data_yaml(dataset_root: Path) -> Path:
     """The dataset manifest -- what `DatasetManifest.load` points at."""
     return dataset_root / "data.yaml"
+
+
+@pytest.fixture(scope="session")
+def detector_weights(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A randomly-initialised yolo11n in ultralytics checkpoint format.
+
+    Built locally rather than downloaded: the test suite must not touch the network. The
+    saved `train_args` is a plain dict (not ultralytics' own namespace type) deliberately --
+    that is exactly the shape `FrozenDetector`'s `_normalize_args` has to repair, and a
+    freshly-trained checkpoint loaded via `YOLO(path).model.args` really does come back this
+    way (verified against the installed ultralytics 8.4.117).
+    """
+    from ultralytics.nn.tasks import DetectionModel
+
+    torch.manual_seed(0)
+    model = DetectionModel(cfg="yolo11n.yaml", ch=3, nc=len(NAMES), verbose=False)
+    model.names = dict(enumerate(NAMES))  # type: ignore[assignment]
+    path = tmp_path_factory.mktemp("detector") / "yolo11n_random.pt"
+    torch.save(
+        {"model": model, "epoch": -1, "best_fitness": None, "train_args": {"data": "synthetic"}},
+        path,
+    )
+    return path

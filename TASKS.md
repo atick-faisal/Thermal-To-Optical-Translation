@@ -163,19 +163,48 @@ blind spot `TASKS.md` flagged in the real local 9-pair sample.
 **Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
 (86 passed, includes a `skipif`-guarded sanity check against the real local dataset).
 
-## M0.4 — Detection layer
+## M0.4 — Detection layer ✅
 
-- [ ] Port `detection/frozen.py` — `FrozenDetector` verbatim. Keep the `train()` override
+- [x] Port `detection/frozen.py` — `FrozenDetector` verbatim. Keep the `train()` override
       (an enclosing trainer's `model.train()` would otherwise flip BN back), the
       `_normalize_args` checkpoint repair, and stride-divisibility validation
-- [ ] `detection/evaluation.py` — the independently-trained evaluation detector. **Never
+- [x] `detection/evaluation.py` — the independently-trained evaluation detector. **Never
       shares weights or gradients with the in-loop detector** (invariant 7)
-- [ ] Port `engine/detector_stage.py` — keep `wandb_integration_disabled()` (ultralytics
+- [x] Port `engine/detector_stage.py` — keep `wandb_integration_disabled()` (ultralytics
       otherwise adopts the open run and calls `wb.run.finish()`, killing it) and the
       `_resolve_weights()` `last.pt` fallback (no `best.pt` is written if fitness was ever
       NaN)
-- [ ] Tests: frozen detector stays in eval after `.train()`; no grads accumulate on its
+- [x] Tests: frozen detector stays in eval after `.train()`; no grads accumulate on its
       params; grads *do* reach the input image; stride validation rejects bad sizes
+
+**Verified against the installed `ultralytics 8.4.117`, not assumed:** `unwrap_model`
+exists (renamed from `de_parallel` at ~8.4.112, and this project's floor is 8.4.108, so this
+was a real thing to check); a freshly-built `DetectionModel` in eval mode returns
+`(y, preds)` with `preds = {"boxes", "scores", "feats"}`; loading a manually-saved
+checkpoint via `YOLO(path).model.args` really does come back as a plain `dict`, confirming
+`_normalize_args`'s dict-repair branch is live rather than dead code.
+
+**Decision — `train_detector` reads `config.detector.evaluation.*`, not flat
+`config.detector.*`.** Clean-SeAFusion's config is flat; t2o's `DetectorConfig` was already
+split into `in_loop`/`evaluation` at M0.2 to encode invariant 7 structurally.
+`train_detector` always trains the *evaluation* detector — the in-loop one is never
+trained, by construction. Also reads `seed` from `config.train.seed`, not
+`config.runtime.seed` (the M0.2 seed-placement decision).
+
+**Decision — `detection/evaluation.py` is new, not a port.** Clean-SeAFusion has no
+equivalent: it alternates a single detector between frozen and trainable roles across
+stages. t2o splits the roles into two structurally distinct types instead, so
+`EvaluationDetector` is a minimal frozen dataclass (`weights: Path` + a `.load()`
+convenience) with deliberately no base class or code in common with `FrozenDetector` —
+checked directly in `tests/test_evaluation_detector.py` (disjoint MRO).
+
+**Not yet exercised:** an actual end-to-end `train_detector(...)` call against ultralytics'
+real training loop. That belongs with M0.8's full engine smoke test (already `slow`-marked
+territory). `DetectionTaskLoss`/`v8DetectionLoss` wiring is M0.7; reusing the metrics-
+extraction pattern for a standalone `model.val()` path is M0.5.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(104 passed).
 
 ## M0.5 — Metrics (all from scratch — none exist in any of our repos)
 
