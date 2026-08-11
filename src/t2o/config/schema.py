@@ -228,6 +228,24 @@ class StubTranslatorConfig(ConfigBase):
 TranslatorConfig = Annotated[StubTranslatorConfig, Field(discriminator="backbone")]
 
 
+class MetricsConfig(ConfigBase):
+    """Knobs for :mod:`t2o.metrics` that change the reported number, not just its cost.
+
+    Only the fidelity-metric fields exist so far (M0.5 step 1); faithfulness (C2) adds its
+    own IoU/confidence thresholds in a later step.
+    """
+
+    # (alex|vgg|squeeze) LPIPS backbone. Changes the reported number -- part of experiment
+    # identity, not an implementation detail. 'alex' is the standard choice for evaluation
+    # (lower variance, closer to the LPIPS paper's human-judgement calibration).
+    lpips_net: Literal["alex", "vgg", "squeeze"] = "alex"
+    # (int) KID's own default (1000) raises if fewer images than that are available. Both
+    # the synthetic smoke fixture (a handful of images) and the ~850-pair custom dataset
+    # are far below it; FidelityEvaluator additionally clamps at compute time if even this
+    # is too high for a given run.
+    kid_subset_size: int = 50
+
+
 class ExportConfig(ConfigBase):
     # (clamp|per_image) how translated floats map to uint8 on export. `clamp` keeps
     # intensities comparable across the dataset, which is what the evaluation detector
@@ -272,6 +290,7 @@ class Config(ConfigBase):
     coupling: CouplingConfig = CouplingConfig()
     detector: DetectorConfig = DetectorConfig()
     translator: TranslatorConfig = StubTranslatorConfig()
+    metrics: MetricsConfig = MetricsConfig()
     export: ExportConfig = ExportConfig()
     runtime: RuntimeConfig = RuntimeConfig()
 

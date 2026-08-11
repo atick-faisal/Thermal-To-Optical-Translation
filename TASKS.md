@@ -208,16 +208,49 @@ extraction pattern for a standalone `model.val()` path is M0.5.
 
 ## M0.5 — Metrics (all from scratch — none exist in any of our repos)
 
-- [ ] `metrics/fidelity.py` — PSNR, SSIM, LPIPS, FID, KID via `torchmetrics` + `lpips`
+Proceeds as **three separate steps/commits** (fidelity → task → faithfulness) rather than
+one, per AGENTS.md's one-step → verify → commit → stop working order — the three families
+are independent enough that bundling them into one commit would just be batching.
+
+- [x] `metrics/fidelity.py` — PSNR, SSIM, LPIPS, FID, KID, all via `torchmetrics.image`
+      (not a raw-`lpips` + torchmetrics mix — verified `LearnedPerceptualImagePatchSimilarity`/
+      `FrechetInceptionDistance`/`KernelInceptionDistance` all accept `[0, 1]` float input
+      directly via `normalize=True`, matching `TranslationSample`'s native convention with
+      no manual uint8 detour). `FidelityEvaluator` wraps all five behind one
+      `update`/`compute`/`reset` — the one evaluation path for fidelity.
 - [ ] `metrics/task.py` — mAP@50, mAP@50:95, per-class AP via ultralytics `DetMetrics`,
       with the defensive `results_dict`-then-`box`-attribute extraction from
       `../Clean-SeAFusion/src/seafusion/engine/detector_stage.py::_extract_metrics`
 - [ ] `metrics/faithfulness.py` (C2) — false-object rate, missed-object rate,
-      detection-consistency translated vs real-visible, adapted Hallucination Index
+      detection-consistency translated vs real-visible. **Hallucination Index deferred**
+      (see note below).
 - [ ] **One evaluation path** (invariant 1): every method computes every metric through
       this code. No per-method variants.
-- [ ] Tests: identical images → PSNR ∞ / SSIM 1 / LPIPS 0; known-shifted images give
-      expected ordering; faithfulness metrics on synthetic detections with known answers
+- [x] Tests (fidelity): identical images → PSNR ∞ / SSIM 1 / LPIPS 0; known-shifted images
+      give expected PSNR/SSIM ordering; FID/KID finite and non-negative on unrelated
+      pools; `MetricsConfig` shape and hash participation. Split along a network boundary
+      rather than a metric boundary — `FidelityEvaluator.__init__` always builds the
+      pretrained AlexNet/Inception backbones, so every test that constructs it is `slow`;
+      the fast suite covers only `MetricsConfig` and the KID subset-size clamp (a pure
+      function). The one-time weight download succeeded in the dev sandbox, so this needed
+      no "verify on server" carve-out.
+- [ ] Tests (task/faithfulness): mAP on a known synthetic prediction set; faithfulness
+      metrics on synthetic detections with known answers.
+
+**Decision — Hallucination Index deferred.** The MICCAI 2024 metric it's adapted from
+(arXiv:2407.12780) is a Hellinger distance between the *distribution* of a generative
+model's reconstructions (mean/variance/noise-power-spectrum across many repeated samples
+per input) and a zero-hallucination reference — it assumes a stochastic model sampled N
+times per input. Our translators (pix2pix, pix2pix-turbo one-step, LBBDM without repeated
+sampling) are deterministic per checkpoint, so the literal metric doesn't apply. Revisit
+once a stochastic backbone (diffusion, Phase 2) makes repeated sampling meaningful; until
+then `faithfulness.py` ships the other three C2 metrics only.
+
+**Decision — `MetricsConfig` added to `config/schema.py`.** `lpips_net` and
+`kid_subset_size` are experiment identity (they change the reported number), not
+implementation detail, so they're config fields and participate in `config_hash()` like
+everything else in `RESEARCH_FINDINGS.md`'s reported table. Faithfulness's IoU/confidence
+thresholds will extend the same section in the next step rather than starting a new one.
 
 ## M0.6 — Translator interface and CPU stand-in
 
