@@ -575,6 +575,14 @@ Match the mature repos (`../Clean-SeAFusion`, `../RGBT-Fusion-Detection`), not t
 behaviours — **unknown-key rejection** (pydantic `extra="forbid"`) and **`snapshot()`** of
 the resolved config into the run dir.
 
+**`config_hash()` covers the experiment, not the invocation.** The `runtime` section
+(device, run name, run dir, W&B flags) is excluded wholly, so the same experiment run on
+two GPUs under two names carries one hash — which is what lets invariant 6 mean anything.
+`seed` therefore lives under `train`, not `runtime`: it is scientific, and a
+silently-changed seed on resume is precisely the drift M0.8's warn-on-drift check exists to
+catch. Clean-SeAFusion hashed everything (`engine/fusion_trainer.py:60`) and consequently
+warned on a renamed run.
+
 ---
 
 ## 14. Dev-on-Mac / train-on-server workflow

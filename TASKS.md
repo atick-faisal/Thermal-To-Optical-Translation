@@ -73,17 +73,51 @@ reformatting those silently breaks the citations.
 **Not verifiable locally:** `uv sync --extra gpu`. `uv lock` resolves the CUDA path, which
 is as far as the Mac can go; the actual install is the first M0.10 check.
 
-## M0.2 — Config layer
+## M0.2 — Config layer ✅
 
-- [ ] `config/` pydantic v2 models with `extra="forbid"` (unknown-key rejection) and
+- [x] `config/` pydantic v2 models with `extra="forbid"` (unknown-key rejection) and
       frozen models. Replaces the hand-rolled `_build`/`_coerce` in
-      `../Clean-SeAFusion/src/seafusion/config.py`
-- [ ] **Inline comment on every field naming its failure mode** — house convention
-- [ ] `config_hash()` — sha256 over sorted-JSON of the resolved config, first 16 chars
-- [ ] `snapshot()` — write the resolved config into the run dir
-- [ ] `ConfigError` subclass; per-field error locations
-- [ ] Tests: unknown key rejected; bad value rejected with a useful message; hash stable
-      across reorderings; hash changes when a value changes
+      `../Clean-SeAFusion/src/seafusion/config.py` — ~70 lines of reflection deleted.
+      Three modules: `base.py` (`ConfigBase`, `ConfigError`, `deep_merge`,
+      `as_config_error`), `schema.py` (sections + root `Config`), `__init__.py`
+- [x] **Inline comment on every field naming its failure mode** — house convention
+- [x] `config_hash()` — sha256 over sorted-JSON of the resolved config, first 16 chars
+- [x] `snapshot()` — write the resolved config into the run dir
+- [x] `ConfigError` subclass; per-field error locations
+- [x] Port `imaging.py` `Normalize` from Clean-SeAFusion — `export.normalize` needs it now,
+      and M0.8 needs `to_uint8` anyway
+- [x] Tests (`tests/test_config.py`, 40 cases): unknown key rejected; bad value rejected
+      with a useful message; hash stable across reorderings; hash changes when a value
+      changes. No fixture data needed — this is the one milestone independent of M0.3's
+      synthetic dataset
+- [x] Verify: `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"` clean
+
+**Sections:** `data` (manifest + the E8 `annotation_fraction`/`annotation_seed` hook),
+`train`, `loss` (λ_l2/λ_lpips/λ_gan), `coupling` (λ_det ramp, `grad_scale`,
+`reward_target`), `detector`, `translator`, `export`, `runtime`.
+
+**Decision — `config_hash()` excludes `runtime` wholly.** Device, run name, run dir and
+W&B flags are invocation details, not experiment identity: the same experiment on two GPUs
+under two names must carry the same hash. `seed` therefore moved out of `runtime` (where
+Clean-SeAFusion put it) into `train` — a seed *is* scientific, and a silently-changed seed
+on resume is exactly the drift the check exists to catch. Diverges from
+`../Clean-SeAFusion/src/seafusion/engine/fusion_trainer.py:60`, which hashed everything and
+so warned on a renamed run.
+
+**Decision — `detector` splits into `in_loop` and `evaluation` sub-sections.** PLAN.md
+invariant 7 ("two detectors, never conflated") encoded structurally rather than by
+convention: there is no single `detector.weights` for the two to accidentally share.
+
+**Decision — `translator` is a pydantic discriminated union on `backbone`,** currently of
+one member (`stub`). `Backbone` gains `PIX2PIX` at M1, `PIX2PIX_TURBO` at M2a, `LBBDM` at
+M2b, each adding one model plus one union entry and touching nothing else — which is what
+makes invariant 3 true rather than aspirational. Consequence worth knowing: omitting
+`translator` entirely keeps the default, but a *partial* `translator:` block must still
+name its `backbone`. Deliberate — which backbone is running is never implicit.
+
+**Deferred:** experiment inheritance (a `base:` include key). `experiments/smoke.yaml` will
+duplicate fields, but with zero experiment YAMLs on disk this is speculative; revisit at
+M0.8 with ≥3 files to compare.
 
 ## M0.3 — Data layer
 
