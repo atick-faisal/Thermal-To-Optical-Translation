@@ -376,9 +376,10 @@ path.
       our code). Real end-to-end confirmation deferred to M0.10 ("Confirm W&B
       self-hosted logging works end to end"), which already covers it on the actual
       server and was always server-only territory.
-- [ ] Port `engine/trainer.py` — bf16/fp16 GradScaler logic, autocast restricted to CUDA,
-      fully resumable checkpoints (model + optimizer + scheduler + scaler + epoch +
-      `config_hash` + config), warn-on-config-drift resume
+- [x] Port `engine/trainer.py` — epoch loop over `translator.fit()`, generic pixel-L2
+      validation via `translate()`, `translator.state_dict()`-based checkpoints (epoch +
+      `config_hash` + config), warn-on-config-drift resume. **Not** a mechanical port —
+      see Decision below
 - [ ] Port `engine/loop.py` — staged alternating loop. **Warm-start the translator across
       stages**; original SeAFusion re-instantiates its generator every stage
       (`train.py:203`), making the loop one-directional
@@ -400,7 +401,34 @@ rank/world-size concept to gate on. `RunTracker(config: Config)` takes one argum
 unchanged. `wandb>=0.28.1` was already a dependency since M0.1.
 
 **Verify (tracking.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
-`pytest -m "not slow"` (155 passed, 6 new). The rest of M0.8 is still open.
+`pytest -m "not slow"` (155 passed, 6 new).
+
+**Decision — `engine/trainer.py` does not own an optimizer, scheduler, GradScaler, or
+autocast, unlike Clean-SeAFusion's `FusionTrainer`.** M0.6 already decided
+`Translator.fit(batch) -> dict[str, float]` is a complete, self-contained optimisation
+step (`StubTranslator.fit()` does its own `zero_grad()`/`backward()`/`optimizer.step()`
+internally) — there is nothing left for a trainer to wrap. AMP becomes each backbone's
+own concern if one ever needs it. Consequence: `TrainConfig.lr`/`lr_gamma`/`amp`/
+`amp_dtype` stay in the schema unread by `engine/trainer.py` — they're what a future
+translator's own constructor/`fit()` will read when it builds its own optimizer/autocast
+(e.g. a `pix2pix.py` wrapper reading `config.train.lr`), not dead fields. Checkpoints
+hold `translator.state_dict()` rather than separate optimizer/scheduler/scaler entries,
+so a translator's optimizer momentum does not survive resume (`nn.Module.state_dict()`
+doesn't see `StubTranslator`'s private `Adam` attribute) — accepted since
+`StubTranslator` is dev/test-only; a real backbone needing this can expose it itself via
+`get_extra_state()`/`set_extra_state()`. Validation is a single generic pixel-L2 pass
+through `translate()` alone under `no_grad` (not `FidelityEvaluator`, which always builds
+pretrained AlexNet/Inception backbones and would make every epoch's validation
+heavyweight) — `translate()` is the one method every backbone keeps grad-connected and
+comparable; `fit()`'s internal loss composition is backbone-specific and, like
+Clean-SeAFusion excluding its own task term from validation, the wrong thing to select
+checkpoints on. No `DistributedContext`/DDP, matching `tracking.py`. Warm-start across
+stages needs no `model=None` constructor branch: the caller always passes an
+already-constructed translator, and `engine/loop.py` reusing the same instance across
+stages *is* the warm start.
+
+**Verify (trainer.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (162 passed, 7 new). The rest of M0.8 is still open.
 
 ## M0.9 — Dataset acquisition
 
