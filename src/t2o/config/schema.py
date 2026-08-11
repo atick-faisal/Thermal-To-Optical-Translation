@@ -229,11 +229,7 @@ TranslatorConfig = Annotated[StubTranslatorConfig, Field(discriminator="backbone
 
 
 class MetricsConfig(ConfigBase):
-    """Knobs for :mod:`t2o.metrics` that change the reported number, not just its cost.
-
-    Only the fidelity-metric fields exist so far (M0.5 step 1); faithfulness (C2) adds its
-    own IoU/confidence thresholds in a later step.
-    """
+    """Knobs for :mod:`t2o.metrics` that change the reported number, not just its cost."""
 
     # (alex|vgg|squeeze) LPIPS backbone. Changes the reported number -- part of experiment
     # identity, not an implementation detail. 'alex' is the standard choice for evaluation
@@ -244,6 +240,22 @@ class MetricsConfig(ConfigBase):
     # are far below it; FidelityEvaluator additionally clamps at compute time if even this
     # is too high for a given run.
     kid_subset_size: int = 50
+    # (float) IoU at or above which a predicted box counts as matching a reference box, for
+    # false-object/missed-object rate and detection-consistency (faithfulness.py). Kept at
+    # mAP50's own convention so the two kinds of number stay comparable.
+    iou_threshold: float = 0.5
+    # (float) minimum detector confidence for a prediction to be considered at all, for the
+    # same three rates -- ultralytics' own inference default. Too low and false-object rate
+    # is dominated by detections a real deployment would already discard, not by anything
+    # the translator did.
+    conf_threshold: float = 0.25
+
+    @field_validator("iou_threshold", "conf_threshold")
+    @classmethod
+    def _is_a_probability(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("must be in [0, 1]")
+        return value
 
 
 class ExportConfig(ConfigBase):

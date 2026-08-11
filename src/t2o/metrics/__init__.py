@@ -1,16 +1,25 @@
-"""Fidelity, task, and faithfulness metrics -- the one evaluation path (PLAN.md invariant 1).
-
-Fidelity and task exist so far (M0.5 steps 1-2). Faithfulness (C2) lands in a later step.
-"""
+"""Fidelity, task, and faithfulness metrics -- the one evaluation path (PLAN.md invariant 1)."""
 
 from __future__ import annotations
 
+from t2o.metrics.faithfulness import (
+    Detections,
+    FaithfulnessEvaluator,
+    FaithfulnessMetrics,
+    detections_from_labels,
+    detections_from_result,
+)
 from t2o.metrics.fidelity import FidelityEvaluator, FidelityMetrics
 from t2o.metrics.task import TaskMetrics, evaluate_detector
 
 __all__ = [
+    "Detections",
+    "FaithfulnessEvaluator",
+    "FaithfulnessMetrics",
     "FidelityEvaluator",
     "FidelityMetrics",
     "TaskMetrics",
+    "detections_from_labels",
+    "detections_from_result",
     "evaluate_detector",
 ]

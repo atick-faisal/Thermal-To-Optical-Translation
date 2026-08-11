@@ -225,11 +225,17 @@ are independent enough that bundling them into one commit would just be batching
       duplicated — verified `Model.train()` and `Model.val()` both return the same
       `DetMetrics` type, so `train_detector` and the new `evaluate_detector` genuinely
       share one function (PLAN.md invariant 1), not two copies that happen to agree.
-- [ ] `metrics/faithfulness.py` (C2) — false-object rate, missed-object rate,
-      detection-consistency translated vs real-visible. **Hallucination Index deferred**
-      (see note below).
-- [ ] **One evaluation path** (invariant 1): every method computes every metric through
-      this code. No per-method variants.
+- [x] `metrics/faithfulness.py` (C2) — false-object rate, missed-object rate,
+      detection-consistency translated vs real-visible, all built on one greedy
+      confidence-ordered single-IoU-threshold matcher (`_greedy_match`). **Hallucination
+      Index deferred** (see note below). **Detection-consistency's formula is a judgement
+      call** (see note below) — RESEARCH_FINDINGS.md §9 names the metric without a formula.
+- [x] **One evaluation path** (invariant 1): fidelity, task, and faithfulness each have
+      exactly one canonical implementation (`FidelityEvaluator`, `evaluate_detector`,
+      `FaithfulnessEvaluator`); nothing downstream should grow a per-method variant of any
+      of the three. Holding this as future translator/coupling/engine code lands is an
+      ongoing discipline, not a one-time box to check, but the three implementations
+      themselves are singular as of this milestone.
 - [x] Tests (fidelity): identical images → PSNR ∞ / SSIM 1 / LPIPS 0; known-shifted images
       give expected PSNR/SSIM ordering; FID/KID finite and non-negative on unrelated
       pools; `MetricsConfig` shape and hash participation. Split along a network boundary
@@ -243,8 +249,14 @@ are independent enough that bundling them into one commit would just be batching
       with zero ground-truth instances is omitted rather than reported as a misleading
       0.0; one `slow`-marked end-to-end `evaluate_detector()` call against the synthetic
       fixture, exercising ultralytics' real `model.val()`.
-- [ ] Tests (faithfulness): faithfulness metrics on synthetic detections with known
-      answers.
+- [x] Tests (faithfulness): synthetic detections with known answers throughout — box
+      coordinates chosen so the correct match/no-match outcome is obvious by construction
+      (identical box+class matches; disjoint boxes don't; same location but different
+      class doesn't; higher-confidence prediction claims a contested match first; a
+      hallucinated detection raises false-object rate; an erased component raises
+      missed-object rate; disagreement with the real-visible detector lowers
+      detection-consistency; all three empty-denominator cases default to their
+      no-failure value rather than 0/0).
 
 **Decision — Hallucination Index deferred.** The MICCAI 2024 metric it's adapted from
 (arXiv:2407.12780) is a Hellinger distance between the *distribution* of a generative
@@ -258,8 +270,24 @@ then `faithfulness.py` ships the other three C2 metrics only.
 **Decision — `MetricsConfig` added to `config/schema.py`.** `lpips_net` and
 `kid_subset_size` are experiment identity (they change the reported number), not
 implementation detail, so they're config fields and participate in `config_hash()` like
-everything else in `RESEARCH_FINDINGS.md`'s reported table. Faithfulness's IoU/confidence
-thresholds will extend the same section in the next step rather than starting a new one.
+everything else in `RESEARCH_FINDINGS.md`'s reported table. `iou_threshold` and
+`conf_threshold` (faithfulness) extended the same section rather than starting a new one.
+
+**Decision — detection-consistency's formula.** RESEARCH_FINDINGS.md §9 names the metric
+without a formula. Defined as: of everything the detector finds on the real visible image,
+what fraction it also finds (same class, same place) on the translated image. Deliberately
+distinct from missed-object rate: that compares against hand-labelled ground truth
+(annotation-quality dependent, and only defined where labels exist); this compares the
+translator against the detector's own behaviour on the untranslated photo, needs no labels
+at all, and so stays well-defined at any `annotation_fraction` (E8). Revisit if a reviewer
+or a closer reading of prior work suggests a different formula before this is reported.
+
+**Decision — matching is greedy, confidence-ordered, single-IoU-threshold.** Same principle
+COCOeval/ultralytics use per class per image, minus the multi-threshold AP integration that
+follows it there (a different question, already answered by `metrics/task.py`). Chosen for
+simplicity and because it is the standard operationalisation of "false positive"/"false
+negative" in the detection literature, not because the alternatives (Hungarian assignment,
+multi-threshold) were found lacking — revisit only if reviewers ask for one of those.
 
 ## M0.6 — Translator interface and CPU stand-in
 
