@@ -367,7 +367,15 @@ path.
 ## M0.8 — Engine and tracking
 
 - [x] Port `tracking.py` — `RunTracker`, never raises, context manager
-- [ ] Point W&B at the self-hosted base URL from env; key from env, never committed
+- [x] Point W&B at the self-hosted base URL from env; key from env, never committed —
+      no code needed: `wandb.init()` already resolves `WANDB_BASE_URL`/`WANDB_API_KEY`
+      from the environment on its own, and `RunTracker` never reads either. Attempted
+      live verification against a local `wandb/local` Docker instance; blocked by a
+      `crypto.randomUUID is not a function` error in that image's bundled frontend
+      (a browser secure-context/Web Crypto issue in the test image itself, unrelated to
+      our code). Real end-to-end confirmation deferred to M0.10 ("Confirm W&B
+      self-hosted logging works end to end"), which already covers it on the actual
+      server and was always server-only territory.
 - [ ] Port `engine/trainer.py` — bf16/fp16 GradScaler logic, autocast restricted to CUDA,
       fully resumable checkpoints (model + optimizer + scheduler + scaler + epoch +
       `config_hash` + config), warn-on-config-drift resume
