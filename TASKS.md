@@ -380,11 +380,11 @@ path.
       validation via `translate()`, `translator.state_dict()`-based checkpoints (epoch +
       `config_hash` + config), warn-on-config-drift resume. **Not** a mechanical port —
       see Decision below
+- [x] Port `engine/export.py` + `imaging.py` `Normalize` enum — per-image (never
+      batch-wise) clamp/stretch
 - [ ] Port `engine/loop.py` — staged alternating loop. **Warm-start the translator across
       stages**; original SeAFusion re-instantiates its generator every stage
       (`train.py:203`), making the loop one-directional
-- [ ] Port `engine/export.py` + `imaging.py` `Normalize` enum — per-image (never
-      batch-wise) clamp/stretch
 - [ ] `cli.py` — argparse subcommands with an explicit flag→config-path override table
 - [ ] `experiments/smoke.yaml` mirroring every real config at tiny scale
 - [ ] Tests (`slow` marker): full end-to-end on the fixture with the stand-in translator →
@@ -429,6 +429,32 @@ stages *is* the warm start.
 
 **Verify (trainer.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
 `pytest -m "not slow"` (162 passed, 7 new). The rest of M0.8 is still open.
+
+**Decision — `export.py` built before `loop.py`, reversing this checklist's original
+order.** `loop.py`'s stage function calls `export_translated(...)` to feed each stage's
+detector fine-tune, so it cannot be written or tested without `export.py` existing first.
+`export.py` itself has no such dependency and is fully testable in isolation on the
+synthetic fixture, so it moved first.
+
+**`engine/export.py`:** ported from
+`../Clean-SeAFusion/src/seafusion/engine/export.py`, dropping the YCbCr recombination —
+`Translator.translate()` already returns RGB directly, so `export_split` just calls it.
+`export_fused` renamed `export_translated`, reading `config.detector.evaluation.batch`
+(not the flat `config.detector.batch` Clean-SeAFusion has) per the M0.2 `in_loop`/
+`evaluation` split. `write_data_yaml` and the label-mirroring helper port unchanged.
+
+**Found while writing `tests/test_export.py`:** a `tests` package shipped inside a
+dependency's wheel (`.venv/lib/python3.12/site-packages/tests/`) shadows the local
+`tests/` directory on pyright's module search path. `from tests.conftest import X` type
+-checks (resolving to the wrong module and reporting `X` as an unknown symbol) even though
+pytest itself imports the right file at runtime. Fixed by not doing cross-test-module
+imports at all — `test_export.py` derives its expected counts/sizes from the fixtures
+themselves (`len(dataset)`, `Image.open(dataset.visible_paths[0]).size`) rather than
+importing `conftest.py`'s constants. Worth remembering if a future test file is tempted to
+import from `tests.conftest` directly.
+
+**Verify (export.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (171 passed, 9 new). `engine/loop.py` is next.
 
 ## M0.9 — Dataset acquisition
 
