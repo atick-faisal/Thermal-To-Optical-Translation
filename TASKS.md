@@ -119,31 +119,49 @@ name its `backbone`. Deliberate — which backbone is running is never implicit.
 duplicate fields, but with zero experiment YAMLs on disk this is speculative; revisit at
 M0.8 with ≥3 files to compare.
 
-## M0.3 — Data layer
+## M0.3 — Data layer ✅
 
-- [ ] Port `data/manifest.py` from Clean-SeAFusion — `data.yaml` as single source of truth,
+- [x] Port `data/manifest.py` from Clean-SeAFusion — `data.yaml` as single source of truth,
       root resolution, `nc` vs `names` validation, `rgbt:` token block extraction
-- [ ] Port `data/pairing.py` — **path-segment** substitution, never sorted-index; eager
+- [x] Port `data/pairing.py` — **path-segment** substitution, never sorted-index; eager
       `validate_pairs`
-- [ ] Port `data/labels.py` — YOLO txt loading
-- [ ] Port `data/dataset.py` → translation semantics. Keep verbatim: bbox crop/flip math,
+- [x] Port `data/labels.py` — YOLO txt loading
+- [x] Port `data/dataset.py` → translation semantics. Keep verbatim: bbox crop/flip math,
       the `_MIN_BOX_SIDE` drop rule, the class-id range precheck (an out-of-range id
       otherwise surfaces as an opaque CUDA device-side assert deep into a run), and the
-      `v8DetectionLoss`-shaped collate
-- [ ] Convert the local `dataset/yolo_rgbt/data.yaml`: drop `channels: 6`, keep the `rgbt:`
-      block. Untracked, so document the change in the manifest module rather than relying
-      on the file reaching anyone else
-- [ ] **`tests/conftest.py` synthetic dataset builder** (`tmp_path_factory`, session-scoped)
+      `v8DetectionLoss`-shaped collate. Renamed `FusionSample`/`FusionBatch`/
+      `FusionPairDataset`/`collate_fusion_batch` → `Translation*`/`collate_translation_batch`;
+      field names (`visible`, `infrared`, `cls`, `bboxes`, `name`) kept as-is since they
+      already match the `rgbt:` token names
+- [x] Convert the local `dataset/yolo_rgbt/data.yaml`: drop `channels: 6`, keep the `rgbt:`
+      block. Untracked, so documented the change in `manifest.py`'s module docstring
+      instead of relying on the file reaching anyone else
+- [x] **`tests/conftest.py` synthetic dataset builder** (`tmp_path_factory`, session-scoped)
       — random 640×480 JPEGs + hand-written YOLO labels in the
       `{split}/{visible,infrared}/{images,labels}` layout with a generated `data.yaml`.
       **This replaces the committed fixture entirely** (PLAN.md §9): `dataset/` is never
-      tracked, so a fresh clone has no images. Parameterise it to emit disjoint
-      `train`/`val` — the real local sample has `train == val`, which hides bugs
-- [ ] Annotation-fraction subsampling hook (deterministic, seeded) — E8 needs it and
+      tracked, so a fresh clone has no images. Train/val use disjoint, non-alphabetically-
+      ordered stems — the real local sample has `train == val`, which hides bugs
+- [x] Annotation-fraction subsampling hook (deterministic, seeded) — E8 needs it and
       retrofitting later is painful
-- [ ] Tests: pairing rejects ambiguous paths; class-id precheck fires; crop/flip bbox math;
+- [x] Tests: pairing rejects ambiguous paths; class-id precheck fires; crop/flip bbox math;
       collate shapes match the `v8DetectionLoss` contract. Build each pathology explicitly
       in the synthetic fixture rather than hoping real data contains one
+
+**Decision — `annotation_fraction` zeroes labels, not images.** Every image still trains
+the translator's reconstruction losses (L2/LPIPS/GAN), since the visible target is always
+present; the fraction only controls which images additionally supply detection supervision
+via a seeded shuffle-and-slice (`TranslationPairDataset._annotated_subset`). Dataset length
+is unaffected by the fraction — this keeps the hook orthogonal to everything else in the
+class.
+
+**Deviation from Clean-SeAFusion's own test fixture:** its `tests/conftest.py` reuses the
+same filenames for `train` and `val` (only pixel content differs). Ours does not — disjoint
+stems are what let a test actually catch a train/val conflation bug, which is exactly the
+blind spot `TASKS.md` flagged in the real local 9-pair sample.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(86 passed, includes a `skipif`-guarded sanity check against the real local dataset).
 
 ## M0.4 — Detection layer
 
