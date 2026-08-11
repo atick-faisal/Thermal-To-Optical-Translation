@@ -14,6 +14,11 @@ deliberate deviations, both driven by how ``t2o.config.Config`` differs from
   access below goes through ``config.detector.evaluation``.
 * ``seed`` there lives on ``config.runtime.seed``; here it lives on ``config.train.seed``
   (M0.2 decision: a seed is scientific and belongs in the hashed part of the config).
+
+``_extract_metrics`` is imported from :mod:`t2o.metrics.task` rather than defined here
+(M0.5 step 2): it is the same P/R/mAP extraction ``evaluate_detector`` uses for standalone
+validation, not a merely similar copy -- ``model.train()`` and ``model.val()`` both return
+the same ``DetMetrics`` type, so one function genuinely serves both call sites.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from t2o.config import Config
+from t2o.metrics.task import _extract_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -192,24 +198,3 @@ def _resolve_weights(model: Any, project: Path, name: str) -> Path:
         f"detector training produced no usable checkpoint in {weights_dir} ({present}). "
         f"Training may have been interrupted before the first epoch completed."
     )
-
-
-# ultralytics' own naming, via DetMetrics.results_dict.
-_RESULT_KEYS = {
-    "precision": "metrics/precision(B)",
-    "recall": "metrics/recall(B)",
-    "map50": "metrics/mAP50(B)",
-    "map50_95": "metrics/mAP50-95(B)",
-}
-# The equivalent attributes on the Metric object, used when results_dict is unavailable.
-_BOX_ATTRS = {"precision": "mp", "recall": "mr", "map50": "map50", "map50_95": "map"}
-
-
-def _extract_metrics(results: Any) -> dict[str, float]:
-    """Pull P/R/mAP out of ultralytics' results, tolerating its shape changing."""
-    results_dict = getattr(results, "results_dict", None) or {}
-    if results_dict:
-        return {name: float(results_dict.get(key, 0.0)) for name, key in _RESULT_KEYS.items()}
-
-    box = getattr(results, "box", None)
-    return {name: float(getattr(box, attr, 0.0) or 0.0) for name, attr in _BOX_ATTRS.items()}

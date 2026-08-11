@@ -1,8 +1,10 @@
 """Locating the checkpoint ultralytics actually wrote.
 
-Ported from ``../Clean-SeAFusion/tests/test_detector_stage.py``. `_resolve_weights` and
-`_extract_metrics` are unchanged by the M0.4 port (see t2o/engine/detector_stage.py's module
-docstring for what *did* change), so these tests carry over verbatim.
+Ported from ``../Clean-SeAFusion/tests/test_detector_stage.py``. `_resolve_weights` is
+unchanged by the M0.4 port (see t2o/engine/detector_stage.py's module docstring for what
+*did* change), so these tests carry over verbatim. `_extract_metrics`'s own tests moved to
+``tests/test_task.py`` in M0.5 step 2, alongside the canonical implementation in
+``t2o.metrics.task``.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from t2o.engine.detector_stage import _extract_metrics, _resolve_weights
+from t2o.engine.detector_stage import _resolve_weights
 
 
 def _trainer(save_dir: Path) -> SimpleNamespace:
@@ -85,38 +87,3 @@ def test_no_checkpoint_at_all_reports_what_is_there(tmp_path: Path) -> None:
 def test_missing_weights_directory_is_reported(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="does not exist"):
         _resolve_weights(_model(tmp_path), tmp_path, "s0")
-
-
-def test_metrics_from_results_dict() -> None:
-    results = SimpleNamespace(
-        results_dict={
-            "metrics/precision(B)": 0.7,
-            "metrics/recall(B)": 0.6,
-            "metrics/mAP50(B)": 0.5,
-            "metrics/mAP50-95(B)": 0.4,
-        }
-    )
-    assert _extract_metrics(results) == {
-        "precision": 0.7,
-        "recall": 0.6,
-        "map50": 0.5,
-        "map50_95": 0.4,
-    }
-
-
-def test_metrics_fall_back_to_the_box_object() -> None:
-    results = SimpleNamespace(
-        results_dict={}, box=SimpleNamespace(mp=0.3, mr=0.2, map50=0.1, map=0.05)
-    )
-    assert _extract_metrics(results)["precision"] == 0.3
-    assert _extract_metrics(results)["map50_95"] == 0.05
-
-
-def test_metrics_degrade_to_zero_rather_than_raising() -> None:
-    # A shape change in either surface must not take down a run mid-loop.
-    assert _extract_metrics(SimpleNamespace()) == {
-        "precision": 0.0,
-        "recall": 0.0,
-        "map50": 0.0,
-        "map50_95": 0.0,
-    }

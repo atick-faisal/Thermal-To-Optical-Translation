@@ -218,9 +218,13 @@ are independent enough that bundling them into one commit would just be batching
       directly via `normalize=True`, matching `TranslationSample`'s native convention with
       no manual uint8 detour). `FidelityEvaluator` wraps all five behind one
       `update`/`compute`/`reset` — the one evaluation path for fidelity.
-- [ ] `metrics/task.py` — mAP@50, mAP@50:95, per-class AP via ultralytics `DetMetrics`,
+- [x] `metrics/task.py` — mAP@50, mAP@50:95, per-class AP via ultralytics `DetMetrics`,
       with the defensive `results_dict`-then-`box`-attribute extraction from
-      `../Clean-SeAFusion/src/seafusion/engine/detector_stage.py::_extract_metrics`
+      `../Clean-SeAFusion/src/seafusion/engine/detector_stage.py::_extract_metrics`.
+      `_extract_metrics` **relocated** here from `engine/detector_stage.py` rather than
+      duplicated — verified `Model.train()` and `Model.val()` both return the same
+      `DetMetrics` type, so `train_detector` and the new `evaluate_detector` genuinely
+      share one function (PLAN.md invariant 1), not two copies that happen to agree.
 - [ ] `metrics/faithfulness.py` (C2) — false-object rate, missed-object rate,
       detection-consistency translated vs real-visible. **Hallucination Index deferred**
       (see note below).
@@ -234,8 +238,13 @@ are independent enough that bundling them into one commit would just be batching
       the fast suite covers only `MetricsConfig` and the KID subset-size clamp (a pure
       function). The one-time weight download succeeded in the dev sandbox, so this needed
       no "verify on server" carve-out.
-- [ ] Tests (task/faithfulness): mAP on a known synthetic prediction set; faithfulness
-      metrics on synthetic detections with known answers.
+- [x] Tests (task): `_extract_metrics` tests moved verbatim from `test_detector_stage.py`
+      (same function, new home); new per-class AP extraction tests, including that a class
+      with zero ground-truth instances is omitted rather than reported as a misleading
+      0.0; one `slow`-marked end-to-end `evaluate_detector()` call against the synthetic
+      fixture, exercising ultralytics' real `model.val()`.
+- [ ] Tests (faithfulness): faithfulness metrics on synthetic detections with known
+      answers.
 
 **Decision — Hallucination Index deferred.** The MICCAI 2024 metric it's adapted from
 (arXiv:2407.12780) is a Hellinger distance between the *distribution* of a generative
