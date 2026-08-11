@@ -321,24 +321,48 @@ The likely shape is a `Translator`-conforming wrapper around any base translator
 the coupling loss without changing the protocol or touching `stub.py`, but this is not
 committed to; revisit when M0.7 actually needs it.
 
-## M0.7 — Coupling
+## M0.7 — Coupling ✅
 
-- [ ] Port `coupling/detection_loss.py` from `../Clean-SeAFusion/src/seafusion/losses/task.py`.
+- [x] Port `coupling/detection_loss.py` from `../Clean-SeAFusion/src/seafusion/losses/task.py`.
       Drop the YCbCr recombination (our translator emits RGB directly). **Keep the
       batch-size division** — ultralytics returns the loss pre-multiplied by batch size, and
       not undoing it makes λ silently scale with batch size
-- [ ] Feed float32 `[0,1]` directly; **never** route generated images through
+- [x] Feed float32 `[0,1]` directly; **never** route generated images through
       `preprocess_batch` (it does `.float()/255` on a uint8 dataloader tensor, creating a
       fresh graph root)
-- [ ] Saturating reward form (ReFL-style hinge / AlignProp-style `|r - target|`) rather
+- [x] Saturating reward form (ReFL-style hinge / AlignProp-style `|r - target|`) rather
       than unbounded minimisation
-- [ ] `coupling/schedule.py` — staged λ_det ramp, `λ_det = 0` a clean no-op that never
+- [x] `coupling/schedule.py` — staged λ_det ramp, `λ_det = 0` a clean no-op that never
       constructs the detector
-- [ ] Recalibrate the λ_det scale for a *detection* loss — the `[0,1,2,3]` ramp is
+- [x] Recalibrate the λ_det scale for a *detection* loss — the `[0,1,2,3]` ramp is
       calibrated to SeAFusion's segmentation loss. Reference downscales: ReFL `1e-3`,
       AlignProp `0.01`
-- [ ] Tests: λ=0 constructs no detector (assert it); loss is differentiable w.r.t. the
+- [x] Tests: λ=0 constructs no detector (assert it); loss is differentiable w.r.t. the
       generated image; λ invariant to batch size
+
+**Decision — reward-target hinge is ReFL's `relu(total - target)`, not AlignProp's
+symmetric `|total - target|`.** Matches `CouplingConfig.reward_target`'s own docstring
+("once the detection loss falls below this the sample stops being rewarded"): the hinge has
+zero gradient once a sample is already at or below target, whereas the AlignProp form would
+also penalise a detection loss that is *better* than target — not what "stops being
+rewarded" describes. `CouplingConfig.grad_scale` is applied as a final multiplicative
+downscale on the (possibly-hinged) total, since scaling a scalar loss before `backward()`
+scales its gradient by the same constant.
+
+**Decision — `grad_scale`/`reward_target` are `DetectionTaskLoss` constructor args, not
+read from `Config` inside it.** Keeps the module testable with plain floats and matches
+`FrozenDetector`'s own weights/nc-as-args style; `coupling/schedule.py` is what bridges
+`CouplingConfig` to the constructor.
+
+**Decision — `schedule.py` is stateless functions (`weight_for_stage`,
+`build_detection_loss`), not a class.** M0.8's not-yet-built loop owns all persistent stage
+state (the warm-started translator, the detector-weights pointer that gets reassigned each
+stage); schedule.py only needs to answer "what's the weight for this stage" and "should a
+detector be constructed," both pure functions of a config + stage index + optional weights
+path.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(149 passed).
 
 ## M0.8 — Engine and tracking
 
