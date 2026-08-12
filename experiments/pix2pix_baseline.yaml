@@ -1,0 +1,99 @@
+# M1's translation-only baseline (TASKS.md M1: "Train on the custom dataset, lambda_det = 0
+# -> baseline translation quality"). One stage, no detection-consistency loop -- the frozen
+# in-loop detector is never even constructed (coupling.task_weights == [0.0], the same
+# clean no-op path E3's ablation later depends on).
+#
+# `data.manifest`/`detector.*.weights` below are placeholders, same convention as
+# experiments/smoke.yaml: paths are resolved per machine, never checked for existence at
+# load time (config/schema.py). Point them at the real dataset/detector on the server via
+# `--data`/`--in-loop-weights`/`--eval-init-weights`, or edit this file directly once their
+# real paths are known here too.
+#
+# `train.epochs_per_stage`/`batch_size`/`lr` are a starting point, not a measured optimum --
+# M0.10's VRAM check only profiled the stub translator + detector fine-tuning, not
+# ResnetGenerator/NLayerDiscriminator specifically. Watch W&B and adjust.
+#
+# Sibling file experiments/pix2pix_loop.yaml is identical except `coupling.task_weights` and
+# `runtime.name` -- the one deliberate difference between the baseline and loop arms. Not
+# budget-matched in total epochs (the loop arm's 4 stages run 4x epochs_per_stage in total,
+# warm-started, per PLAN.md §8's schedule design) -- acceptable for M1's go/no-go gate check;
+# a budget-matched ablation is E3's job later (PLAN.md §11), not this one.
+
+data:
+  manifest: dataset/yolo_rgbt/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+
+train:
+  epochs_per_stage: 100
+  batch_size: 8
+  # pix2pix paper's own value (2e-4), not the schema's generic 1e-4 default.
+  lr: 2.0e-4
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  # Safe starting point (PLAN.md §3, TASKS M0.10) -- raise via --workers once a higher value
+  # is confirmed stable on the server.
+  workers: 0
+  hflip: 0.5
+  crop: null
+  seed: 0
+
+loss:
+  l2: 1.0
+  lpips: 5.0
+  # Nonzero here (unlike the schema's own 0.0 default): this experiment IS testing pix2pix's
+  # full adversarial-loss recipe, not a GAN-less regression stand-in for it. net_d is only
+  # ever constructed when this is > 0 (Pix2PixTranslator's clean no-op discipline).
+  gan: 1.0
+
+coupling:
+  # lambda_det = 0 for the whole run -- the baseline arm, by definition.
+  task_weights: [0.0]
+  grad_scale: 1.0e-2
+  reward_target: null
+
+detector:
+  in_loop:
+    # Unused in this file: task_weights == [0.0] means build_detection_loss never
+    # constructs a detector regardless of what's here (coupling/schedule.py). Left at the
+    # schema placeholder rather than a real path for that reason.
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    # Point at the same bootstrap weights used across every arm of the comparison -- must
+    # be identical or the results table stops being a comparison (EvalDetectorConfig's own
+    # docstring).
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: pix2pix
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  gan_mode: vanilla
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  # null auto-selects; pass --device cuda:0 explicitly if there's ever more than one GPU
+  # visible (PLAN.md §3 -- no DDP, one experiment per GPU via CUDA_VISIBLE_DEVICES).
+  device: null
+  # Off by default, same as smoke.yaml -- there's no --no-wandb flag (cli.py's --wandb can
+  # only turn it on), so leaving it off here and opting in per-invocation with --wandb is
+  # the reversible choice.
+  wandb: false
+  wandb_project: thermal-to-optical
+  run_dir: runs
+  name: pix2pix-baseline

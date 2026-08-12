@@ -1,0 +1,80 @@
+# M1's detection-in-the-loop arm (TASKS.md M1: "Train with lambda_det > 0 -> the loop arm").
+# The real staged ramp (CouplingConfig's own schema default) -- translator and evaluation
+# detector warm-started across all four stages (PLAN.md §8); the in-loop detector stays
+# fixed at detector.in_loop.weights for the whole run (M0.8's loop.py decision).
+#
+# Identical to the sibling experiments/pix2pix_baseline.yaml except `coupling.task_weights`
+# and `runtime.name` -- see that file's header for the placeholder-path convention, the
+# starting-point epoch/batch/lr caveat, and why the two arms aren't total-epoch-budget-
+# matched at M1 (that's E3's job later, not this go/no-go gate check).
+
+data:
+  manifest: dataset/yolo_rgbt/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+
+train:
+  epochs_per_stage: 100
+  batch_size: 8
+  lr: 2.0e-4
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  workers: 0
+  hflip: 0.5
+  crop: null
+  seed: 0
+
+loss:
+  l2: 1.0
+  lpips: 5.0
+  gan: 1.0
+
+coupling:
+  # The real 4-stage ramp -- lambda_det = 0, 1, 2, 3. Weight 0 in stage 0 still means no
+  # detector is constructed for that stage (coupling/schedule.py); stages 1-3 couple in the
+  # frozen in-loop detector below.
+  task_weights: [0.0, 1.0, 2.0, 3.0]
+  grad_scale: 1.0e-2
+  reward_target: null
+
+detector:
+  in_loop:
+    # This DOES matter here, unlike the baseline file -- stages 1-3 have lambda_det > 0.
+    # Point at the optical (visible-trained) detector already on the server
+    # (InLoopDetectorConfig's own docstring: an undertrained detector contributes gradient
+    # noise, not signal). Left at the schema placeholder; override with --in-loop-weights or
+    # edit this path directly once the real weights file is known here too.
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    # Must be identical to pix2pix_baseline.yaml's -- same requirement, EvalDetectorConfig's
+    # own docstring: identical bootstrap weights across every arm or the comparison breaks.
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: pix2pix
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  gan_mode: vanilla
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  wandb: false
+  wandb_project: thermal-to-optical
+  run_dir: runs
+  name: pix2pix-loop

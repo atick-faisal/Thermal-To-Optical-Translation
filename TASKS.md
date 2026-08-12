@@ -1059,8 +1059,63 @@ detector run directly on raw thermal, untranslated. Deliberately low.
 (248 passed, 10 new), `pytest -m slow` (14 passed, 3 new). Vendored file re-diffed against
 the pinned commit as the final check — byte-identical.
 
-**Out of scope for this step, needs the server** — training pix2pix on the real ~850-pair
-dataset at λ_det=0 and λ_det>0, and evaluating both through `metrics.task.evaluate_detector`.
+**`experiments/pix2pix_baseline.yaml` (λ_det=0) / `pix2pix_loop.yaml` (the real 4-stage
+ramp) — the two tracked configs the remaining M1 bullets run.** Decisions:
+
+- **`loss.gan: 1.0` in both**, not the schema's own `0.0` default — these two experiments
+  specifically exist to test pix2pix's actual GAN recipe (TASKS.md M1's own wording: "the
+  GAN loop"), so leaving the adversarial term off by default here would make "baseline
+  translation quality" a GAN-less regression stand-in instead of the method being gated.
+  `train.lr: 2.0e-4` also departs from the schema's generic `1.0e-4` default, matching the
+  pix2pix paper's own tuned value.
+- **The two files are identical except `coupling.task_weights` and `runtime.name`** — kept
+  as two explicit files rather than reaching for the `base:`-include inheritance mechanism
+  `config/schema.py`'s M0.2 notes deferred pending "≥3 experiment files to compare." That
+  threshold is technically met now (`smoke.yaml` + these two), but building an inheritance
+  mechanism is a bigger feature than two YAMLs differing by two fields warrants right now —
+  noted here as a real candidate to revisit, not silently dropped.
+  `test_pix2pix_experiments.py::test_baseline_and_loop_configs_differ_only_by_design` pins
+  this invariant directly so the two files can't silently drift apart on any other field.
+- **`train.epochs_per_stage`/`batch_size` are a starting point, not a measured optimum.**
+  M0.10's VRAM check only profiled the stub translator + detector fine-tuning, not
+  `ResnetGenerator`/`NLayerDiscriminator` specifically — said explicitly in both files'
+  header comments rather than presented as tuned numbers.
+- **Not total-epoch-budget-matched between the two arms** (the loop arm's 4 stages run
+  4x `epochs_per_stage` in total, warm-started per PLAN.md §8's schedule design) —
+  acceptable for M1's go/no-go gate check; a budget-matched ablation is E3's job later
+  (PLAN.md §11), not this one. Stated in both files' headers so it isn't mistaken for an
+  oversight when E3 actually runs.
+- **`detector.in_loop.weights` matters only in `pix2pix_loop.yaml`** (stages 1–3 have
+  λ_det > 0; `pix2pix_baseline.yaml`'s single `[0.0]` stage never constructs a detector at
+  all, per `coupling/schedule.py`) — both left at the `yolo11n.pt` schema placeholder,
+  documented as needing `--in-loop-weights`/`--eval-init-weights`/`--data` overrides (or a
+  direct edit once the real server paths are known here too), same convention
+  `experiments/smoke.yaml` already established.
+- **`runtime.wandb: false` in both**, not `true` — there is no `--no-wandb` flag (`cli.py`'s
+  `--wandb` can only turn it on, never off), so leaving it off in the tracked file and
+  opting in per-invocation with `--wandb` is the reversible choice.
+- Tests (`tests/test_pix2pix_experiments.py`): both files load with the right shape; hashes
+  are stable across loads; the identical-except-two-fields invariant above; one `slow`
+  end-to-end `run_loop` pass on the synthetic fixture through `pix2pix_loop.yaml` itself
+  (not just `Pix2PixTranslator` in isolation), proving the tracked file's own schema is
+  actually loadable and drives the loop correctly.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(253 passed, 5 new), `pytest -m slow` (15 passed, 1 new).
+
+**Out of scope for this step, needs the server** — running these two configs against the
+real ~850-pair dataset and detector weights, then evaluating both through
+`metrics.task.evaluate_detector`:
+
+```
+uv run t2o loop --config experiments/pix2pix_baseline.yaml --data <real data.yaml> \
+    --in-loop-weights <visible-trained.pt> --eval-init-weights <visible-trained.pt> \
+    --device cuda:0
+uv run t2o loop --config experiments/pix2pix_loop.yaml --data <real data.yaml> \
+    --in-loop-weights <visible-trained.pt> --eval-init-weights <visible-trained.pt> \
+    --device cuda:0
+```
+
 Report the mAP numbers back once run; the gate decision above gets recorded here at that
 point, not before.
 
