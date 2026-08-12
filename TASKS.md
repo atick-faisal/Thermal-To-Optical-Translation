@@ -636,11 +636,23 @@ bullet.
 - [ ] Fetch LLVIP, M3FD, TTPLA once on the Mac via `gdown`, re-host, then make the server
       path a plain `curl`
 - [ ] Adapters normalising each into the internal representation
+  - [x] MSRS — `data/adapters/msrs.py::adapt_msrs`. `train`/`ir`+`vi` (1083 pairs) merged with
+        the small `detection/` pool (80 labelled pairs, disjoint filenames); `test` → `val`
+        (361 pairs, unlabelled). Verified against the real local clone: 1163 train / 361 val.
+  - [ ] FLIR-aligned — needs filename normalisation (`FLIR_00002_RGB.jpg` vs
+        `FLIR_00002_PreviewData.jpeg` share no stem) and VOC-XML→YOLO conversion. Next step.
+  - **CPLID and HIT-UAV are out of scope, confirmed with the user.** Verified against the
+        real local clones: CPLID is RGB-only (UAV insulator photos, VOC-XML, class
+        `insulator`/`defect`), HIT-UAV is IR-only (thermal aerial shots, YOLO, 4 classes).
+        Neither has a counterpart modality, so neither fits the paired
+        `{visible,infrared}` contract `data/pairing.py`/`data/dataset.py` assume for every
+        sample. Revisit only if a single-modality detector-pretraining need arises (e.g. E9).
 - [x] Verify: MSRS `detection/` folder — does it have box annotations usable for mAP?
-      **No.** `github.com/Linfeng-Tang/MSRS` is only `train/{vi,ir}` and `test/{vi,ir}`
-      image pairs — no `detection/` folder, no box annotations. Confirms
-      `RESEARCH_FINDINGS.md`'s own framing as a "semantic-aware translation benchmark," not
-      a detection one; MSRS is translation/fidelity data only.
+      **Correction: yes.** The prior answer here was written from browsing GitHub without
+      cloning. The real clone has `detection/{vi,ir,labels}` — 80 pairs, YOLO boxes, classes
+      `person`/`bicycle`/`car` (generic, not power-line-relevant). Small relative to the
+      1083 train / 361 test pairs, so MSRS is still primarily translation/fidelity data, as
+      `RESEARCH_FINDINGS.md` frames it — just not *exclusively* unlabelled.
 - [ ] Verify: InsPLAD annotation format (not stated in its README; Mendeley Data gates the
       files behind a form, so this needs the actual download, not just the repo README)
 - [ ] Freeze and hash the splits; commit the manifest
@@ -656,11 +668,12 @@ bullet.
   `transformers`.
 - **Idempotent** — a destination that already exists and is non-empty is skipped with a
   log line rather than re-cloned, consistent with `engine/loop.py`'s resume discipline.
-- **Not executed for real in this session** — confirmed with the user. The script is
-  written and tested with `subprocess.run`/`huggingface_hub.snapshot_download` both
-  monkeypatched (`tests/test_fetch_datasets.py`, 8 fast tests, no network I/O); the actual
-  multi-GB fetch is left for the user to run when convenient, same spirit as M0.1's
-  "not verifiable locally" `uv sync --extra gpu`.
+- **Not executed for real in the session that wrote it** — confirmed with the user at the
+  time. The script itself is tested with `subprocess.run`/`huggingface_hub.snapshot_download`
+  both monkeypatched (`tests/test_fetch_datasets.py`, 8 fast tests, no network I/O). The user
+  has since run it for real: `dataset/raw/{msrs,cplid,hituav,flir}` exist locally as of the
+  adapters step below, which is what let that step be designed against actual raw layouts
+  instead of READMEs.
 - **`scripts/` is a new top-level package**, sibling to `src/t2o`, not part of it — added
   to `[tool.pytest.ini_options] pythonpath`, `[tool.ruff] src`, and `[tool.pyright]
   include` so it lints/type-checks/imports-in-tests the same as everything else, without
@@ -668,6 +681,36 @@ bullet.
 
 **Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
 (200 passed, 8 new). No `slow` test — nothing here touches ultralytics/torch.
+
+**`data/adapters/` — MSRS (M0.9 adapters step 1 of 2) decisions:**
+
+- **`data/adapters/common.py` is the one place the paired `rgbt:`-block `data.yaml` shape is
+  written** (`write_manifest_yaml`), shared by every per-dataset adapter, so MSRS and the
+  next one (FLIR-aligned) can't drift against each other or against `tests/conftest.py`'s
+  synthetic-fixture format — the same "one evaluation path" discipline `metrics/` already
+  follows, applied to the write side of the data contract instead of the read side.
+- **Images are copied verbatim (`shutil.copyfile`), never re-encoded.** MSRS ships PNG;
+  nothing in `data/dataset.py`/`data/pairing.py` requires a specific extension
+  (`IMAGE_SUFFIXES` already covers it), so there's no reason to touch the bytes.
+- **`detection/`'s 80 labelled pairs merge into `train`, not a third split.** Verified
+  disjoint by filename stem from `train`/`test` in the real clone; the internal
+  representation only has two splits, and `data/labels.py::load_yolo_labels` already treats
+  a missing label file as a zero-instance negative, so the other 1083 train images need no
+  placeholder `.txt` files — `write_label` writes nothing for them rather than an empty file.
+- **Collision check is defensive, not decorative.** Today's MSRS release has zero overlap
+  between `train/` and `detection/` stems, but a future release changing that would silently
+  overwrite images under a plain merge; `adapt_msrs` raises `AdapterError` naming the
+  colliding stems instead, and `tests/test_adapters.py` constructs the collision directly
+  rather than trusting it never happens.
+- **CPLID and HIT-UAV get no adapter.** Both are single-modality (verified against the real
+  local clones, not README claims) — confirmed with the user before scoping this step down
+  to MSRS + FLIR-aligned only; see the M0.9 checklist entry above for the corrected dataset
+  survey.
+
+**Verify (MSRS adapter only):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (207 passed, 7 new). Also run for real against the local
+`dataset/raw/msrs`: 1163 train / 361 val pairs, matching the plan's predicted counts exactly;
+`DatasetManifest.load` on the result loads cleanly. FLIR-aligned adapter is next.
 
 ## M0.10 — Server bring-up (cannot be verified locally)
 
