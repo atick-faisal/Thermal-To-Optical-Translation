@@ -385,7 +385,7 @@ path.
 - [x] Port `engine/loop.py` — staged alternating loop. **Warm-start the translator across
       stages**; original SeAFusion re-instantiates its generator every stage
       (`train.py:203`), making the loop one-directional
-- [ ] `cli.py` — argparse subcommands with an explicit flag→config-path override table
+- [x] `cli.py` — argparse subcommands with an explicit flag→config-path override table
 - [ ] `experiments/smoke.yaml` mirroring every real config at tiny scale
 - [ ] Tests (`slow` marker): full end-to-end on the fixture with the stand-in translator →
       `metrics.json`; resume produces identical state; same config+seed twice → identical
@@ -503,7 +503,43 @@ stage's frozen in-loop detector. Resolved:
 coverage plus one fast `run_loop` test). One new `slow` test
 (`tests/test_loop.py::test_full_loop_fine_tunes_a_detector_every_stage`) is the first
 end-to-end exercise of `train_detector` against ultralytics' real training loop — deferred
-from M0.4, run locally and passing (`pytest -m slow`: 8 passed). `cli.py` is next.
+from M0.4, run locally and passing (`pytest -m slow`: 8 passed).
+
+**`cli.py`:** four subcommands — `train` (one stage of `Trainer`), `loop` (`run_loop`),
+`export` (`export_translated`), `evaluate` (`metrics.task.evaluate_detector`, standalone).
+Two things didn't exist yet and landed as part of this step rather than being deferred:
+
+- **`build_translator(config: Config) -> nn.Module`**, added to
+  `translators/__init__.py`. No factory existed anywhere — every prior call site (all in
+  `tests/`) constructed `StubTranslator` directly. One `isinstance` branch per
+  `TranslatorConfig` union member; the `raise ConfigError` fallback is unreachable today (one
+  member) but stops being unreachable the moment M1 adds `pix2pix`.
+- **Arbitrary-depth override merging.** Clean-SeAFusion's `overrides_from_args` only handles
+  1-tuple/2-tuple config paths (`(section,)` or `(section, key)`). t2o's `DetectorConfig` is
+  a level deeper (`detector.evaluation.init_weights`), so `_OVERRIDES` maps each flag to an
+  N-tuple walked by `node.setdefault(key, {})`, and multiple flags targeting sibling subpaths
+  under the same top-level section (`detector.in_loop.*` and `detector.evaluation.*`) now
+  coexist in the merged dict instead of one clobbering the other — covered directly in
+  `tests/test_cli.py`.
+
+**Decision — `evaluate` subcommand added now, not deferred to M0.10.** Not in TASKS.md's
+literal wording, but `metrics.task.evaluate_detector` already existed with no CLI entry
+point, and M0.10's E1 reference bracket needs one. Confirmed with the user before building
+it. Standalone — takes `--weights`/`--data`/`--imgsz`/`--batch`/`--device` directly and never
+touches `Config`, same spirit as Clean-SeAFusion's own standalone `predict` subcommand. No
+`predict`/inference subcommand exists or is planned — PLAN.md §1 rules out an inference
+service; `evaluate` only ever scores an existing detector checkpoint.
+
+**Decision — heavy submodules (torch, ultralytics) are imported inside each subcommand
+function, not at module level.** Keeps `t2o --version`/`t2o --help` fast and importable
+without a GPU-capable torch build, matching Clean-SeAFusion's own lazy-import style in its
+`cli.py`.
+
+**Verify (cli.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (185 passed, 9 new), `pytest -m slow` (9 passed, 1 new — the
+`evaluate` subcommand's real `model.val()` call). Manually smoke-tested `t2o --version`,
+`t2o --help`, `t2o train --help` against the installed entry point. `experiments/smoke.yaml`
+is next.
 
 ## M0.9 — Dataset acquisition
 
