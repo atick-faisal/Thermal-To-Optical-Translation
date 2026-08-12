@@ -38,7 +38,10 @@ def test_stub_satisfies_the_translator_protocol() -> None:
 
 
 def test_config_hidden_channels_reaches_the_module() -> None:
+    from t2o.config import StubTranslatorConfig
+
     config = Config.load(overrides={"translator": {"backbone": "stub", "hidden_channels": 7}})
+    assert isinstance(config.translator, StubTranslatorConfig)  # narrows the union for pyright
     translator = StubTranslator(hidden_channels=config.translator.hidden_channels)
     first_conv = translator.net[0]
     assert isinstance(first_conv, torch.nn.Conv2d)

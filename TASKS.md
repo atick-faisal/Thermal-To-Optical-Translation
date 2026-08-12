@@ -952,20 +952,117 @@ spellings pass through, `None` matches `torch.cuda.is_available()`).
 
 ## M1 — Phase 1: GAN loop (the go/no-go gate)
 
-- [ ] Vendor `pytorch-CycleGAN-and-pix2pix` at `2a7afba` — **`models/networks.py` only**
+- [x] Vendor `pytorch-CycleGAN-and-pix2pix` at `2a7afba` — **`models/networks.py` only**
       (`define_G`, `define_D`, `GANLoss`). Not `BaseModel`, `options/`, `data/`, `train.py`
-- [ ] `translators/pix2pix.py` wrapper implementing the Translator protocol.
+- [x] `translators/pix2pix.py` wrapper implementing the Translator protocol.
       `translate` is `netG(x)`
-- [ ] Wire the detection loss where `fake_B` is already un-detached
-- [ ] Smoke-test the full loop on the fixture
+- [x] Wire the detection loss where `fake_B` is already un-detached
+- [x] Smoke-test the full loop on the fixture
 - [ ] Train on the custom dataset, λ_det = 0 → baseline translation quality
 - [ ] Train with λ_det > 0 → the loop arm
 - [ ] Evaluate both through the single evaluation path
 
 **GATE:** if translated mAP does not beat raw-thermal mAP on at least one class, **stop**.
-Re-frame around the low-annotation regime before escalating to diffusion.
+Re-frame around the low-annotation regime before escalating to diffusion. **The bar this
+measures against is now known** (M0.10's E1 bracket): < 0.05 mAP50, the visible-trained
+detector run directly on raw thermal, untranslated. Deliberately low.
 
 - [ ] Record the gate decision and evidence in this file before proceeding
+
+**Vendor + wrapper decisions:**
+
+- **Pin resolved to `2a7afba2895d52556dd5dfe07e8555ef657ced6f` (2025-08-06)** — the local
+  `../pytorch-CycleGAN-and-pix2pix` sibling checkout was ~500 commits stale (HEAD `c3268ed`,
+  2024-03-22); `git fetch origin` in that checkout (read-only, no working-tree change) made
+  the pin reachable. `models/networks.py` at that commit is self-contained (no `BaseModel`/
+  `opt` imports), confirming PLAN.md §7's vendoring thesis directly rather than assuming it.
+- **Vendored to `third_party/pix2pix/networks.py` + `LICENSE`, byte-identical**, plus empty
+  `third_party/__init__.py` / `third_party/pix2pix/__init__.py`. Verified byte-identical
+  against the pinned commit as the very last step before committing — `ruff format .`
+  reformats any file it can reach regardless of `[tool.ruff] src`'s allowlist (that setting
+  only affects import-classification, not file discovery), so it silently rewrote the
+  vendored file in place the first time this was run. **Fixed**: `[tool.ruff]
+  extend-exclude` gained `"third_party"` alongside the existing `"*.md"` entry — the same
+  fix `*.md` already needed, for the same reason (never rewrite text we don't own).
+  `[tool.pyright] include` is a genuine allowlist (`["src", "scripts", "tests"]`) and already
+  excluded `third_party/` by omission with no change needed — confirmed by running `pyright`
+  after the fact and checking no diagnostics were reported *for* `third_party/pix2pix/
+  networks.py` itself (only for our own call sites into it).
+- **Packaging fix required for the vendor path to import at runtime at all**:
+  `[tool.hatch.build.targets.wheel] packages` gained `"third_party"` alongside `"src/t2o"`.
+  `third_party/` sits beside `src/t2o`, not inside it (PLAN.md §5), and `t2o` runs as an
+  installed console script rather than `python -m` from repo root, so cwd-based import
+  tricks would not reliably resolve `third_party.pix2pix.networks`. This is the same
+  mechanism that already makes `import t2o` cwd-independent, generalised to a second
+  top-level package. Verified directly, not assumed: `import third_party.pix2pix.networks`
+  from `/tmp` (not the repo root) resolves cleanly after `uv sync`.
+- **`init_weights`, not `init_net`.** At this pinned commit, `define_G`/`define_D` accept
+  but never *apply* `init_type`/`init_gain` — that used to be `init_net`'s job, called from
+  `BaseModel`, out of vendor scope. `init_net` also hardcodes CUDA device placement (PLAN.md
+  §7: "our wrapper owns device placement"). `Pix2PixTranslator.__init__` calls
+  `networks.init_weights(net, init_type, init_gain)` directly after each `define_G`/
+  `define_D` call instead, then does its own `.to(device)` implicitly via the caller moving
+  the whole module.
+- **Generator defaults to `resnet_9blocks`, not the paper's `unet_256`.** `UnetGenerator`
+  needs input divisible by 2**8=256; the custom dataset is 640x480 and `train.crop` only
+  guarantees stride-32 divisibility (PLAN.md §8). `ResnetGenerator` only needs
+  divisible-by-4 — works on the synthetic fixture, the real dataset, and any future one.
+- **Reconstruction/adversarial losses reuse the shared `LossConfig.{l2,lpips,gan}`**, not
+  pix2pix's own `lambda_L1=100` — pix2pix becomes the second consumer of the same three
+  fields `StubTranslator` already established, so every backbone stays comparable through
+  one set of knobs (PLAN.md §8). `loss.gan` defaults to `0.0` (its own existing docstring:
+  "the cheaper and more stable starting point"), so **`net_d` is never constructed by
+  default** — the same "clean no-op at weight 0" discipline `CouplingConfig` already uses
+  for the frozen in-loop detector. `loss.lpips` defaults to `5.0`, so an LPIPS network
+  (`torchmetrics` `LearnedPerceptualImagePatchSimilarity`, `normalize=True` — the same module
+  `FidelityEvaluator` already uses) is built by default; also only when the weight is `> 0`.
+- **New config surface** (`Pix2PixTranslatorConfig`): `net_g`, `net_d`, `ngf`, `ndf`,
+  `gan_mode` — the knobs actually worth sweeping. `gan_mode` is `Literal["vanilla",
+  "lsgan"]`, deliberately excluding the paper's third option `wgangp`: that needs
+  `cal_gradient_penalty` wiring this milestone doesn't build, so it's rejected at
+  config-load time rather than silently behaving like a no-op. `norm="batch"`, `init_type=
+  "normal"`, `init_gain=0.02`, `beta1=0.5`, `n_layers_d=3`, and the training-time LPIPS
+  backbone (`"alex"`) are fixed constants inside the wrapper, not config fields — no signal
+  to sweep them in Phase 1, and every config field carries an ongoing documentation cost
+  (house style, PLAN.md §13). `input_nc`/`output_nc` are hardcoded too (1/3 channels,
+  exactly what the data contract always produces), matching how `StubTranslator` already
+  hardcodes its own conv channel counts.
+- **One consistent `[0,1]` convention throughout `fit()`, not a `[-1,1]` detour.**
+  `ResnetGenerator`'s last layer is `Tanh` (`[-1,1]`), so `translate()` remaps once at its
+  own boundary (`(x + 1) / 2`) to satisfy the `Translator` protocol. Inside `fit()`, an
+  earlier draft kept a separate raw-Tanh tensor around for the discriminator to mirror
+  upstream's "`fake_B` is already un-detached" framing literally — caught in self-review:
+  the affine remap is linear and differentiable, so it does not affect detachment either
+  way, and keeping two representations around actually introduced a real bug (concatenating
+  a `[0,1]` infrared channel with a `[-1,1]` visible channel for the discriminator's real
+  pair). Fixed before committing: `fake_b` (already `[0,1]`) is the only tensor used for
+  L2/LPIPS/GAN/detection-loss alike, so `real_a`/`real_b`/`fake_b` are always on the same
+  scale for the discriminator regardless of which pair it's shown.
+- **Tests split fast/slow exactly like `FidelityEvaluator`'s own precedent (M0.5)**: fast
+  tests construct with `loss_gan=0.0, loss_lpips=0.0` so neither the discriminator nor the
+  LPIPS network is ever built; slow tests cover real defaults (all loss terms finite) and
+  one direct `engine.loop.run_loop` pass with `backbone: pix2pix` on the synthetic fixture,
+  the pix2pix analogue of `test_experiments.py`'s stub-only loop test. One convergence test
+  needed a second self-review fix: driving `loss_l2` down over 20 steps with `loss_lpips`
+  also active (its 5x-heavier default weight) is not reliable on random-noise batches, since
+  the optimizer follows the *combined* gradient — isolated to `loss_lpips=0.0` too, matching
+  `StubTranslator`'s own convergence test, which tests the same thing without the confound.
+- **Also found and fixed while running the full suite**: two *existing* tests assumed
+  `"pix2pix"` was still an invalid `backbone` tag (`test_config.py`'s "unknown backbone"
+  case, predating this milestone) and that `config.translator` was still a one-member union
+  (`test_stub_translator.py`'s `hidden_channels` test, no longer narrowable without an
+  explicit `isinstance` check now that a second union member exists) — both updated; the
+  first now uses a genuinely-still-invalid tag (`pix2pix_turbo`) and gained a sibling
+  positive test for the real `pix2pix` tag.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(248 passed, 10 new), `pytest -m slow` (14 passed, 3 new). Vendored file re-diffed against
+the pinned commit as the final check — byte-identical.
+
+**Out of scope for this step, needs the server** — training pix2pix on the real ~850-pair
+dataset at λ_det=0 and λ_det>0, and evaluating both through `metrics.task.evaluate_detector`.
+Report the mAP numbers back once run; the gate decision above gets recorded here at that
+point, not before.
 
 ---
 

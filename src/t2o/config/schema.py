@@ -46,6 +46,7 @@ class Backbone(StrEnum):
     """
 
     STUB = "stub"
+    PIX2PIX = "pix2pix"
 
 
 class DataConfig(ConfigBase):
@@ -221,11 +222,54 @@ class StubTranslatorConfig(ConfigBase):
     hidden_channels: int = 16
 
 
-# A discriminated union of one. Each new backbone adds a model with its own
-# `backbone: Literal[...]` tag plus one entry here; nothing else in the config layer
-# changes, which is what makes PLAN.md invariant 3 ("swapping backbones is a config
-# change") true rather than aspirational.
-TranslatorConfig = Annotated[StubTranslatorConfig, Field(discriminator="backbone")]
+class Pix2PixTranslatorConfig(ConfigBase):
+    """M1's GAN backbone (`PLAN.md` §10 Phase 1) -- vendored `models/networks.py` from
+    `junyanz/pytorch-CycleGAN-and-pix2pix` at `2a7afba`, driven by our own trainer.
+
+    Only the architecture knobs worth sweeping are exposed. `norm="batch"`, `init_type=
+    "normal"`, `init_gain=0.02`, `beta1=0.5`, `n_layers_d=3` and the LPIPS backbone used for
+    training loss are fixed inside `translators/pix2pix.py` -- nothing in Phase 1 needs to
+    sweep them, and every config field carries an ongoing documentation cost (house style,
+    PLAN.md §13). Reconstruction/adversarial loss weights are *not* here -- pix2pix reuses
+    the shared `LossConfig.{l2,lpips,gan}` fields `StubTranslator` already established,
+    rather than inventing its own `lambda_L1`.
+    """
+
+    backbone: Literal[Backbone.PIX2PIX] = Backbone.PIX2PIX
+    # (resnet_9blocks|resnet_6blocks|unet_128|unet_256) generator architecture. Deliberately
+    # *not* the paper's own default (`unet_256`): `UnetGenerator` needs input divisible by
+    # 2**8=256, which neither the 640x480 custom dataset nor any stride-32-divisible
+    # `train.crop` satisfies. `ResnetGenerator` only needs divisible-by-4.
+    net_g: Literal["resnet_9blocks", "resnet_6blocks", "unet_128", "unet_256"] = "resnet_9blocks"
+    # (basic|n_layers|pixel) discriminator architecture. "basic" is the paper's own default
+    # (70x70 PatchGAN) and works on any input size.
+    net_d: Literal["basic", "n_layers", "pixel"] = "basic"
+    # (int) generator's last-conv filter width. Raising it costs VRAM/throughput for
+    # (usually marginal) capacity.
+    ngf: int = 64
+    # (int) discriminator's first-conv filter width. Only matters when `loss.gan > 0` --
+    # otherwise no discriminator is ever constructed (the same "clean no-op at weight 0"
+    # discipline `CouplingConfig` already uses for the frozen detector).
+    ndf: int = 64
+    # (vanilla|lsgan) adversarial objective. Deliberately excludes the paper's third option,
+    # `wgangp` -- that needs `cal_gradient_penalty` wiring this milestone doesn't build, so
+    # it is rejected at config-load time rather than silently behaving like a no-op.
+    gan_mode: Literal["vanilla", "lsgan"] = "vanilla"
+
+    @field_validator("ngf", "ndf")
+    @classmethod
+    def _at_least_one(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("must be >= 1")
+        return value
+
+
+# A discriminated union: each new backbone adds a model with its own `backbone: Literal[...]`
+# tag plus one entry here; nothing else in the config layer changes, which is what makes
+# PLAN.md invariant 3 ("swapping backbones is a config change") true rather than aspirational.
+TranslatorConfig = Annotated[
+    StubTranslatorConfig | Pix2PixTranslatorConfig, Field(discriminator="backbone")
+]
 
 
 class MetricsConfig(ConfigBase):

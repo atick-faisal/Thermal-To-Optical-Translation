@@ -99,15 +99,21 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/t2o"]
+# third_party is a sibling of src/t2o (PLAN.md §5), not nested inside it -- listing it here
+# is what makes `import third_party.pix2pix.networks` resolve from an installed/editable
+# `t2o` console script regardless of cwd, the same mechanism that already makes `import t2o`
+# itself cwd-independent.
+packages = ["src/t2o", "third_party"]
 
 [tool.ruff]
 line-length = 100
 src = ["src", "scripts", "tests"]
-# ruff formats fenced Python inside markdown. PLAN.md and RESEARCH_FINDINGS.md quote
+# ruff formats fenced Python inside markdown (PLAN.md and RESEARCH_FINDINGS.md quote
 # upstream source verbatim with `file:line` citations; reformatting those breaks the
-# citation. Docs are prose, not code we own.
-extend-exclude = ["*.md"]
+# citation) and would otherwise reformat/relint vendored third-party code in place, which
+# invariant 4 (PLAN.md §5) forbids -- `ruff check .`/`ruff format .` walk the filesystem
+# directly and are not limited by `src`'s import-classification-only role.
+extend-exclude = ["*.md", "third_party"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
