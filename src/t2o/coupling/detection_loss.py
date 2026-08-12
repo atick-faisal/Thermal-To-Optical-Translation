@@ -10,6 +10,7 @@ its fusion network only predicts luma. t2o's translator emits RGB directly
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import torch.nn.functional as F
 from torch import Tensor, nn
@@ -51,6 +52,21 @@ class DetectionTaskLoss(nn.Module):
         self.criterion = v8DetectionLoss(detector.model)
         self.grad_scale = grad_scale
         self.reward_target = reward_target
+
+    def to(self, *args: Any, **kwargs: Any) -> DetectionTaskLoss:
+        # v8DetectionLoss is a plain object, not an nn.Module -- nn.Module.to()'s own
+        # recursion only reaches registered submodules/parameters/buffers (self.detector),
+        # never self.criterion's internal device-pinned tensors (self.proj, self.bbox_loss,
+        # self.class_weights), which v8DetectionLoss.__init__ bakes in once from
+        # `next(model.parameters()).device` at construction time -- CPU, since this module
+        # is always built before anything moves to the training device. Move self.detector
+        # first via super().to(), then rebuild self.criterion so it re-reads the (now
+        # correct) device fresh.
+        result = super().to(*args, **kwargs)
+        from ultralytics.utils.loss import v8DetectionLoss
+
+        self.criterion = v8DetectionLoss(self.detector.model)
+        return result
 
     def compute(self, rgb: Tensor, batch: TranslationBatch) -> TaskLossOutput:
         # rgb is fed straight to the detector as float32 [0,1] -- never routed through
