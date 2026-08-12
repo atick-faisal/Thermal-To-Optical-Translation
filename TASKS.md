@@ -703,7 +703,55 @@ bullet.
       work actually wants this dataset (RESEARCH_FINDINGS.md; InsPLAD is single-modality
       RGB, like CPLID/HIT-UAV, so it can only ever be a detector-training/eval source, never
       a translation pair).
-- [ ] Freeze and hash the splits; commit the manifest
+- [x] Freeze and hash the splits; commit the manifest. `data/splits.py` (`freeze_split`,
+      `write_split_manifest`/`load_split_manifest`, `verify_split` + `SplitDriftError`) plus
+      `scripts/freeze_splits.py` — run for real against `dataset/processed/{msrs,flir}`,
+      committed as `splits/msrs.json` (1163 train / 361 val) and `splits/flir.json` (4129
+      train / 1013 val), matching each adapter's own real-run counts exactly. **The custom
+      ~850-pair dataset's split is still open** — it lives only on the server (PLAN.md §2)
+      and has no `data.yaml` on this machine; freeze it there with the same script once it
+      exists, and see [[dataset-rehost-deferred]]-style follow-up: LLVIP/M3FD/TTPLA get
+      frozen the same way once actually fetched.
+
+**`data/splits.py` decisions:**
+
+- **The frozen record, not the images, is what reaches git.** `dataset/` is wholly
+  gitignored with no exceptions (M0.1), so a split can never be proven unchanged by diffing
+  images. `splits/<name>.json` records sorted train/val filename stems plus a sha256 hash of
+  each (16 hex chars, matching `Config.config_hash()`'s own truncation convention) — small,
+  diffable, and enough to detect any reshuffling without needing the data itself.
+- **Stems are listed in full, not just hashed.** A bare hash mismatch says "something
+  changed" with no way to say what; listing every stem makes `git diff` on
+  `splits/<name>.json` show exactly which files were added or removed if MSRS/FLIR ever
+  publish a revision. At ~1500–5200 lines per file this is well within normal bounds for a
+  text-diffable manifest (the same pattern many ML repos use for train/val list files).
+  `PLAN.md`'s "one internal representation" invariant is about the directory contract, not
+  about keeping every artifact minimal — diagnosability won out here, same reasoning
+  `data/pairing.py`'s `validate_pairs` already uses (report the full mismatch, not just that
+  one exists).
+- **`verify_split`/`SplitDriftError` exist but nothing calls them yet.** Wiring drift
+  detection into `engine/loop.py` or `cli.py train` isn't needed to freeze today's two public
+  splits, and the dataset this guard matters most for (the custom ~850 pairs) isn't on this
+  machine to test against. Built as reusable library code precisely so a future run-start
+  check is a small addition, not a redesign — matches the project's own pattern of landing a
+  capability before its first caller when the caller depends on data that doesn't exist yet
+  (`coupling/schedule.py`'s stage functions predated `engine/loop.py` the same way).
+- **`scripts/freeze_splits.py` discovers datasets by globbing `<data-root>/*/data.yaml`**
+  rather than a hardcoded list, so committing LLVIP/M3FD/TTPLA/the custom dataset's frozen
+  records later needs no changes here — only running the adapter (or pointing `--data-root`
+  at wherever a `data.yaml` already exists) and re-running this script.
+- **Re-freezing an existing record overwrites rather than refuses, but logs a warning first
+  if the previous record no longer matches.** A silent overwrite would defeat the point of
+  freezing; an outright refusal would make "yes, I know it changed, update it" require
+  manually deleting the file first. `--check` is the strict, non-writing mode for anything
+  that wants to fail loudly on drift instead.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(235 passed, 18 new). No `slow` test — nothing here touches ultralytics/torch. Ran for real:
+`uv run python scripts/freeze_splits.py` (froze both), then `--check` (both matched,
+confirming the round trip is exact). **M0.9 is now fully closed** except the LLVIP/M3FD/TTPLA
+real fetch (deferred, disk space — see the gdown decisions below) and, by extension, freezing
+their splits once fetched.
 
 **`scripts/fetch_datasets.py` decisions:**
 
