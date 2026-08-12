@@ -93,7 +93,7 @@ packages = ["src/t2o"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "scripts", "tests"]
 # ruff formats fenced Python inside markdown. PLAN.md and RESEARCH_FINDINGS.md quote
 # upstream source verbatim with `file:line` citations; reformatting those breaks the
 # citation. Docs are prose, not code we own.
@@ -103,7 +103,7 @@ extend-exclude = ["*.md"]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "scripts", "tests"]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"
@@ -111,6 +111,10 @@ reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `scripts/` sits outside `src/t2o` and has no console-script entry point, so it's never
+# on sys.path by default the way the installed `t2o` package is -- this is what lets
+# `tests/test_fetch_datasets.py` `import scripts.fetch_datasets`.
+pythonpath = ["."]
 markers = [
     "slow: long-running tests (CPU smoke training, end-to-end runs); deselect with -m 'not slow'",
 ]

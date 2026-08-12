@@ -630,15 +630,44 @@ bullet.
 
 ## M0.9 — Dataset acquisition
 
-- [ ] `scripts/fetch_datasets.py` for the trivially-scriptable set: MSRS, CPLID, HIT-UAV,
+- [x] `scripts/fetch_datasets.py` for the trivially-scriptable set: MSRS, CPLID, HIT-UAV,
       FLIR-aligned (HuggingFace mirror `UserNae3/FLIR_aligned` — avoids the Teledyne
       registration form)
 - [ ] Fetch LLVIP, M3FD, TTPLA once on the Mac via `gdown`, re-host, then make the server
       path a plain `curl`
 - [ ] Adapters normalising each into the internal representation
-- [ ] Verify: MSRS `detection/` folder — does it have box annotations usable for mAP?
-- [ ] Verify: InsPLAD annotation format (not stated in its README)
+- [x] Verify: MSRS `detection/` folder — does it have box annotations usable for mAP?
+      **No.** `github.com/Linfeng-Tang/MSRS` is only `train/{vi,ir}` and `test/{vi,ir}`
+      image pairs — no `detection/` folder, no box annotations. Confirms
+      `RESEARCH_FINDINGS.md`'s own framing as a "semantic-aware translation benchmark," not
+      a detection one; MSRS is translation/fidelity data only.
+- [ ] Verify: InsPLAD annotation format (not stated in its README; Mendeley Data gates the
+      files behind a form, so this needs the actual download, not just the repo README)
 - [ ] Freeze and hash the splits; commit the manifest
+
+**`scripts/fetch_datasets.py` decisions:**
+
+- **Destination `dataset/raw/<name>/`** — stays inside the already-wholesale-ignored
+  `dataset/` prefix (`.gitignore`), so no new ignore rule was needed, and sits next to
+  where the still-open adapter step will read raw layouts from.
+- **Two fetch strategies, chosen per source**: `git clone --depth 1` for MSRS/CPLID/
+  HIT-UAV (plain git repos); `huggingface_hub.snapshot_download` for FLIR-aligned.
+  `huggingface_hub` needed no new dependency — already installed transitively via
+  `transformers`.
+- **Idempotent** — a destination that already exists and is non-empty is skipped with a
+  log line rather than re-cloned, consistent with `engine/loop.py`'s resume discipline.
+- **Not executed for real in this session** — confirmed with the user. The script is
+  written and tested with `subprocess.run`/`huggingface_hub.snapshot_download` both
+  monkeypatched (`tests/test_fetch_datasets.py`, 8 fast tests, no network I/O); the actual
+  multi-GB fetch is left for the user to run when convenient, same spirit as M0.1's
+  "not verifiable locally" `uv sync --extra gpu`.
+- **`scripts/` is a new top-level package**, sibling to `src/t2o`, not part of it — added
+  to `[tool.pytest.ini_options] pythonpath`, `[tool.ruff] src`, and `[tool.pyright]
+  include` so it lints/type-checks/imports-in-tests the same as everything else, without
+  becoming part of the installed `t2o` distribution.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(200 passed, 8 new). No `slow` test — nothing here touches ultralytics/torch.
 
 ## M0.10 — Server bring-up (cannot be verified locally)
 
