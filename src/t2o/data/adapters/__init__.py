@@ -8,6 +8,7 @@ mode. CPLID (RGB-only) and HIT-UAV (IR-only) don't fit it and are out of scope.
 from __future__ import annotations
 
 from t2o.data.adapters.common import AdapterError
+from t2o.data.adapters.flir import adapt_flir
 from t2o.data.adapters.msrs import adapt_msrs
 
-__all__ = ["AdapterError", "adapt_msrs"]
+__all__ = ["AdapterError", "adapt_flir", "adapt_msrs"]

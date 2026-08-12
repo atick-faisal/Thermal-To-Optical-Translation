@@ -2,9 +2,10 @@
 ``{split}/{visible,infrared}/{images,labels}`` contract (PLAN.md §9).
 
 One place to write the ``rgbt:``-block ``data.yaml`` and copy image/label pairs, so every
-per-dataset adapter (``msrs.py``, and ``flir.py`` next) produces byte-identical shapes rather
-than each inventing its own. Images are always copied, never re-encoded -- a straight
-``shutil.copyfile`` preserves the source format and is what keeps this step cheap on
+per-dataset adapter (``msrs.py``, ``flir.py``) produces byte-identical shapes rather than each
+inventing its own. Images are always copied byte-for-byte, never re-encoded -- either straight
+off disk (``copy_image_pair``, MSRS's git-cloned tree) or straight out of an archive
+(``write_image_pair_bytes``, FLIR-aligned's zip) -- which is what keeps this step cheap on
 thousand-plus-image datasets.
 """
 
@@ -29,6 +30,12 @@ class AdapterError(ValueError):
     """Raised when a raw dataset's layout doesn't match what its adapter expects."""
 
 
+def _images_dir(split_root: Path, modality: str) -> Path:
+    images_dir = split_root / modality / IMAGES_SEGMENT
+    images_dir.mkdir(parents=True, exist_ok=True)
+    return images_dir
+
+
 def copy_image_pair(
     visible_src: Path, infrared_src: Path, stem: str, split_root: Path, suffix: str
 ) -> None:
@@ -40,9 +47,18 @@ def copy_image_pair(
     itself to match exactly.
     """
     for modality, src in (("visible", visible_src), ("infrared", infrared_src)):
-        images_dir = split_root / modality / IMAGES_SEGMENT
-        images_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, images_dir / f"{stem}{suffix}")
+        shutil.copyfile(src, _images_dir(split_root, modality) / f"{stem}{suffix}")
+
+
+def write_image_pair_bytes(
+    visible_data: bytes, infrared_data: bytes, stem: str, split_root: Path, suffix: str
+) -> None:
+    """Byte-for-byte equivalent of :func:`copy_image_pair` for a source that isn't a plain
+    file on disk -- FLIR-aligned's raw layout is a zip archive, read via
+    ``zipfile.ZipFile.read()`` rather than a path ``shutil.copyfile`` can take.
+    """
+    for modality, data in (("visible", visible_data), ("infrared", infrared_data)):
+        (_images_dir(split_root, modality) / f"{stem}{suffix}").write_bytes(data)
 
 
 def write_label(split_root: Path, stem: str, source_label: Path | None) -> None:
@@ -58,6 +74,19 @@ def write_label(split_root: Path, stem: str, source_label: Path | None) -> None:
     labels_dir = split_root / "visible" / LABELS_SEGMENT
     labels_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source_label, labels_dir / f"{stem}.txt")
+
+
+def write_label_lines(split_root: Path, stem: str, lines: list[str]) -> None:
+    """Write YOLO label lines computed in memory (e.g. converted from VOC-XML boxes).
+
+    ``lines=[]`` writes nothing, for the same "missing = negative" reason
+    :func:`write_label` skips a nonexistent source.
+    """
+    if not lines:
+        return
+    labels_dir = split_root / "visible" / LABELS_SEGMENT
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    (labels_dir / f"{stem}.txt").write_text("\n".join(lines) + "\n")
 
 
 def write_manifest_yaml(

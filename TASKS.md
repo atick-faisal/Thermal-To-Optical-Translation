@@ -635,12 +635,17 @@ bullet.
       registration form)
 - [ ] Fetch LLVIP, M3FD, TTPLA once on the Mac via `gdown`, re-host, then make the server
       path a plain `curl`
-- [ ] Adapters normalising each into the internal representation
+- [x] Adapters normalising each into the internal representation
   - [x] MSRS — `data/adapters/msrs.py::adapt_msrs`. `train`/`ir`+`vi` (1083 pairs) merged with
         the small `detection/` pool (80 labelled pairs, disjoint filenames); `test` → `val`
         (361 pairs, unlabelled). Verified against the real local clone: 1163 train / 361 val.
-  - [ ] FLIR-aligned — needs filename normalisation (`FLIR_00002_RGB.jpg` vs
-        `FLIR_00002_PreviewData.jpeg` share no stem) and VOC-XML→YOLO conversion. Next step.
+  - [x] FLIR-aligned — `data/adapters/flir.py::adapt_flir`. Reads directly out of
+        `aligned.zip` (never extracted to disk); renames `FLIR_XXXXX_RGB.jpg`/
+        `_PreviewData.jpeg` to a shared `FLIR_XXXXX.jpg` stem so `Pairing` can find them;
+        converts VOC-XML `bndbox` → normalised YOLO boxes; splits by each XML's own
+        `<folder>` field. Scoped to the ~5142 annotated pairs (of 10284 total) — the other
+        half has neither a split nor a label. Verified against the real local archive: 4129
+        train / 1013 val, matching the literature's known FLIR-aligned split exactly.
   - **CPLID and HIT-UAV are out of scope, confirmed with the user.** Verified against the
         real local clones: CPLID is RGB-only (UAV insulator photos, VOC-XML, class
         `insulator`/`defect`), HIT-UAV is IR-only (thermal aerial shots, YOLO, 4 classes).
@@ -711,6 +716,49 @@ bullet.
 `pytest -m "not slow"` (207 passed, 7 new). Also run for real against the local
 `dataset/raw/msrs`: 1163 train / 361 val pairs, matching the plan's predicted counts exactly;
 `DatasetManifest.load` on the result loads cleanly. FLIR-aligned adapter is next.
+
+**`data/adapters/flir.py` — FLIR-aligned (M0.9 adapters step 2 of 2) decisions:**
+
+- **Reads straight out of `aligned.zip` via `zipfile`, never extracts to disk.** The raw
+  layout for this one source is genuinely an archive, not a directory tree —
+  `huggingface_hub.snapshot_download` leaves it zipped. `common.py` gained
+  `write_image_pair_bytes`/`write_label_lines` alongside MSRS's path-based
+  `copy_image_pair`/`write_label`, so both source shapes share the same destination-writing
+  code without forcing a full extraction of an archive most of which (the unannotated half,
+  the duplicate `AnnotatedImages/` copies) this step doesn't use.
+- **Scoped to the ~5142 annotated pairs, not all 10284.** Each annotation XML's own
+  `<folder>` field (`training`/`validation`) is the *only* place a train/val split is
+  recorded — verified against an 800-file sample of the real archive, no external split
+  list exists. The unannotated half has neither a split nor a label, so including it would
+  only add unlabelled bulk; MSRS's 1083-pair unlabelled pool already serves that role more
+  compactly.
+- **Filenames are normalised on copy.** `FLIR_00002_RGB.jpg` and `FLIR_00002_PreviewData.jpeg`
+  share no stem in the raw archive; `data.pairing.Pairing` requires the visible and infrared
+  paths to differ only in their `visible`/`infrared` directory segment, so both get renamed
+  to `FLIR_00002.jpg` on copy (bytes untouched — both are already JPEG data regardless of the
+  source extension).
+- **Class vocabulary is derived from the data, sorted alphabetically** (`bicycle`, `car`,
+  `dog`, `person`), not hardcoded — nothing in the archive declares a canonical order the way
+  MSRS's `classes.txt` does, and deriving it keeps the adapter correct even if a future FLIR
+  release adds or removes a class.
+- **Boxes are clamped to the frame, and dropped (not written) if zero-area after clamping.**
+  A handful of FLIR's `bndbox` values run past the image edge; failing loudly on that would
+  make an otherwise-usable annotation block the whole adapter, and writing a degenerate
+  zero-width box would hand `v8DetectionLoss` a nonsensical target. `tests/test_flir_adapter.py`
+  constructs this case directly (a box entirely outside a 50×50 frame) rather than trusting
+  it's rare enough not to matter.
+- **The real-data sanity test is `slow`, unlike MSRS's.** MSRS's real-clone test copies
+  already-decompressed PNGs from a directory tree and stayed fast; FLIR's equivalent
+  decompresses real image bytes out of a ~1.4GB archive (~6s locally) — cheap enough to run,
+  but not free enough to belong in the default `pytest -m "not slow"` pass.
+
+**Verify (FLIR adapter):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (214 passed, 7 new), `pytest -m slow` (real-archive test passes,
+~6s). Also run for real against the local `dataset/raw/flir/aligned.zip`: 4129 train / 1013
+val pairs — matching the FLIR-aligned split reported in the literature exactly; classes
+`bicycle`/`car`/`dog`/`person`; `DatasetManifest.load` on the result loads cleanly.
+**M0.9's adapters item is now closed.** Remaining M0.9 work: LLVIP/M3FD/TTPLA (`gdown`),
+InsPLAD annotation-format verification, freezing and hashing the splits.
 
 ## M0.10 — Server bring-up (cannot be verified locally)
 

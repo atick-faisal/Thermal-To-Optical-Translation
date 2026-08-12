@@ -6,6 +6,9 @@ Companion to `fetch_datasets.py` -- that script only fetches; nothing there conv
 layout, this is that step. Only datasets that are genuinely paired belong here; CPLID
 (RGB-only) and HIT-UAV (IR-only) don't fit the paired contract and have no adapter.
 
+FLIR-aligned's adapter reads directly out of `aligned.zip` (never extracted to disk) and can
+take upwards of a minute on the real ~1.4GB archive -- expected, not a hang.
+
 Standalone script, not part of the `t2o` package -- it owns its own `logging.basicConfig` the
 way `fetch_datasets.py` does for the same reason.
 """
@@ -17,7 +20,7 @@ import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from t2o.data.adapters import adapt_msrs
+from t2o.data.adapters import adapt_flir, adapt_msrs
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +29,11 @@ LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 DEFAULT_RAW_ROOT = Path("dataset/raw")
 DEFAULT_DEST_ROOT = Path("dataset/processed")
 
-# One entry per adapted dataset. Registry, not a chain of ifs, so adding the next dataset
-# (FLIR-aligned) is a one-line addition here plus its own `adapters/flir.py`.
+# One entry per adapted dataset. Registry, not a chain of ifs, so adding the next one is a
+# one-line addition here plus its own `adapters/<name>.py`.
 ADAPTERS: dict[str, Callable[[Path, Path], Path]] = {
     "msrs": adapt_msrs,
+    "flir": adapt_flir,
 }
 
 
