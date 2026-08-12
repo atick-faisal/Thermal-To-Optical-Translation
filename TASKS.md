@@ -635,6 +635,26 @@ bullet.
       registration form)
 - [ ] Fetch LLVIP, M3FD, TTPLA once on the Mac via `gdown`, re-host, then make the server
       path a plain `curl`
+  - [x] Script written: `scripts/fetch_datasets.py`'s `SOURCES` registry extended with
+        `gdown_file_id`/`gdown_folder_id` (real ids read off each dataset's own README —
+        `bupt-ai-cz/LLVIP`, `JinyuanLiu-CV/TarDAL`, `R3ab/ttpla_dataset` — not guessed) and
+        `fetch_gdown_file`/`fetch_gdown_folder`, dispatched the same idempotent way as the
+        existing git/HuggingFace sources. `gdown` added as a new `scripts` uv dependency
+        group (not `dev` — it's a fetch-time tool the server never needs, not a code-quality
+        one), so a bare `uv sync` doesn't pull it in.
+  - [ ] **Real fetch not executed — confirmed with the user.** This machine has ~31GB free
+        disk (93% full), shared across both checkouts on this volume; LLVIP alone (15,488
+        pairs at 1024×1280) plausibly doesn't fit safely alongside M3FD/TTPLA. Run
+        `uv run --group scripts python scripts/fetch_datasets.py --dataset llvip m3fd ttpla`
+        yourself once disk/bandwidth allow, same spirit as M0.1's "not verifiable locally."
+  - [ ] **Re-host destination not decided.** PLAN.md's plan is "fetch once on the Mac,
+        re-host, then the server script is a plain `curl`" — where (HF dataset repo, S3,
+        etc.) is an open decision. User asked to be reminded when server training
+        approaches, rather than deciding it now.
+  - Note: the M3FD Google Drive folder (`1H-oO7bgRuVFYDcMGvxstT1nmy0WF_Y_6`) also contains
+        TNO and RoadScene as sibling subfolders — bundled that way in TarDAL's own share, not
+        a mistake on our end. Expect `dataset/raw/m3fd/` to hold more than just M3FD once
+        fetched; a future adapter should read only the M3FD subfolder.
 - [x] Adapters normalising each into the internal representation
   - [x] MSRS — `data/adapters/msrs.py::adapt_msrs`. `train`/`ir`+`vi` (1083 pairs) merged with
         the small `detection/` pool (80 labelled pairs, disjoint filenames); `test` → `val`
@@ -759,6 +779,35 @@ val pairs — matching the FLIR-aligned split reported in the literature exactly
 `bicycle`/`car`/`dog`/`person`; `DatasetManifest.load` on the result loads cleanly.
 **M0.9's adapters item is now closed.** Remaining M0.9 work: LLVIP/M3FD/TTPLA (`gdown`),
 InsPLAD annotation-format verification, freezing and hashing the splits.
+
+**`fetch_datasets.py` — gdown sources decisions:**
+
+- **One script, one registry, not a second file.** LLVIP/M3FD/TTPLA are still "fetch a
+  public dataset to `dataset/raw/<name>/`" — the same job `fetch_datasets.py` already does
+  for the git/HuggingFace sources, just via a different `DatasetSource` field selecting a
+  different strategy function. Splitting fetch logic across two scripts would just be two
+  places to keep the idempotent-skip/CLI/logging conventions in sync.
+- **Drive ids are copied from each dataset's own README, not guessed.** A wrong file id
+  silently serves an HTML interstitial or 404s rather than data; verified against
+  `bupt-ai-cz/LLVIP/download_dataset.md`, `JinyuanLiu-CV/TarDAL/README.md`, and
+  `R3ab/ttpla_dataset/README.md` directly.
+- **`gdown` lives in a new `scripts` uv dependency group, not `dev`.** It's a fetch-time-only
+  tool nothing in `src/t2o` or the server ever imports (the server side of this plan is a
+  plain `curl` against wherever these get re-hosted) — grouping it with linters/typecheckers
+  would blur why it's there. `uv run --group scripts ...` is required to actually invoke the
+  gdown paths; a bare `uv sync`/`uv run pytest` does not install it, matching the "server
+  never needs gdown" design.
+- **The real download was not run.** Confirmed with the user given ~31GB free disk on this
+  machine (93% full) — LLVIP alone is large enough that a blind multi-dataset fetch risked
+  filling it. The script itself is verified with `gdown.download`/`gdown.download_folder`
+  both monkeypatched (`tests/test_fetch_datasets.py`, 4 new fast tests, no network I/O).
+- **Re-hosting is intentionally left undecided**, per the user — a reminder to revisit this
+  belongs whenever server training on these datasets actually starts, not now.
+
+**Verify (gdown extension):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (217 passed, 3 new). No `slow` test and no real network call —
+matching M0.9 step 1's own "not executed for real" precedent, this time by explicit
+disk-space decision rather than default caution.
 
 ## M0.10 — Server bring-up (cannot be verified locally)
 

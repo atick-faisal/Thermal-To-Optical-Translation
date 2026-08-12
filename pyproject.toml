@@ -53,6 +53,9 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.16.2",
 ]
+scripts = [
+    "gdown>=5.2",
+]
 
 # Conflicting extras + explicit indices are what let CPU-on-Mac and CUDA-on-Windows
 # resolve from a single uv.lock. Ported from ../RGBT-Fusion-Detection.

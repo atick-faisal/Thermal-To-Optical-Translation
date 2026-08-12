@@ -69,6 +69,39 @@ def test_fetch_dataset_routes_hf_sources_through_snapshot_download(
     ]
 
 
+def test_fetch_dataset_routes_gdown_file_sources_through_gdown_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr("gdown.download", lambda **kwargs: calls.append(kwargs))
+    source = DatasetSource(name="llvip", gdown_file_id="abc123")
+
+    dest = fetch_dataset(source, tmp_path)
+
+    assert dest == tmp_path / "llvip"
+    assert calls == [{"id": "abc123", "output": f"{dest}/", "quiet": False}]
+
+
+def test_fetch_dataset_routes_gdown_folder_sources_through_gdown_download_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr("gdown.download_folder", lambda **kwargs: calls.append(kwargs))
+    source = DatasetSource(name="m3fd", gdown_folder_id="def456")
+
+    dest = fetch_dataset(source, tmp_path)
+
+    assert dest == tmp_path / "m3fd"
+    assert calls == [{"id": "def456", "output": str(dest), "quiet": False}]
+
+
+def test_fetch_dataset_rejects_a_source_with_no_strategy_configured(tmp_path: Path) -> None:
+    source = DatasetSource(name="nothing")
+
+    with pytest.raises(FetchError, match="no fetch strategy configured"):
+        fetch_dataset(source, tmp_path)
+
+
 def test_fetch_dataset_skips_an_already_populated_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
