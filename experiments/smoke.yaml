@@ -1,0 +1,67 @@
+# The smoke experiment: mirrors the shape of every real experiment config (every section
+# present, nothing left to implicit defaults) but sized so the whole loop finishes on CPU in
+# seconds (PLAN.md §9). `data.manifest` and `detector.*.weights` below are placeholders --
+# like a real experiment config, they are resolved per machine, and every test that loads
+# this file overrides them to point at the synthetic fixture (`tests/conftest.py`) rather
+# than a path that only exists on one machine. Nothing is pushed to the server without a run
+# through this file passing first.
+
+data:
+  manifest: dataset/yolo_rgbt/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+
+train:
+  epochs_per_stage: 1
+  batch_size: 2
+  lr: 1.0e-4
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  workers: 0
+  hflip: 0.5
+  crop: null
+  seed: 0
+
+loss:
+  l2: 1.0
+  lpips: 5.0
+  gan: 0.0
+
+coupling:
+  # Two stages, not the real ramp's four -- enough to exercise both the weight=0 no-detector
+  # path and the weight>0 coupled path once each.
+  task_weights: [0.0, 1.0]
+  grad_scale: 1.0e-2
+  reward_target: null
+
+detector:
+  in_loop:
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    init_weights: yolo11n.pt
+    epochs: 1
+    imgsz: 640
+    batch: 2
+
+translator:
+  # The CPU stand-in (M0.6) -- the only backbone that can even be imported on the Mac.
+  backbone: stub
+  hidden_channels: 8
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: cpu
+  wandb: false
+  wandb_project: thermal-to-optical
+  run_dir: runs
+  name: smoke

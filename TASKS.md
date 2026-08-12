@@ -386,7 +386,7 @@ path.
       stages**; original SeAFusion re-instantiates its generator every stage
       (`train.py:203`), making the loop one-directional
 - [x] `cli.py` — argparse subcommands with an explicit flag→config-path override table
-- [ ] `experiments/smoke.yaml` mirroring every real config at tiny scale
+- [x] `experiments/smoke.yaml` mirroring every real config at tiny scale
 - [ ] Tests (`slow` marker): full end-to-end on the fixture with the stand-in translator →
       `metrics.json`; resume produces identical state; same config+seed twice → identical
       hash and metrics
@@ -538,8 +538,33 @@ without a GPU-capable torch build, matching Clean-SeAFusion's own lazy-import st
 **Verify (cli.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
 `pytest -m "not slow"` (185 passed, 9 new), `pytest -m slow` (9 passed, 1 new — the
 `evaluate` subcommand's real `model.val()` call). Manually smoke-tested `t2o --version`,
-`t2o --help`, `t2o train --help` against the installed entry point. `experiments/smoke.yaml`
-is next.
+`t2o --help`, `t2o train --help` against the installed entry point.
+
+**`experiments/smoke.yaml`:** every section present explicitly (no field left to an implicit
+default), sized so the full loop finishes on CPU in seconds — `epochs_per_stage: 1`,
+`batch_size: 2`, `workers: 0`, a 2-stage `task_weights: [0.0, 1.0]` (not the real 4-stage
+ramp) instead of exercising the weight=0/weight>0 split in one pass each, `translator.backbone:
+stub` (the only backbone importable on the Mac). First tracked file under `experiments/`.
+
+**Decision — `data.manifest`/`detector.*.weights` stay at schema defaults
+(`dataset/yolo_rgbt/data.yaml`, `yolo11n.pt`), not a fixture path.** These are placeholders by
+design, the same way a real experiment config's paths are machine-specific and resolved per
+invocation (PLAN.md §9's "a path that is missing locally is the normal case"). Every test that
+actually runs the file overrides them to the synthetic fixture, exactly like every other engine
+test already does — `Config.load()` never checks path existence at load time (`schema.py`'s own
+docstring), so loading the file as-committed and merely inspecting its resolved values needs no
+override at all.
+
+**`tests/test_experiments.py`:** three fast tests — loads and is tiny; `config_hash()` is
+stable across repeated loads of the same file; one real end-to-end pass through
+`engine.loop.run_loop` on the synthetic fixture (translator-only, `train_detector_stages=False`,
+matching `test_loop.py`'s own fast path). The fuller end-to-end contract this file will also
+serve — `metrics.json` across every stage, resume, same-config-same-seed hash/metrics
+reproducibility — is the *next* TASKS.md item, not duplicated here.
+
+**Verify (experiments/smoke.yaml only):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (188 passed, 3 new). The M0.8 "Tests" bullet (resume + hash/metrics
+reproducibility) is next.
 
 ## M0.9 — Dataset acquisition
 
