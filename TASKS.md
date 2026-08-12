@@ -387,7 +387,7 @@ path.
       (`train.py:203`), making the loop one-directional
 - [x] `cli.py` — argparse subcommands with an explicit flag→config-path override table
 - [x] `experiments/smoke.yaml` mirroring every real config at tiny scale
-- [ ] Tests (`slow` marker): full end-to-end on the fixture with the stand-in translator →
+- [x] Tests (`slow` marker): full end-to-end on the fixture with the stand-in translator →
       `metrics.json`; resume produces identical state; same config+seed twice → identical
       hash and metrics
 
@@ -565,6 +565,68 @@ reproducibility — is the *next* TASKS.md item, not duplicated here.
 **Verify (experiments/smoke.yaml only):** `ruff format`, `ruff check`, `pyright` (0 errors),
 `pytest -m "not slow"` (188 passed, 3 new). The M0.8 "Tests" bullet (resume + hash/metrics
 reproducibility) is next.
+
+**M0.8's closing "Tests" bullet required real production code, not just tests.**
+`engine/loop.py`'s own docstring had explicitly deferred "stage-level resume" to this exact
+item; nothing before this step could make "resume produces identical state" true, since
+`run_loop` had no resume path at all — confirmed with the user before touching its public
+signature, given the operational stakes of getting crash-recovery semantics wrong on a
+long-running server job.
+
+- **`run_loop(..., resume: bool = False)`** (`engine/loop.py`). On `resume=True`,
+  `run_dir/metrics.json` (if present) is parsed back into `StageResult`s via two new
+  functions, `_load_existing_results`/`_stage_result_from_json` — the exact inverse of the
+  existing `_write_metrics`/`_stage_result_to_json`; already-recorded stages are never
+  re-run. A fresh `run_dir` (no file yet) makes `resume=True` a silent no-op, identical to
+  `resume=False`. **Detector fine-tuning is never itself resumed** — it is one bounded
+  `model.train()` call per stage, not something tracked epoch-by-epoch the way translator
+  training is, so a resumed stage's detector fine-tune always restarts from `eval_weights`
+  fresh. `eval_weights` itself is recovered from the last completed stage's recorded
+  `DetectorResult.weights` when resuming, exactly mirroring what an unbroken run would have
+  carried forward.
+- **Warm-start continuity across a resume needed one non-obvious fix.** A resumed process's
+  `translator` argument is whatever a fresh call to `build_translator` just constructed —
+  correct only for a from-scratch run. If the stage about to run has no checkpoint of its
+  own yet (never started), `run_loop` now restores it from the *previous* completed stage's
+  `translator_last.pt` before training begins; if the stage does have its own checkpoint
+  (crashed mid-epoch), `Trainer.resume()` already restores it more precisely (including
+  `start_epoch`). Without the first case, a resumed run would silently train the next stage
+  from an unwarm-started translator while every other signal claimed continuity.
+- **`translators.build_translator` now seeds the global torch RNG from `config.train.seed`
+  before constructing the backbone.** Needed for "same config+seed twice → identical
+  metrics" to be true structurally rather than by test-only trickery: translator weight
+  init previously depended on whatever torch's ambient RNG state happened to be at
+  construction time, and `build_translator` (M0.8 step 5) is the one choke point every real
+  caller (`cli.py`, tests) already goes through. `Trainer` never constructs a translator, so
+  there was no other natural place for this.
+- **`cli.py`'s `loop` subcommand gained `--resume`**, wired straight through to
+  `run_loop(resume=args.resume)` — otherwise the new capability would be unreachable outside
+  a test.
+
+**`tests/test_loop.py`:** four new tests. `test_resume_on_a_fresh_run_dir_behaves_like_a_normal_run`
+and `test_running_the_same_config_and_seed_twice_yields_identical_metrics` are fast
+(`train_detector_stages=False`). `test_resume_skips_completed_stages_and_restores_warm_started_weights`
+is the direct test of "resume produces identical state": an unbroken 2-stage run vs. one
+deliberately interrupted right after stage 0 and then resumed must land on bit-identical
+final translator weights and identical `metrics.json` contents — also fast, since the
+mechanism under test is `run_loop`'s own bookkeeping, not detector training.
+`test_resume_continues_through_a_completed_detector_stage` is the one scenario those fast
+tests can't reach — `eval_weights` carrying forward from a stage whose detector fine-tune
+already completed — and is `slow`, since it touches real `train_detector`. One more fast
+test lives in `tests/test_cli.py` (`test_main_loop_resume_skips_completed_stages`),
+confirming `--resume` is actually wired rather than merely present on the parser.
+
+**Deviation from the checklist's literal "(`slow` marker)":** only the detector-fine-tune
+resume test is `slow`. The already-existing `test_full_loop_fine_tunes_a_detector_every_stage`
+(M0.8 step 4) already satisfies "full end-to-end on the fixture with the stand-in translator
+→ metrics.json" and is not duplicated here; the two new *fast* tests are meaningful and
+correct without touching ultralytics at all, matching the house convention of reserving
+`slow` for real detector training rather than blanket-marking everything in a checklist
+bullet.
+
+**Verify (M0.8 Tests bullet):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (192 passed, 4 new), `pytest -m slow` (10 passed, 1 new).
+**M0.8 is now fully closed.** M0.9 (dataset acquisition) is next.
 
 ## M0.9 — Dataset acquisition
 

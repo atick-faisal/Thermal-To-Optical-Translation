@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="translator only; skips export and detector fine-tuning every stage",
     )
+    loop.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an interrupted loop run; skips stages already in run_dir/metrics.json",
+    )
 
     export = subparsers.choices["export"]
     export.add_argument("--checkpoint", type=Path, required=True, help="translator checkpoint")
@@ -213,6 +218,7 @@ def _run_loop(args: argparse.Namespace, config: Config) -> int:
             run_dir=config.runtime.path,
             tracker=tracker,
             train_detector_stages=not args.no_detector,
+            resume=args.resume,
         )
 
     for result in results:

@@ -146,6 +146,39 @@ def test_main_loop_no_detector_writes_metrics(
     assert all(stage["detector"] is None for stage in metrics)
 
 
+def test_main_loop_resume_skips_completed_stages(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    common = [
+        "--data",
+        str(data_yaml),
+        "--device",
+        "cpu",
+        "--batch-size",
+        "2",
+        "--workers",
+        "0",
+        "--epochs",
+        "1",
+        "--in-loop-weights",
+        str(detector_weights),
+        "--run-dir",
+        str(tmp_path),
+        "--name",
+        "run",
+        "--no-detector",
+    ]
+
+    first_exit = main(["loop", *common, "--task-weights", "0.0"])
+    assert first_exit == 0
+    assert len(json.loads((tmp_path / "run" / "metrics.json").read_text())) == 1
+
+    resumed_exit = main(["loop", *common, "--task-weights", "0.0", "1.0", "--resume"])
+    assert resumed_exit == 0
+    metrics = json.loads((tmp_path / "run" / "metrics.json").read_text())
+    assert len(metrics) == 2
+
+
 def test_main_export_writes_a_translated_dataset(data_yaml: Path, tmp_path: Path) -> None:
     train_exit = main(
         [
