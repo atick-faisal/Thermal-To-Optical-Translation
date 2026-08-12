@@ -12,8 +12,13 @@ dependencies = [
     "pillow>=11.0",
     "pydantic>=2.9",
     "pyyaml>=6.0",
-    "torch>=2.13.0",
-    "torchvision>=0.28.0",
+    # Capped below 2.13.0/0.28.0: download.pytorch.org's index is missing the sha256
+    # fragment for torchvision-0.28.0+cu130's win_amd64/cp312 wheel (every version from
+    # 0.24.0 through 0.27.1 has one) -- uv's hash verification fails on the Windows server
+    # with a hash mismatch as a result. 2.12.1/0.27.1 is the latest pair confirmed to have
+    # proper hashes on both wheels for cu130/win_amd64/cp312.
+    "torch>=2.12.1,<2.13.0",
+    "torchvision>=0.27.1,<0.28.0",
     # The Detect head output format changed between 8.3 and 8.4 (dict vs list); code
     # written against one silently does not work against the other. PLAN.md §8.
     "ultralytics>=8.4.108,<8.5",
@@ -34,12 +39,14 @@ dependencies = [
 # selects the matching index below. Exactly one must be chosen at sync time.
 [project.optional-dependencies]
 cpu = [
-    "torch>=2.13.0",
-    "torchvision>=0.28.0",
+    # Capped below 2.13.0/0.28.0 -- see the main dependencies list above for why.
+    "torch>=2.12.1,<2.13.0",
+    "torchvision>=0.27.1,<0.28.0",
 ]
 gpu = [
-    "torch>=2.13.0",
-    "torchvision>=0.28.0",
+    # Capped below 2.13.0/0.28.0 -- see the main dependencies list above for why.
+    "torch>=2.12.1,<2.13.0",
+    "torchvision>=0.27.1,<0.28.0",
 ]
 
 [project.scripts]

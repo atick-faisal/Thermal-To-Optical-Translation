@@ -882,7 +882,19 @@ disk-space decision rather than default caution.
 
 ## M0.10 — Server bring-up (cannot be verified locally)
 
-- [ ] `uv sync --extra gpu` on the server
+- [ ] `uv sync --extra gpu` on the server. **First real attempt hit a hash-verification
+      failure** ("unexpected sha mismatch") installing `torchvision`, traced to a real
+      upstream bug: `download.pytorch.org`'s index is missing the `sha256` fragment for
+      `torchvision-0.28.0+cu130`'s `win_amd64`/`cp312` wheel specifically (every version
+      from 0.24.0 through 0.27.1 has one — checked directly against the live index).
+      **Fixed** by capping `pyproject.toml`'s `torch`/`torchvision` to
+      `>=2.12.1,<2.13.0`/`>=0.27.1,<0.28.0` — the latest pair confirmed to have proper
+      hashes on both wheels for `cu130`/`win_amd64`/`cp312`. Re-locked (`uv lock`); the full
+      local suite (`pytest -m "not slow"` and `-m slow`, 246 total) still passes against
+      2.12.1/0.27.1 CPU wheels, so this is a pure downgrade with no code changes needed.
+      **Not yet re-verified against the real Windows/CUDA install** — that's still this
+      checklist item's job; confirm `uv sync --extra gpu` succeeds cleanly with the new pins
+      before considering this closed.
 - [ ] Confirm dataloader does not hang under Windows spawn — start `num_workers=0`, raise
       slowly
 - [ ] **Measure actual VRAM** at candidate batch sizes and resolutions before committing to
