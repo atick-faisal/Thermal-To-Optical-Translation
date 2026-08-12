@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -174,6 +175,35 @@ def test_trainer_defaults_to_no_task_loss(data_yaml: Path, tmp_path: Path) -> No
 
     assert trainer.task_loss is None
     assert trainer.task_weight == 0.0
+
+
+def test_trainer_moves_an_nn_module_task_loss_to_its_device(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    """Regression test for a real bug: a `DetectionTaskLoss` wraps a frozen detector that
+    stays wherever `torch.load` put it (CPU) unless something moves it. On a CUDA box this
+    crashes the moment `task_weight > 0` first calls it, with the translator's output on
+    `cuda:0` meeting detector weights still on `cpu` -- invisible on this CPU-only dev
+    machine unless `Trainer` is checked to actually call `.to()` on it.
+    """
+    manifest = DatasetManifest.load(data_yaml)
+
+    class RecordingTaskLoss(nn.Module):
+        def forward(self, pred: Tensor, batch: TranslationBatch) -> Tensor:
+            return pred.sum()
+
+    task_loss = RecordingTaskLoss()
+    with patch.object(task_loss, "to", wraps=task_loss.to) as to_spy:
+        trainer = Trainer(
+            _config(),
+            manifest,
+            StubTranslator(hidden_channels=4),
+            tmp_path / "run",
+            task_loss=task_loss,
+            task_weight=1.0,
+        )
+
+    to_spy.assert_called_once_with(trainer.device)
 
 
 def test_shuffle_is_deterministic_for_a_given_epoch_seed(data_yaml: Path, tmp_path: Path) -> None:

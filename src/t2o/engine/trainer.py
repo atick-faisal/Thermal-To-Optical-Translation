@@ -111,6 +111,12 @@ class Trainer:
 
         self.device = resolve_device(config.runtime.device)
         self.translator.to(self.device)
+        if isinstance(task_loss, nn.Module):
+            # `task_loss` is a `DetectionTaskLoss` wrapping a frozen detector loaded on
+            # whatever device torch.load put it on (CPU) -- without this, the first stage
+            # with task_weight > 0 feeds it a `fake_b` on `self.device` and crashes with a
+            # cuda/cpu tensor-vs-weight mismatch the moment it actually runs.
+            task_loss.to(self.device)
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
         self.train_dataset = TranslationPairDataset(
