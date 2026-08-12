@@ -678,8 +678,31 @@ bullet.
       `person`/`bicycle`/`car` (generic, not power-line-relevant). Small relative to the
       1083 train / 361 test pairs, so MSRS is still primarily translation/fidelity data, as
       `RESEARCH_FINDINGS.md` frames it — just not *exclusively* unlabelled.
-- [ ] Verify: InsPLAD annotation format (not stated in its README; Mendeley Data gates the
-      files behind a form, so this needs the actual download, not just the repo README)
+- [x] Verify: InsPLAD annotation format (not stated in its README; Mendeley Data gates the
+      files behind a form, so this needs the actual download, not just the repo README).
+      **Verified: standard MS-COCO detection JSON**
+      (`InsPLAD-det.zip/annotations/instances_{train,val}.json`), `bbox: [x, y, w, h]` in
+      absolute pixel coordinates (top-left origin), `segmentation: []` throughout (no masks
+      — matches the README's note that pixel-level annotation is a separate, later
+      project), `iscrowd: 0` throughout. **18 categories, not the 17 the paper's text
+      lists** — the released JSON has an extra `sphere` (id 18) absent from the arXiv
+      class list; worth flagging if InsPLAD's numbers are ever cited directly. Train: 7981
+      images / 22635 boxes; val: 2626 images / 6324 boxes — image count sums to exactly
+      the README's 10,607; box count sums to 28,959 against the README's cited 28,933 (off
+      by 26, likely a version/rounding drift between the paper and the released archive).
+      **Correction: the "Mendeley Data gates the files behind a form" premise was wrong.**
+      Mendeley's public API (`data.mendeley.com/public-api/datasets/5n3fjgvfyz`) hands back
+      an unauthenticated, directly-fetchable S3 `download_url` for the one 6.4GB
+      `InsPLAD_Dataset.zip` — no login, no request form, in practice. That outer zip nests
+      three inner zips (`InsPLAD-det.zip` 4.36GB, `unsupervised_anomaly_detection.zip`
+      1.17GB, `supervised_fault_classification.zip` 875MB); verified without downloading any
+      of them in full — HTTP range requests plus a streaming zip/deflate reader pulled just
+      the two annotation JSONs (~1.5MB fetched total over the network, on a machine with
+      ~31GB free disk). No adapter written yet; InsPLAD isn't in `fetch_datasets.py`'s
+      registry either — both are natural follow-ups once the E9 cross-dataset generalisation
+      work actually wants this dataset (RESEARCH_FINDINGS.md; InsPLAD is single-modality
+      RGB, like CPLID/HIT-UAV, so it can only ever be a detector-training/eval source, never
+      a translation pair).
 - [ ] Freeze and hash the splits; commit the manifest
 
 **`scripts/fetch_datasets.py` decisions:**
@@ -778,7 +801,7 @@ bullet.
 val pairs — matching the FLIR-aligned split reported in the literature exactly; classes
 `bicycle`/`car`/`dog`/`person`; `DatasetManifest.load` on the result loads cleanly.
 **M0.9's adapters item is now closed.** Remaining M0.9 work: LLVIP/M3FD/TTPLA (`gdown`),
-InsPLAD annotation-format verification, freezing and hashing the splits.
+freezing and hashing the splits.
 
 **`fetch_datasets.py` — gdown sources decisions:**
 
