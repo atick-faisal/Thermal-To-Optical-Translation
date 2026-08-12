@@ -8,6 +8,8 @@ a CPU dev machine before anything reaches the server.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import torch
 from torch import Tensor, nn
 
@@ -37,11 +39,25 @@ class StubTranslator(nn.Module):
         device = next(self.parameters()).device
         return self.net(batch["infrared"].to(device))
 
-    def fit(self, batch: TranslationBatch) -> dict[str, float]:
+    def fit(
+        self,
+        batch: TranslationBatch,
+        task_loss: Callable[[Tensor, TranslationBatch], Tensor] | None = None,
+        task_weight: float = 0.0,
+    ) -> dict[str, float]:
         self._optimizer.zero_grad()
         pred = self.translate(batch)
         target = batch["visible"].to(pred.device)
         loss = nn.functional.mse_loss(pred, target)
-        loss.backward()
+        total = loss
+        stats = {"loss_l2": float(loss.detach())}
+
+        if task_loss is not None and task_weight > 0.0:
+            detection = task_loss(pred, batch)
+            total = total + task_weight * detection
+            stats["loss_det"] = float(detection.detach())
+
+        total.backward()
         self._optimizer.step()
-        return {"loss_l2": float(loss.detach())}
+        stats["loss_total"] = float(total.detach())
+        return stats

@@ -12,9 +12,10 @@ from pathlib import Path
 
 import pytest
 import torch
-from torch import nn
+from torch import Tensor, nn
 
 from t2o.config import Config
+from t2o.data.dataset import TranslationBatch
 from t2o.data.manifest import DatasetManifest
 from t2o.engine.trainer import BEST_CHECKPOINT, LAST_CHECKPOINT, Trainer
 from t2o.translators import StubTranslator
@@ -109,6 +110,51 @@ def test_translator_must_implement_the_protocol(data_yaml: Path, tmp_path: Path)
 
     with pytest.raises(TypeError, match="Translator protocol"):
         Trainer(_config(), manifest, NotATranslator(), tmp_path / "run")
+
+
+def test_trainer_passes_task_loss_and_weight_through_to_fit(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    manifest = DatasetManifest.load(data_yaml)
+    calls: list[tuple[object, float]] = []
+
+    class RecordingTranslator(nn.Module):
+        def translate(self, batch: TranslationBatch) -> Tensor:
+            return torch.zeros_like(batch["visible"])
+
+        def fit(
+            self,
+            batch: TranslationBatch,
+            task_loss: object = None,
+            task_weight: float = 0.0,
+        ) -> dict[str, float]:
+            calls.append((task_loss, task_weight))
+            return {"loss_l2": 0.0}
+
+    def fake_task_loss(pred: Tensor, batch: TranslationBatch) -> Tensor:
+        return pred.sum()
+
+    trainer = Trainer(
+        _config(epochs_per_stage=1),
+        manifest,
+        RecordingTranslator(),
+        tmp_path / "run",
+        task_loss=fake_task_loss,
+        task_weight=1.5,
+    )
+
+    trainer.train()
+
+    assert calls
+    assert all(loss is fake_task_loss and weight == 1.5 for loss, weight in calls)
+
+
+def test_trainer_defaults_to_no_task_loss(data_yaml: Path, tmp_path: Path) -> None:
+    manifest = DatasetManifest.load(data_yaml)
+    trainer = Trainer(_config(), manifest, StubTranslator(hidden_channels=4), tmp_path / "run")
+
+    assert trainer.task_loss is None
+    assert trainer.task_weight == 0.0
 
 
 def test_shuffle_is_deterministic_for_a_given_epoch_seed(data_yaml: Path, tmp_path: Path) -> None:

@@ -89,6 +89,34 @@ def test_fit_drives_the_loss_down_on_a_fixed_batch() -> None:
     assert last < first
 
 
+def test_fit_ignores_task_loss_when_weight_is_zero() -> None:
+    translator = StubTranslator()
+    calls = 0
+
+    def task_loss(pred: torch.Tensor, batch: TranslationBatch) -> torch.Tensor:
+        nonlocal calls
+        calls += 1
+        return pred.sum()
+
+    result = translator.fit(_batch(n=2, h=32, w=32), task_loss=task_loss, task_weight=0.0)
+
+    assert calls == 0
+    assert "loss_det" not in result
+
+
+def test_fit_adds_the_task_loss_when_weight_is_positive() -> None:
+    translator = StubTranslator()
+
+    def task_loss(pred: torch.Tensor, batch: TranslationBatch) -> torch.Tensor:
+        return pred.sum()
+
+    result = translator.fit(_batch(n=2, h=32, w=32), task_loss=task_loss, task_weight=0.5)
+
+    assert "loss_det" in result
+    assert math.isfinite(result["loss_total"])
+    assert result["loss_total"] != result["loss_l2"]
+
+
 # --------------------------------------------------------------------------- round trip
 
 

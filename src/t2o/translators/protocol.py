@@ -8,6 +8,7 @@ training or evaluation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from torch import Tensor
@@ -25,8 +26,21 @@ class Translator(Protocol):
     loss term.
     """
 
-    def fit(self, batch: TranslationBatch) -> dict[str, float]:
-        """Run one full optimisation step. Returns scalar losses for logging."""
+    def fit(
+        self,
+        batch: TranslationBatch,
+        task_loss: Callable[[Tensor, TranslationBatch], Tensor] | None = None,
+        task_weight: float = 0.0,
+    ) -> dict[str, float]:
+        """Run one full optimisation step. Returns scalar losses for logging.
+
+        ``task_loss``/``task_weight`` are the staged detection-consistency term (M0.7,
+        ``coupling/schedule.py::build_detection_loss``). Typed as a plain callable rather
+        than ``coupling.DetectionTaskLoss`` directly -- ``translators/`` sits below
+        ``coupling/`` in PLAN.md §5's layer order, and ``DetectionTaskLoss.__call__``
+        already satisfies this signature, so no upward import is needed. A backbone that
+        ignores both (the defaults) trains exactly as it did before this term existed.
+        """
         ...
 
     def translate(self, batch: TranslationBatch) -> Tensor:

@@ -29,22 +29,28 @@ thing to select checkpoints on.
 Warm-starting a translator across stages needs no ``model=None`` constructor branch (unlike
 Clean-SeAFusion's): the caller always passes an already-constructed translator, and holding
 the same instance across successive ``Trainer(...)`` calls *is* the warm start.
+
+``task_loss``/``task_weight`` (M0.8 step 4) are opaque pass-through to ``translator.fit()``
+each step -- the staged detection-consistency term (M0.7). ``Trainer`` still composes
+nothing itself; it only carries the per-stage ingredient the backbone's own loss
+composition needs, matching how ``engine/loop.py`` reconstructs both fresh per stage.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
 from t2o.config import Config
-from t2o.data.dataset import TranslationPairDataset, collate_translation_batch
+from t2o.data.dataset import TranslationBatch, TranslationPairDataset, collate_translation_batch
 from t2o.data.manifest import DatasetManifest
 from t2o.tracking import RunTracker
 from t2o.translators.protocol import Translator
@@ -80,6 +86,8 @@ class Trainer:
         translator: nn.Module,
         run_dir: Path,
         tracker: RunTracker | None = None,
+        task_loss: Callable[[Tensor, TranslationBatch], Tensor] | None = None,
+        task_weight: float = 0.0,
     ) -> None:
         if not isinstance(translator, Translator):
             raise TypeError("translator must implement fit()/translate() (the Translator protocol)")
@@ -88,6 +96,8 @@ class Trainer:
         self.translator = translator
         self.run_dir = run_dir
         self.tracker = tracker
+        self.task_loss = task_loss
+        self.task_weight = task_weight
 
         self.device = _resolve_device(config.runtime.device)
         self.translator.to(self.device)
@@ -157,7 +167,7 @@ class Trainer:
         totals: dict[str, float] = {}
         n = 0
         for batch in self.train_loader:
-            losses = translator.fit(batch)
+            losses = translator.fit(batch, task_loss=self.task_loss, task_weight=self.task_weight)
             for key, value in losses.items():
                 totals[key] = totals.get(key, 0.0) + value
             n += 1

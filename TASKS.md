@@ -382,7 +382,7 @@ path.
       see Decision below
 - [x] Port `engine/export.py` + `imaging.py` `Normalize` enum — per-image (never
       batch-wise) clamp/stretch
-- [ ] Port `engine/loop.py` — staged alternating loop. **Warm-start the translator across
+- [x] Port `engine/loop.py` — staged alternating loop. **Warm-start the translator across
       stages**; original SeAFusion re-instantiates its generator every stage
       (`train.py:203`), making the loop one-directional
 - [ ] `cli.py` — argparse subcommands with an explicit flag→config-path override table
@@ -455,6 +455,55 @@ import from `tests.conftest` directly.
 
 **Verify (export.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
 `pytest -m "not slow"` (171 passed, 9 new). `engine/loop.py` is next.
+
+**`engine/loop.py` needed two prerequisites `loop.py` itself doesn't touch again once
+built:** `Translator.fit()` had no way to receive a per-stage detection loss at all
+(`StubTranslator.fit()` was a fixed MSE step — M0.6 flagged this as "revisit when M0.7
+needs it" and left it unresolved), and there was no answer yet for which `Path` seeds each
+stage's frozen in-loop detector. Resolved:
+
+- `Translator.fit()` gained two optional parameters —
+  `task_loss: Callable[[Tensor, TranslationBatch], Tensor] | None = None` and
+  `task_weight: float = 0.0` — typed as a plain callable rather than importing
+  `coupling.DetectionTaskLoss` directly, since `translators/` sits below `coupling/` in
+  PLAN.md §5's layer order and `DetectionTaskLoss.__call__` already satisfies the shape.
+  `StubTranslator.fit()` now adds `task_weight * task_loss(pred, batch)` to its total when
+  both are given; `Trainer` gained matching constructor params it threads through to every
+  `fit()` call unchanged, still composing nothing itself.
+- **Decision — the in-loop coupling detector stays fixed at `config.detector.in_loop.weights`
+  for an entire run; only the *evaluation* detector warm-starts across stages** (resolved
+  with the user). Clean-SeAFusion threads one `detector_weights` variable through both
+  roles, so its "detector warm-started across stages" (PLAN.md §8) reads as one thing.
+  t2o already split the two roles structurally at M0.2 (`DetectorConfig.in_loop`/
+  `.evaluation`, "never conflated" — invariant 7) specifically so they cannot share a
+  weights file by accident; letting `loop.py` reassign the in-loop detector to each stage's
+  freshly fine-tuned evaluation detector would violate that literally, and would mean the
+  coupling loss grades the translator against a detector that was itself trained on the
+  translator's own prior, weaker outputs — a strictly worse experiment than a fixed,
+  independently-trained reference. `run_loop` therefore holds exactly one variable
+  (`eval_weights`) across the stage loop, seeded from `config.detector.evaluation.init_weights`
+  and reassigned to each stage's `DetectorResult.weights`; `config.detector.in_loop.weights`
+  is read fresh every stage and never written. "Detector warm-started across stages" in
+  PLAN.md §8 is now read as describing this evaluation-detector accumulation, the same way
+  the translator accumulates, not the in-loop detector's identity.
+- Detector fine-tuning (`export_translated` → `train_detector`) is unconditional every
+  stage, including stage 0 — matching Clean-SeAFusion's table (stage 0 still bootstraps a
+  detector from the translation-only output). Only `build_detection_loss`'s own
+  weight-vs-zero check (M0.7, unchanged) decides whether a stage's coupling term exists.
+- `run_loop(config, translator, run_dir=None, tracker=None, train_detector_stages=True)`
+  returns `list[StageResult]` and writes `run_dir/metrics.json` after every stage.
+  `train_detector_stages=False` skips export/detector work entirely — the fast test path,
+  and an independently useful translator-only mode (Clean-SeAFusion carries the same flag).
+- **Out of scope for this step**, left for the later "Tests" bullet below: stage-level
+  resume, and the same-config-same-seed-twice hash/metrics equality check. `Trainer.resume()`
+  already covers within-stage resume.
+
+**Verify (loop.py only):** `ruff format`, `ruff check`, `pyright` (0 errors),
+`pytest -m "not slow"` (176 passed, 5 new — protocol/`StubTranslator`/`Trainer` coupling
+coverage plus one fast `run_loop` test). One new `slow` test
+(`tests/test_loop.py::test_full_loop_fine_tunes_a_detector_every_stage`) is the first
+end-to-end exercise of `train_detector` against ultralytics' real training loop — deferred
+from M0.4, run locally and passing (`pytest -m slow`: 8 passed). `cli.py` is next.
 
 ## M0.9 — Dataset acquisition
 
