@@ -19,14 +19,11 @@ import argparse
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from t2o import __version__
 from t2o.config import Config
 from t2o.imaging import Normalize
-
-if TYPE_CHECKING:
-    import torch
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +106,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path, help="YAML config; flags below override it")
-    parser.add_argument("--device", help="null/auto, 'cpu', '0', or '0,1'")
+    # Resolved by engine.trainer.resolve_device -- a single torch.device, never a
+    # comma-joined multi-GPU list (PLAN.md §3 rules out DDP on Windows entirely; use
+    # CUDA_VISIBLE_DEVICES for a second GPU instead).
+    parser.add_argument("--device", help="null/auto, 'cpu', '0', or 'cuda:0'")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--name", help="run name under run_dir")
@@ -237,13 +237,14 @@ def _run_export(args: argparse.Namespace, config: Config) -> int:
     import torch
 
     from t2o.engine.export import export_translated
+    from t2o.engine.trainer import resolve_device
     from t2o.translators import build_translator
 
     translator = build_translator(config)
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     translator.load_state_dict(state["translator"])
 
-    device = _resolve_device(config.runtime.device)
+    device = resolve_device(config.runtime.device)
     translator.to(device)
 
     data_yaml = export_translated(translator, config, args.out, device=device)
@@ -264,14 +265,6 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     for name, ap50 in sorted(metrics.per_class_ap50.items()):
         logger.info("  %-20s AP50=%.4f", name, ap50)
     return 0
-
-
-def _resolve_device(device: str | None) -> torch.device:
-    import torch
-
-    if device is not None:
-        return torch.device(device)
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 _COMMANDS = {

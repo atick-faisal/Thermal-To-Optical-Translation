@@ -17,7 +17,7 @@ from torch import Tensor, nn
 from t2o.config import Config
 from t2o.data.dataset import TranslationBatch
 from t2o.data.manifest import DatasetManifest
-from t2o.engine.trainer import BEST_CHECKPOINT, LAST_CHECKPOINT, Trainer
+from t2o.engine.trainer import BEST_CHECKPOINT, LAST_CHECKPOINT, Trainer, resolve_device
 from t2o.translators import StubTranslator
 
 
@@ -25,6 +25,25 @@ def _config(**train: object) -> Config:
     return Config.load(
         overrides={"train": {"batch_size": 2, "workers": 0, "epochs_per_stage": 2, **train}}
     )
+
+
+# --------------------------------------------------------------------------- resolve_device
+
+
+def test_resolve_device_accepts_a_bare_digit() -> None:
+    # torch.device("0") itself raises -- ultralytics' own convention accepts a bare digit,
+    # but a real torch.device needs the "cuda:" prefix.
+    assert resolve_device("0") == torch.device("cuda:0")
+
+
+def test_resolve_device_passes_through_an_explicit_spelling() -> None:
+    assert resolve_device("cpu") == torch.device("cpu")
+    assert resolve_device("cuda:0") == torch.device("cuda:0")
+
+
+def test_resolve_device_defaults_to_whatever_is_available() -> None:
+    expected = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    assert resolve_device(None) == expected
 
 
 def test_train_returns_epoch_stats_per_epoch(data_yaml: Path, tmp_path: Path) -> None:

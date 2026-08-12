@@ -880,9 +880,9 @@ freezing and hashing the splits.
 matching M0.9 step 1's own "not executed for real" precedent, this time by explicit
 disk-space decision rather than default caution.
 
-## M0.10 — Server bring-up (cannot be verified locally)
+## M0.10 — Server bring-up (cannot be verified locally) ✅
 
-- [ ] `uv sync --extra gpu` on the server. **First real attempt hit a hash-verification
+- [x] `uv sync --extra gpu` on the server. **First real attempt hit a hash-verification
       failure** ("unexpected sha mismatch") installing `torchvision`, traced to a real
       upstream bug: `download.pytorch.org`'s index is missing the `sha256` fragment for
       `torchvision-0.28.0+cu130`'s `win_amd64`/`cp312` wheel specifically (every version
@@ -892,16 +892,61 @@ disk-space decision rather than default caution.
       hashes on both wheels for `cu130`/`win_amd64`/`cp312`. Re-locked (`uv lock`); the full
       local suite (`pytest -m "not slow"` and `-m slow`, 246 total) still passes against
       2.12.1/0.27.1 CPU wheels, so this is a pure downgrade with no code changes needed.
-      **Not yet re-verified against the real Windows/CUDA install** — that's still this
-      checklist item's job; confirm `uv sync --extra gpu` succeeds cleanly with the new pins
-      before considering this closed.
-- [ ] Confirm dataloader does not hang under Windows spawn — start `num_workers=0`, raise
-      slowly
-- [ ] **Measure actual VRAM** at candidate batch sizes and resolutions before committing to
-      any long run
-- [ ] E1 reference bracket: detector on {raw thermal, real visible} × {detector trained on
-      thermal, on visible}, using the existing `.pt` weights
-- [ ] Confirm W&B self-hosted logging works end to end
+      **Confirmed on the real Windows/CUDA install** — `uv sync --extra gpu` succeeds
+      cleanly with the new pins.
+- [x] Confirm dataloader does not hang under Windows spawn — start `num_workers=0`, raise
+      slowly. Confirmed clean on the server.
+- [x] **Measure actual VRAM** at candidate batch sizes and resolutions before committing to
+      any long run. Done on the server (stub translator + detector fine-tuning only — real
+      diffusion VRAM profiling is still M2a's job, this only established the dataloader/
+      detector floor).
+- [x] E1 reference bracket: detector on {raw thermal, real visible} × {detector trained on
+      thermal, on visible}, using the existing `.pt` weights. Run for real on the server:
+
+      | detector trained on \ evaluated on | thermal | visible |
+      | --- | --- | --- |
+      | thermal | **> 0.9 mAP50** | — |
+      | visible | **< 0.05 mAP50** | **> 0.9 mAP50** |
+
+      **In-domain detection is excellent on both modalities** (> 0.9 mAP50 whichever side
+      the detector is trained and run on) — thermal frames are not fundamentally
+      information-poor for this task; the open question behind C4/E1 ("does translation
+      even help over direct thermal detection") already has a clear directional answer: the
+      signal is there, the *domain gap* is the problem, not the sensor.
+
+      **Cross-domain transfer is catastrophic** (< 0.05 mAP50, visible-trained detector run
+      directly on raw thermal, untranslated) — and this is the actual number M1's gate
+      ("translated mAP must beat raw-thermal mAP on at least one class, or stop") measures
+      against. The realistic deployment baseline is "run the detector you can actually label
+      data for (visible) on whatever raw sensor frame you have," not the thermal-trained
+      detector — training a thermal-domain detector requires exactly the thermal-domain
+      annotations the low-annotation framing (E8) exists to avoid depending on. **The gate's
+      bar is very low — a good sign for M1's feasibility.**
+- [x] Confirm W&B self-hosted logging works end to end. Confirmed on the server.
+
+**Found while running these checks — `--device 0` failed, `--device cuda:0` was needed as a
+workaround.** Real bug, not a server environment quirk: `cli.py` and `engine/trainer.py` each
+carried a private, byte-identical `_resolve_device` that called `torch.device(device)`
+directly on the raw string. Real PyTorch's `torch.device("0")` raises
+`RuntimeError: Invalid device string: '0'` — it needs the `cuda:` prefix. Both `--device`
+help strings advertised `'0'` as valid (copying ultralytics' own convention, where
+`select_device` *does* accept a bare digit), but `train`/`loop`/`export` never go through
+ultralytics' resolver, so the documented spelling silently didn't work; `evaluate` (which
+forwards the device string straight into `model.val(device=...)`, i.e. ultralytics' own
+resolver) tolerated it fine, which is why it only bit during the dataloader/VRAM checks
+above, not the E1 evaluate calls. **Fixed**: `engine/trainer.py`'s `_resolve_device` became
+the single public `resolve_device`, normalising a bare digit to `cuda:{device}` before
+constructing the `torch.device`; `cli.py`'s duplicate copy was deleted and `_run_export` now
+imports the one in `engine/trainer.py`. The misleading `'0,1'` example in the shared
+`--device` help text was also removed — a single `torch.device` can never represent a
+comma-joined multi-GPU list, and `PLAN.md` §3 rules out DDP on Windows entirely anyway (one
+experiment per GPU via `CUDA_VISIBLE_DEVICES`). `evaluate`'s own `--device` help text is
+untouched since it genuinely forwards to ultralytics' multi-device-capable resolver.
+Tests: `tests/test_trainer.py` (`resolve_device("0") == torch.device("cuda:0")`, explicit
+spellings pass through, `None` matches `torch.cuda.is_available()`).
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(238 passed, 3 new). **M0.10 is now fully closed.** M1 (Phase 1 GAN loop) is next.
 
 ---
 

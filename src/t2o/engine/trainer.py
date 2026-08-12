@@ -70,10 +70,20 @@ class EpochStats:
     val_loss: float
 
 
-def _resolve_device(device: str | None) -> torch.device:
-    if device is not None:
-        return torch.device(device)
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def resolve_device(device: str | None) -> torch.device:
+    """Turn a `--device` string into a `torch.device`.
+
+    A bare digit ("0") is ultralytics' own device convention -- its `select_device` accepts
+    it directly -- but `torch.device("0")` raises `RuntimeError: Invalid device string`. It
+    needs the `cuda:` prefix. Normalising it here is what makes `train`/`loop`/`export`
+    accept the same `--device 0` spelling `evaluate` already does (that subcommand forwards
+    straight into ultralytics' own resolver and never hits this function).
+    """
+    if device is None:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.isdigit():
+        device = f"cuda:{device}"
+    return torch.device(device)
 
 
 class Trainer:
@@ -99,7 +109,7 @@ class Trainer:
         self.task_loss = task_loss
         self.task_weight = task_weight
 
-        self.device = _resolve_device(config.runtime.device)
+        self.device = resolve_device(config.runtime.device)
         self.translator.to(self.device)
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
