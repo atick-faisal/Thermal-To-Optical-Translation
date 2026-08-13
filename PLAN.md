@@ -362,7 +362,13 @@ never touches training code.
 
 ### The custom dataset
 
-~850 annotated pairs, 4 classes (Fuse, Pole, Switch, Transformer). Registered 640×480 FLIR
+~850 annotated pairs, **5** classes (Connector, Fuse, Pole, Switch, Transformer) — corrected
+at M1.1 from the server's own `data.yaml`, which this document previously recorded as 4,
+omitting Connector. **Connector has zero ground-truth instances in the val split**: it is
+absent from every per-class AP table M1 produced, and `metrics/task.py` omits a class with no
+instances rather than reporting a misleading 0.0. Worth resolving before any per-class result
+is published — either the class is unused in this release, or val does not sample it, and the
+second case would mean the val split is not representative. Registered 640×480 FLIR
 pairs; thermal is single-channel. Labels are shared across modalities.
 
 A 9-pair sample sits at `dataset/yolo_rgbt/` on the dev machine with `train == val` — it is

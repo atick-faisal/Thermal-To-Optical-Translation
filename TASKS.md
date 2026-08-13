@@ -1290,7 +1290,81 @@ had the machinery for since it was written but no caller for.
       arm scores, logged to the tracker under `stage{N}/fidelity/*`
 - [x] `t2o fidelity` subcommand — post-hoc scoring of any finished run, which is what M1's
       two completed runs need
-- [ ] Run it on both completed runs and record the numbers beside the gate table
+- [x] Run it on both completed runs and record the numbers beside the gate table
+
+### Result: **no reward hacking** — but λ_det's benefit is not yet causally established
+
+All five metrics on the exported val split (153 images), against the real visible frames,
+with M1's zero-shot mAP50 alongside:
+
+| arm | zero-shot mAP50 | LPIPS ↓ | FID ↓ | KID ↓ | SSIM ↑ | PSNR ↑ |
+| --- | --- | --- | --- | --- | --- | --- |
+| baseline, λ=0, 100 ep | 0.7751 | 0.3059 | **87.24** | **0.0210** | 0.4528 | 15.50 |
+| loop stage 0, λ=0, 100 ep | 0.7622 | 0.2988 | 104.82 | 0.0301 | 0.4979 | 15.34 |
+| loop stage 1, λ=1, 200 ep cum. | 0.8218 | 0.2828 | 96.13 | 0.0283 | 0.5002 | 15.08 |
+| loop stage 2, λ=2, 300 ep cum. | 0.8332 | **0.2811** | 92.69 | 0.0265 | **0.5027** | 15.66 |
+| loop stage 3, λ=3, 400 ep cum. | **0.8696** | 0.2825 | 90.85 | 0.0273 | 0.4914 | **15.69** |
+
+**Reward hacking is ruled out, which is what this milestone existed to test.** Its signature
+is a detection metric climbing while perceptual fidelity degrades. Across the loop's four
+stages mAP50 rises 0.7622 → 0.8696 while **every** perceptual metric improves or holds:
+LPIPS falls 0.2988 → 0.2825, FID falls monotonically 104.82 → 90.85, KID falls
+0.0301 → 0.0273, SSIM is flat. The translator is not buying detections with adversarial
+texture. `reward_target` stays `null` and `grad_scale` stays `1e-2` — nothing here argues
+for retuning them before M2.
+
+**But the stage-to-stage trend cannot attribute that gain to λ_det**, and two things in this
+table say so:
+
+1. **The stages are not budget-matched and not independent.** Stage 3 is the same translator
+   after 400 cumulative warm-started epochs; stage 0 after 100. Every stage-to-stage
+   improvement is confounded with simply training longer. TASKS.md flagged this when the
+   configs were written ("a budget-matched ablation is E3's job"); it is now the *binding*
+   limitation rather than a footnote, because the trend is the headline.
+2. **Run-to-run variance is much larger than the mAP noise floor suggested.** The baseline
+   and loop stage 0 are the same computation — same config bar `task_weights`, same seed,
+   same 100 epochs — yet they differ by **17.6 FID** (87.24 vs 104.82), 0.009 KID, and 0.045
+   SSIM. On mAP50 they differed by only 0.0129, which made the noise floor look small. It is
+   not: 100 epochs of GAN training on a GPU is not reproducible run-to-run even at a fixed
+   seed (cuDNN non-determinism in conv backward), and fidelity metrics expose that far more
+   than mAP does. **The loop's whole 14-point FID improvement is inside one sample of that
+   variance.**
+
+Note the direction of that discrepancy: the baseline has the *best* FID and KID of any arm
+while having the *worst* LPIPS and SSIM. That is not a translator being better or worse; it
+is what two draws from a noisy process look like.
+
+**What is and is not established:**
+
+| claim | status |
+| --- | --- |
+| Translation beats raw thermal | **Established** (M1 gate, uncontaminated λ=0 arm) |
+| The loop does not reward-hack | **Established** — the point of this milestone |
+| λ_det causally improves detection | **Not established** — confounded with epoch budget and run variance |
+
+Resolving the third needs E3 as designed (PLAN.md §11): budget-matched arms, ≥3 seeds,
+and an independently-trained reference detector. Given the variance measured here, **≥3
+seeds is not optional rigour, it is the minimum to say anything at all.**
+
+**Also worth reporting honestly: the absolute fidelity is poor.** PSNR ~15.5, SSIM ~0.50,
+LPIPS ~0.28, FID ~90 are weak numbers for an image-translation paper — expected for pix2pix
+on ~850 pairs, and part of why M2's diffusion backbone exists. It also *supports* PLAN.md
+§12's argument rather than undermining it: detection transfer works well (0.87 mAP50, 94% of
+the real-visible ceiling) on images these metrics score as mediocre reconstructions. Pixel
+fidelity is measuring something other than what the downstream task needs, which is the
+paper's own claim.
+
+**Found incidentally — the custom dataset has 5 classes, not 4.** `DatasetManifest` logged
+`5 classes ['Connector', 'Fuse', 'Pole', 'Switch', 'Transformer']` off the server's real
+`data.yaml`; PLAN.md §9 recorded 4 and omitted Connector (corrected there). Connector appears
+in **no** per-class AP table from any M1 evaluation, which by `metrics/task.py`'s design means
+it has zero ground-truth instances in val. Two possibilities, and they need different fixes:
+the class is declared but unused in this release (harmless, but `nc` should say so), or val
+genuinely does not sample a class that train does (a split problem — every per-class number
+so far would then be silent about it). **Open: count Connector instances in train vs val
+before publishing any per-class result.** `data/splits.py::freeze_split` has never been run
+against this dataset either (M0.9 left it open, since it lives only on the server), so there
+is no frozen record to check the split against yet.
 
 **Decision — fidelity is scored on the exported PNGs, not the translator's float output.**
 Those files are the exact bytes both detectors were scored against, so fidelity and mAP
