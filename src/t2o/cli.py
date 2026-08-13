@@ -152,6 +152,38 @@ def build_parser() -> argparse.ArgumentParser:
     train_detector.add_argument("--seed", type=int, default=1)
     train_detector.add_argument("--device", help="null/auto, 'cpu', '0', or 'cuda:0'")
 
+    aggregate = subparsers.add_parser(
+        "aggregate",
+        help="read a campaign of runs as one paired experiment (E3): mean +- std per arm x "
+        "stage, sign-flip permutation test, bootstrap CI",
+    )
+    aggregate.add_argument(
+        "--runs",
+        nargs="+",
+        required=True,
+        help="run directories, or globs over them -- quote the glob ('runs/e3-*') so it "
+        "reaches here unexpanded and matches identically on every shell",
+    )
+    # A list, not one value: mAP rising while LPIPS degrades is the reward-hacking signature
+    # (M1.1), and that check is only convenient if one invocation reports both.
+    aggregate.add_argument(
+        "--metric",
+        nargs="+",
+        default=["zero_shot.map50"],
+        help="dotted paths into a stage record, e.g. zero_shot.map50 fidelity.lpips "
+        "zero_shot.per_class_ap50.Switch",
+    )
+    aggregate.add_argument(
+        "--stage",
+        type=int,
+        help="the stage the verdict line reports; defaults to the last stage common to "
+        "every run. Every common stage is computed regardless, so stage 0's null control "
+        "is always printed beside it",
+    )
+    aggregate.add_argument("--csv", type=Path, help="also write the tidy per-run rows here")
+    aggregate.add_argument("--resamples", type=int, default=10000, help="bootstrap resamples")
+    aggregate.add_argument("--seed", type=int, default=0, help="bootstrap seed")
+
     return parser
 
 
@@ -219,17 +251,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         format=LOG_FORMAT,
     )
 
-    # These three take their inputs directly rather than through Config -- they act on
+    # These four take their inputs directly rather than through Config -- they act on
     # artifacts that already exist on disk, same spirit as Clean-SeAFusion's standalone
     # `predict`. None needs an experiment definition to say what it is doing, and
     # `train-detector` in particular must not: the judge it produces has to be independent
-    # of the experiment whose translations it will later score (TASKS.md M1.2).
+    # of the experiment whose translations it will later score (TASKS.md M1.2). `aggregate`
+    # spans twelve experiments at once, so a single Config could not describe it anyway.
     if args.command == "evaluate":
         return _run_evaluate(args)
     if args.command == "fidelity":
         return _run_fidelity(args)
     if args.command == "train-detector":
         return _run_train_detector(args)
+    if args.command == "aggregate":
+        return _run_aggregate(args)
 
     config = config_from_args(args)
     return _COMMANDS[args.command](args, config)
@@ -398,6 +433,77 @@ def _run_train_detector(args: argparse.Namespace) -> int:
     # `_resolve_weights` may have fallen back to last.pt, so it must not be guessed.
     logger.info("detector weights: %s", result.weights)
     logger.info("  mAP50 %.4f  mAP50-95 %.4f", result.map50, result.map50_95)
+    return 0
+
+
+def _expand_run_globs(patterns: Sequence[str]) -> list[Path]:
+    """Turn `--runs` into directories, treating a literal path as its own single match.
+
+    `glob` returns nothing for a path with no magic characters that does not exist, which
+    would silently shrink a campaign; a literal that is missing must say so instead.
+    """
+    from glob import glob
+
+    matched: list[Path] = []
+    for pattern in patterns:
+        hits = sorted(Path(hit) for hit in glob(pattern))
+        if not hits:
+            raise FileNotFoundError(f"--runs pattern matched nothing: {pattern}")
+        matched.extend(hit for hit in hits if hit.is_dir())
+    return matched
+
+
+def _run_aggregate(args: argparse.Namespace) -> int:
+    from t2o.analysis.aggregate import aggregate, tidy_rows, write_csv
+
+    report = aggregate(
+        _expand_run_globs(args.runs),
+        metrics=args.metric,
+        resamples=args.resamples,
+        seed=args.seed,
+    )
+    headline = args.stage if args.stage is not None else report.stages[-1]
+
+    # Widened to the longest metric actually asked for: a dotted per-class path
+    # (zero_shot.per_class_ap50.Switch) overruns any fixed width and shears the table.
+    width = max(len(metric) for metric in report.metrics)
+
+    logger.info("%d runs, stages %s", len(report.runs), list(report.stages))
+    logger.info("%-*s %-8s %5s %3s %9s %9s", width, "metric", "arm", "stage", "n", "mean", "std")
+    for summary in report.summaries:
+        logger.info(
+            "%-*s %-8s %5d %3d %9.4f %9.4f",
+            width,
+            summary.metric,
+            summary.arm.value,
+            summary.stage,
+            summary.n,
+            summary.mean,
+            summary.std,
+        )
+
+    for metric in report.metrics:
+        logger.info("paired (loop - control), %s", metric)
+        for result in (r for r in report.paired if r.metric == metric):
+            # Stage 0 is lambda = 0 in *both* arms, so its paired difference is a null
+            # control measured from inside the experiment itself. Labelling it is what stops
+            # the headline stage being read without it.
+            note = " (null)" if result.stage == 0 else ""
+            marker = " <-- headline" if result.stage == headline else ""
+            logger.info(
+                "  stage %d%-7s n=%d  %+.4f  p=%.4f  95%% CI [%+.4f, %+.4f]%s",
+                result.stage,
+                note,
+                result.n,
+                result.mean_difference,
+                result.p_value,
+                result.ci_low,
+                result.ci_high,
+                marker,
+            )
+
+    if args.csv is not None:
+        logger.info("wrote %s", write_csv(tidy_rows(report), args.csv))
     return 0
 
 

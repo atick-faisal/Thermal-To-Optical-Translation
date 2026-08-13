@@ -381,3 +381,76 @@ def test_main_train_detector_writes_a_checkpoint(
     assert exit_code == 0
     weights = tmp_path / "judge" / "weights"
     assert (weights / "best.pt").is_file() or (weights / "last.pt").is_file()
+
+
+def _write_e3_run(root: Path, name: str, seed: int, weights: list[float], map50: float) -> None:
+    """A minimal run directory, mirroring what `run_loop` + `Config.snapshot` leave behind."""
+    run_dir = root / name
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_text(
+        json.dumps(
+            [
+                {
+                    "stage": 0,
+                    "task_weight": weights[0],
+                    "epochs": [],
+                    "detector": None,
+                    "zero_shot": {
+                        "precision": 0.8,
+                        "recall": 0.8,
+                        "map50": map50,
+                        "map50_95": map50 * 0.7,
+                        "per_class_ap50": {},
+                        "per_class_ap50_95": {},
+                    },
+                    "fidelity": None,
+                }
+            ]
+        )
+    )
+    (run_dir / "config.yaml").write_text(
+        f"train:\n  seed: {seed}\ncoupling:\n  task_weights: {weights}\nruntime:\n  name: {name}\n"
+    )
+
+
+def test_main_aggregate_expands_a_glob_and_writes_the_csv(tmp_path: Path) -> None:
+    """`--runs 'runs/e3-*'` is quoted in TASKS.md M1.2 step 5, so the glob reaches argparse
+    unexpanded and this is the code that has to handle it."""
+    for seed in (0, 1):
+        _write_e3_run(tmp_path, f"e3-control-s{seed}", seed, [0.0], 0.70)
+        _write_e3_run(tmp_path, f"e3-loop-s{seed}", seed, [1.0], 0.80)
+    csv_path = tmp_path / "e3.csv"
+
+    exit_code = main(
+        [
+            "aggregate",
+            "--runs",
+            f"{tmp_path}/e3-*",
+            "--metric",
+            "zero_shot.map50",
+            "zero_shot.map50_95",
+            "--csv",
+            str(csv_path),
+            "--resamples",
+            "100",
+        ]
+    )
+
+    assert exit_code == 0
+    rows = csv_path.read_text().splitlines()
+    assert len(rows) == 1 + 4 * 1 * 2  # header + runs x stages x metrics
+
+
+def test_main_aggregate_reports_a_missing_literal_run(tmp_path: Path) -> None:
+    """`glob` returns nothing for a non-existent literal path, which would silently shrink
+    a campaign rather than fail it."""
+    with pytest.raises(FileNotFoundError, match="matched nothing"):
+        main(["aggregate", "--runs", str(tmp_path / "absent")])
+
+
+def test_aggregate_takes_no_config(tmp_path: Path) -> None:
+    args = build_parser().parse_args(["aggregate", "--runs", str(tmp_path)])
+
+    assert not hasattr(args, "config")
+    assert args.metric == ["zero_shot.map50"]
+    assert args.stage is None

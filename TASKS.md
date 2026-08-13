@@ -1766,20 +1766,89 @@ completing end to end on the synthetic fixture).
 
 **No server run for this step.** Step 4's aggregator stands between here and the campaign.
 
-### Step 4 — aggregation and statistics
+### Step 4 — aggregation and statistics ✅
 
 Nothing in the repo reads more than one run today. `metrics.json` records **no seed and no
 config hash**, so the aggregator joins each run to its sibling `config.yaml` snapshot rather
 than changing `metrics.json`'s format — which keeps M1's two completed server runs readable.
 
-- [ ] `t2o/analysis/aggregate.py`: tidy rows per (run, seed, arm, stage); mean ± std per
+- [x] `t2o/analysis/aggregate.py`: tidy rows per (run, seed, arm, stage); mean ± std per
       arm × stage; paired per-seed differences with **stage 0 reported beside stage 3**;
       exact sign-flip permutation test (2ⁿ enumeration, n ≤ 6 → 64 cases, no scipy, no
       distributional assumption); bootstrap CI on the mean difference
-- [ ] Refuse to test unpaired arms — a missing seed on one side raises rather than silently
+- [x] Refuse to test unpaired arms — a missing seed on one side raises rather than silently
       dropping the pair
-- [ ] `t2o aggregate`, standalone (paths, no `Config`). Runs on the server; `runs/` is
+- [x] `t2o aggregate`, standalone (paths, no `Config`). Runs on the server; `runs/` is
       gitignored and results must not travel back through git
+
+**Decision — the config snapshot is parsed as plain YAML, never through `Config.load`.**
+Step 2b already predicted this: M1's completed runs carry `train.workers` in their
+`runs/*/config.yaml`, and `extra="forbid"` now rejects that key. Only two values are read
+(`train.seed`, `coupling.task_weights`), both in the schema since M0.2, so raw YAML costs
+nothing and is what keeps *every* run ever produced readable rather than only runs written
+by today's schema. Directly tested
+(`test_a_snapshot_with_a_key_the_current_schema_rejects_still_loads`).
+
+**Decision — the arm is derived, not declared, and derived from `config.yaml` rather than
+`metrics.json`.** `Arm.LOOP if any(w > 0 for w in task_weights)` is deliberately the *same*
+predicate `tracking.py::run_tags` uses for its `lambda_det:on|off` W&B tag, so a run's arm in
+the CSV and its tag in W&B cannot disagree about the same run. Reading it from `metrics.json`
+instead would look equivalent and is not: the loop arm's stage 0 is itself λ = 0, so a run
+interrupted after stage 0 records an all-zero `task_weight` column and would be silently
+misfiled as a control (`test_a_loop_run_that_only_finished_stage_zero_is_still_the_loop_arm`).
+
+**Decision — every stage common to all runs is computed, so stage 0's null control needs no
+flag.** `--stage` only selects which line the verdict marker points at; the paired test runs
+at every shared stage regardless, and stage 0 is labelled `(null)` in the output. The two are
+only useful side by side — if the stage-3 effect is not clearly larger than the stage-0
+difference, E3 is negative — so making the null opt-in would be the wrong default.
+
+**Decision — `metric_value` raises on a null arm rather than returning a sentinel.** A stage
+run with `--no-detector` records `zero_shot: null`/`fidelity: null`. A hole in one cell of a
+paired comparison must not become a number; the error names the metric path and the stage.
+
+**Decision — `sign_flip_p_value` refuses above n = 20.** 2²⁰ ≈ 1M assignments is about a
+second; past that a mis-globbed `--runs` would hang instead of failing. The comparison uses
+`>= observed - 1e-12`, not `>`, because floating-point summation makes the identity
+assignment's own mean differ from `observed` in the last bits — excluding it would let p dip
+below its true floor of 2/2ⁿ. `test_sign_flip_p_value_is_exact_and_bottoms_out_at_two_over_two_to_the_n`
+pins 2/64 = 0.03125 at n = 6 against a hand-computed answer, so it pins E3's six-seed
+justification itself, not only the code.
+
+**Decision — `pair_runs` refuses two runs in the same `(arm, seed)` cell**, not just a
+missing one. That is what a forgotten `--name` produces: `runs/<name>` has no seed component
+(step 5's own warning), so the second launch overwrites the first and the survivor looks
+perfectly normal. Both refusals name the offending seeds/paths.
+
+**Decision — `--metric` takes a list; `--csv` is opt-in** (confirmed with the user). One
+invocation reporting `zero_shot.map50` beside `fidelity.lpips` is M1.1's reward-hacking read
+in a single command — mAP rising while LPIPS degrades is the signature, and it is only a
+convenient check if both come out of the same pass. Per-class paths work too
+(`zero_shot.per_class_ap50.Switch` — the class the gain lives in). `--csv` writes the tidy
+long-format rows for re-analysis; a bare invocation writes nothing, since `runs/` is
+gitignored and the printed table is what actually travels back to this repo.
+
+**Not built, deliberately:** no paired t-test (PLAN.md §12 allows "paired t-test *or*
+bootstrap CIs"; scipy is not a dependency and this step names the distribution-free test); no
+formal test on the difference-of-differences between stage 3 and stage 0 (the step says
+stage 0 reported *beside* stage 3, and both are — a test on their difference is scope this
+does not ask for); `metrics.json`'s format is untouched.
+
+**Tests (`tests/test_aggregate.py`, 21 fast + 1 slow; 3 more in `test_cli.py`).** Run
+directories are hand-written, the same reasoning M0.3 applied to the synthetic dataset: an
+unpaired seed, a duplicate cell, a run one stage short, a null metric, and a stale snapshot
+can each be constructed exactly instead of hoping a real run contains one. The one `slow`
+test covers the seam no hand-written fixture can — it runs `run_loop` for real (a control arm
+and a loop arm, one stage each, on the synthetic fixture) and aggregates the result, so the
+fast tests cannot all keep passing if `engine/loop.py`'s output format drifts.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(315 passed, 24 new), `pytest -m slow` (21 passed, 1 new). Also exercised for real against a
+hand-built 12-run campaign in a scratch directory — the glob, the arm × stage table, the
+paired blocks at all four stages and `--csv` all render correctly end to end.
+
+**No server run for this step.** Step 5's campaign is the next thing that needs the server,
+and this was the last piece of tooling it waited on.
 
 ### Step 5 — the campaign (server)
 
