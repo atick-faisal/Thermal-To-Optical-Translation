@@ -1354,17 +1354,27 @@ the real-visible ceiling) on images these metrics score as mediocre reconstructi
 fidelity is measuring something other than what the downstream task needs, which is the
 paper's own claim.
 
-**Found incidentally — the custom dataset has 5 classes, not 4.** `DatasetManifest` logged
-`5 classes ['Connector', 'Fuse', 'Pole', 'Switch', 'Transformer']` off the server's real
-`data.yaml`; PLAN.md §9 recorded 4 and omitted Connector (corrected there). Connector appears
-in **no** per-class AP table from any M1 evaluation, which by `metrics/task.py`'s design means
-it has zero ground-truth instances in val. Two possibilities, and they need different fixes:
-the class is declared but unused in this release (harmless, but `nc` should say so), or val
-genuinely does not sample a class that train does (a split problem — every per-class number
-so far would then be silent about it). **Open: count Connector instances in train vs val
-before publishing any per-class result.** `data/splits.py::freeze_split` has never been run
-against this dataset either (M0.9 left it open, since it lives only on the server), so there
-is no frozen record to check the split against yet.
+**Found incidentally — the custom dataset declares 5 classes but only 4 are annotated.**
+`DatasetManifest` logged `5 classes ['Connector', 'Fuse', 'Pole', 'Switch', 'Transformer']`
+off the server's real `data.yaml`; PLAN.md §9 recorded 4 and omitted Connector (corrected
+there). Connector appears in no per-class AP table from any M1 evaluation. **Resolved with
+the user: it is a Label Studio artifact — the class was created in the labelling project and
+never used, so it has zero instances in train *and* val.** Not a split problem; the initial
+concern that val might under-sample a class train contains does not apply.
+
+Left as-is deliberately rather than dropping it to `nc: 4`. Connector is index **0**
+(alphabetically first), so removing it would renumber every other class in every label file
+on the server — a migration with real corruption risk for no measurable gain. The
+consequences of leaving it are all benign and worth stating so nobody re-derives them later:
+
+- `v8DetectionLoss` carries one class logit that never receives positive supervision. Costs
+  nothing but a negligible slice of the head.
+- `metrics/task.py::_extract_per_class_ap` already omits zero-instance classes rather than
+  reporting a misleading `0.0` (M0.5's own decision), which is exactly why this surfaced as
+  an absence rather than as four-fifths-of-nothing dragging the table down.
+- ultralytics averages mAP over classes actually present, so **no reported mAP is diluted**
+  by the dead class. Every number in M1's gate table is a 4-class average, as intended.
+- **The paper must report 4 classes**, not the `nc: 5` the manifest declares.
 
 **Decision — fidelity is scored on the exported PNGs, not the translator's float output.**
 Those files are the exact bytes both detectors were scored against, so fidelity and mAP
