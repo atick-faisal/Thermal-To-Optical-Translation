@@ -1476,8 +1476,23 @@ Falling back to 3 seeds is allowed but then the writeup says "consistent across 
 - [x] `t2o train-detector` subcommand, standalone like `evaluate`/`fidelity` (M0.8). Defaults
       chosen to make independence the easy path: `--init-weights yolo11s.pt` (a different
       architecture from the in-loop `yolo11n`) and `--seed 1` (not `train.seed`'s 0)
-- [ ] **Server:** train the judge on the **visible train split only**, validating on visible
-      val
+- [x] **Bug found by the first server run: a relative `project` escapes to another repo.**
+      ultralytics does not resolve a relative `project` against the cwd —
+      `cfg/__init__.py::get_save_dir` appends it under `SETTINGS["runs_dir"]/<task>`, and
+      that setting is a machine-global default frozen to whichever git root was current the
+      first time ultralytics wrote its `settings.json`. `--out runs/reference-yolo11s` from
+      this repo therefore landed in
+      `D:\Atick\GitHub\Thermal-Image-Research\runs\detect\runs\reference-yolo11s` — the
+      doubled `runs` being the `runs_dir / task / project` composition. Fixed by resolving
+      inside `train_detector`, which covers the loop's per-stage detector directories too.
+      **M1's numbers are unaffected**: `_resolve_weights` reads the trainer's real save_dir,
+      so stage-to-stage warm-starting always chained the correct checkpoint — only the files
+      sat in the wrong repository. `evaluate_detector` still writes ultralytics' throwaway
+      `val/` scratch dirs there; nothing reads them, so this is left alone rather than
+      inventing a location for output no one consumes
+- [x] **Server:** train the judge on the **visible train split only**, validating on visible
+      val — `yolo11s`, seed 1, 100 epochs: **P 0.8931 R 0.9030 mAP50 0.9364 mAP50-95 0.6822**
+      on the 153-image / 423-instance val split
 - [ ] **Server:** re-score everything M1 already produced under the new judge — validation
       passes only, minutes, no retraining
 
@@ -1502,7 +1517,11 @@ uv run t2o evaluate --weights runs/reference-yolo11s/weights/best.pt \
   ultralytics defaults", which does not confirm a held-out split. If the old judge scores
   *real visible* far above what the new train-split-only judge does, the old one memorised
   val — which would inflate M1's 0.9213 "ceiling" **and** every translated arm sharing val's
-  scene layout. The new judge fixes it either way; this measures how much it mattered.
+  scene layout. **Answered, favourably: no evidence of leakage.** The new judge, trained on
+  train and validated on held-out val, scores **0.9364** where the old one scored 0.9213.
+  Memorisation would have pushed the old number *above* the clean one, not below; the gap is
+  the other way and is the size expected from `yolo11s` being the larger model. M1's ceiling
+  row stands.
 - **Judge-to-judge agreement** is itself a reportable number.
 
 ### Step 2 — make "differ only by seed" true rather than merely likely

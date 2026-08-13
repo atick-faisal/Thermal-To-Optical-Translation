@@ -87,3 +87,46 @@ def test_no_checkpoint_at_all_reports_what_is_there(tmp_path: Path) -> None:
 def test_missing_weights_directory_is_reported(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="does not exist"):
         _resolve_weights(_model(tmp_path), tmp_path, "s0")
+
+
+def test_a_relative_project_is_resolved_before_ultralytics_sees_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A relative `project` does not mean "under the cwd" to ultralytics.
+
+    `cfg/__init__.py::get_save_dir` appends a relative project under the machine-global
+    `SETTINGS["runs_dir"]/<task>` instead, which is frozen to whichever git root was current
+    when ultralytics first wrote its settings.json. Observed on the server: `--out
+    runs/reference-yolo11s` from this repo wrote to
+    `<unrelated-repo>/runs/detect/runs/reference-yolo11s`.
+    """
+    import ultralytics
+
+    from t2o.engine.detector_stage import train_detector
+
+    captured: dict[str, object] = {}
+
+    class FakeYOLO:
+        def __init__(self, weights: str) -> None:
+            self.trainer = None
+
+        def train(self, **kwargs: object) -> object:
+            captured.update(kwargs)
+            return SimpleNamespace()
+
+    monkeypatch.setattr(ultralytics, "YOLO", FakeYOLO)
+    monkeypatch.chdir(tmp_path)
+    _write(tmp_path / "out" / "judge" / "weights" / "best.pt")
+
+    result = train_detector(
+        data_yaml=Path("d.yaml"),
+        init_weights=Path("yolo11s.pt"),
+        project=Path("out"),
+        name="judge",
+        epochs=1,
+    )
+
+    project = Path(str(captured["project"]))
+    assert project.is_absolute()
+    assert project == (tmp_path / "out").resolve()
+    assert result.weights == (tmp_path / "out").resolve() / "judge" / "weights" / "best.pt"

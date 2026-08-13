@@ -135,6 +135,16 @@ def train_detector(
     """
     from ultralytics import YOLO
 
+    # Absolute, always. ultralytics does not resolve a *relative* `project` against the cwd:
+    # `cfg/__init__.py::get_save_dir` appends it under `SETTINGS["runs_dir"]/<task>` instead,
+    # and that setting is a machine-global default frozen to whichever git root happened to
+    # be current the first time ultralytics wrote its settings.json. A relative path here
+    # therefore lands in an unrelated repository, silently and with the run's own name still
+    # attached -- observed on the server as
+    # `<other-repo>/runs/detect/runs/reference-yolo11s`. Resolving is what makes `--out` and
+    # the loop's stage directories mean what they say.
+    project = Path(project).resolve()
+
     model = YOLO(str(init_weights))
     if tracker is not None:
         model.add_callback("on_fit_epoch_end", _forward_epoch_metrics(tracker, metric_prefix))
