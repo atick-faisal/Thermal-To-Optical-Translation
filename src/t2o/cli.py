@@ -102,6 +102,26 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--batch", type=int, default=16)
     evaluate.add_argument("--device", help="null/auto, 'cpu', '0', or '0,1'")
 
+    fidelity = subparsers.add_parser(
+        "fidelity",
+        help="score an exported translated split against the real visible frames (PSNR/SSIM/"
+        "LPIPS/FID/KID)",
+    )
+    fidelity.add_argument(
+        "--translated",
+        type=Path,
+        required=True,
+        help="a translated export root (contains val/images) or the images dir itself",
+    )
+    fidelity.add_argument(
+        "--data", type=Path, required=True, help="source data.yaml holding the real visible split"
+    )
+    fidelity.add_argument("--split", choices=("train", "val"), default="val")
+    fidelity.add_argument("--lpips-net", choices=("alex", "vgg", "squeeze"), default="alex")
+    fidelity.add_argument("--kid-subset-size", type=int, default=50)
+    fidelity.add_argument("--batch", type=int, default=8)
+    fidelity.add_argument("--device", help="null/auto, 'cpu', or 'cuda:0'")
+
     return parser
 
 
@@ -168,8 +188,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         format=LOG_FORMAT,
     )
 
+    # Both take their inputs directly rather than through Config -- they only ever score
+    # artifacts that already exist on disk, same spirit as Clean-SeAFusion's standalone
+    # `predict`. Neither needs an experiment definition to say what it is measuring.
     if args.command == "evaluate":
         return _run_evaluate(args)
+    if args.command == "fidelity":
+        return _run_fidelity(args)
 
     config = config_from_args(args)
     return _COMMANDS[args.command](args, config)
@@ -237,12 +262,16 @@ def _run_loop(args: argparse.Namespace, config: Config) -> int:
         detector_note = (
             f" | fine-tuned mAP50 {result.detector.map50:.4f}" if result.detector else ""
         )
+        # LPIPS accompanies the zero-shot mAP because the pair is the reward-hacking check:
+        # mAP up with LPIPS up (worse) is the signature. Printing mAP alone would hide it.
+        fidelity_note = f" | LPIPS {result.fidelity.lpips:.4f}" if result.fidelity else ""
         logger.info(
-            "stage %d (task_weight=%s): %d epochs%s%s",
+            "stage %d (task_weight=%s): %d epochs%s%s%s",
             result.stage,
             result.task_weight,
             len(result.epochs),
             zero_shot_note,
+            fidelity_note,
             detector_note,
         )
     return 0
@@ -279,6 +308,36 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     )
     for name, ap50 in sorted(metrics.per_class_ap50.items()):
         logger.info("  %-20s AP50=%.4f", name, ap50)
+    return 0
+
+
+def _run_fidelity(args: argparse.Namespace) -> int:
+    from t2o.data.manifest import DatasetManifest
+    from t2o.metrics.fidelity import evaluate_fidelity
+
+    manifest = DatasetManifest.load(args.data)
+    reference = manifest.train_images if args.split == "train" else manifest.val_images
+
+    # Accept either the export root (`.../translated`) or an images dir directly, because
+    # both are natural things to have on the clipboard: `run_loop` names the former and the
+    # data.yaml inside it names the latter.
+    translated = Path(args.translated)
+    if (translated / args.split / "images").is_dir():
+        translated = translated / args.split / "images"
+
+    metrics = evaluate_fidelity(
+        translated,
+        reference,
+        lpips_net=args.lpips_net,
+        kid_subset_size=args.kid_subset_size,
+        device=args.device,
+        batch_size=args.batch,
+    )
+    logger.info("  PSNR       %.4f  (higher better)", metrics.psnr)
+    logger.info("  SSIM       %.4f  (higher better)", metrics.ssim)
+    logger.info("  LPIPS      %.4f  (LOWER better)", metrics.lpips)
+    logger.info("  FID        %.4f  (LOWER better)", metrics.fid)
+    logger.info("  KID        %.4f +- %.4f  (LOWER better)", metrics.kid_mean, metrics.kid_std)
     return 0
 
 

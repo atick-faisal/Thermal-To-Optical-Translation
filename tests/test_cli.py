@@ -246,3 +246,53 @@ def test_main_evaluate_scores_a_detector_checkpoint(
     )
 
     assert exit_code == 0
+
+
+def test_fidelity_accepts_an_export_root_or_an_images_dir(tmp_path: Path) -> None:
+    """`run_loop` hands out `.../translated`; the data.yaml inside it names
+    `.../translated/val/images`. Both are things a user will paste, so both must work."""
+    parser = build_parser()
+    root = tmp_path / "translated"
+    (root / "val" / "images").mkdir(parents=True)
+
+    args = parser.parse_args(
+        ["fidelity", "--translated", str(root), "--data", "d.yaml", "--split", "val"]
+    )
+    assert args.translated == root
+    assert args.split == "val"
+    assert (args.translated / args.split / "images").is_dir()
+
+
+@pytest.mark.slow
+def test_main_fidelity_scores_an_export_against_the_real_visible_split(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    from t2o.engine.export import export_translated
+
+    config = Config.load(
+        overrides={
+            "data": {"manifest": str(data_yaml)},
+            "translator": {"backbone": "stub", "hidden_channels": 4},
+            "runtime": {"device": "cpu"},
+        }
+    )
+    translator = build_translator(config)
+    export_translated(translator, config, tmp_path / "translated")
+
+    exit_code = main(
+        [
+            "fidelity",
+            "--translated",
+            str(tmp_path / "translated"),
+            "--data",
+            str(data_yaml),
+            "--kid-subset-size",
+            "2",
+            "--batch",
+            "2",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    assert exit_code == 0

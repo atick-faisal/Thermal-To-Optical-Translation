@@ -16,6 +16,7 @@ alongside these tests) are what make "same config+seed twice -> identical metric
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,11 @@ def test_full_loop_fine_tunes_a_detector_every_stage(
         assert result.zero_shot is not None
         assert 0.0 <= result.zero_shot.map50 <= 1.0
         assert 0.0 <= result.zero_shot.map50_95 <= 1.0
+        # Fidelity on the same export. Recorded beside zero_shot because the pair is the
+        # reward-hacking check -- neither number diagnoses it alone (PLAN.md §8).
+        assert result.fidelity is not None
+        assert math.isfinite(result.fidelity.lpips)
+        assert math.isfinite(result.fidelity.fid)
 
     metrics = json.loads((tmp_path / "run" / "metrics.json").read_text())
     assert len(metrics) == 2
@@ -98,6 +104,8 @@ def test_full_loop_fine_tunes_a_detector_every_stage(
         assert entry["zero_shot"] is not None
         assert 0.0 <= entry["zero_shot"]["map50"] <= 1.0
         assert "per_class_ap50" in entry["zero_shot"]
+        assert entry["fidelity"] is not None
+        assert "lpips" in entry["fidelity"]
 
 
 def test_resume_on_a_fresh_run_dir_behaves_like_a_normal_run(
@@ -240,6 +248,7 @@ def test_metrics_json_written_before_the_zero_shot_arm_existed_still_resumes(
     legacy = json.loads((run_dir / "metrics.json").read_text())
     for entry in legacy:
         del entry["zero_shot"]
+        del entry["fidelity"]
     (run_dir / "metrics.json").write_text(json.dumps(legacy))
 
     results = run_loop(
@@ -248,6 +257,7 @@ def test_metrics_json_written_before_the_zero_shot_arm_existed_still_resumes(
 
     assert [r.stage for r in results] == [0, 1]
     assert results[0].zero_shot is None
+    assert results[0].fidelity is None
 
 
 @pytest.mark.slow

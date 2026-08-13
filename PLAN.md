@@ -557,6 +557,12 @@ E4 shows gradient conflict the cascaded and bilevel arms cannot resolve.
 insufficient. PSNR/SSIM reward blur; FID/KID use ImageNet backbones insensitive to
 domain-specific structure and are unreliable on small sets.
 
+Scored on the **exported images**, not the translator's float output, so fidelity and the
+task metric describe the same artifact. Their job in this project is not to carry an argument
+alone but to sit beside the task metric as the reward-hacking check: detection rising while
+LPIPS/FID fall is the signature §8's guardrails exist to catch, and neither number diagnoses
+it by itself.
+
 **Task:** mAP@50, mAP@50:95, per-class AP — reported in **two arms**, which answer different
 questions and must never be conflated:
 

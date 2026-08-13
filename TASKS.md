@@ -1039,10 +1039,10 @@ yet:
 1. **An independently-trained visible detector as judge** (different seed, ideally different
    architecture). Until then the honest claim is the gate itself, which rests entirely on the
    uncontaminated λ_det = 0 arm.
-2. **Fidelity metrics.** `FidelityEvaluator` (M0.5) still has no caller in `engine/`, so no
-   PSNR/SSIM/LPIPS/FID exists for any run and PLAN.md §8's fidelity-floor guardrail is
-   unwired. If LPIPS/FID degrade as λ_det rises while zero-shot mAP climbs, that is reward
-   hacking; if they hold, the gain is real.
+2. **Fidelity metrics.** ~~`FidelityEvaluator` (M0.5) still has no caller in `engine/`~~ —
+   **built, see M1.1 below.** If LPIPS/FID degrade as λ_det rises while zero-shot mAP
+   climbs, that is reward hacking; if they hold, the gain is real. Runnable against the two
+   completed runs with no retraining.
 
 **The metric change is what produced this result.** The adapted arm reported
 0.9199 / 0.9053 / 0.9191 / 0.8984 / 0.9132 — flat, and it ranked stage 3 (0.9132) *below* the
@@ -1273,6 +1273,67 @@ in the "GATE DECISION" section above.**
 
 **Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
 (260 passed, 7 new), `pytest -m slow`.
+
+---
+
+## M1.1 — Fidelity metrics wired (the reward-hacking check)
+
+The gate passed, but M1's λ_det trend is monotone *and* self-graded, which is the shape
+reward hacking produces. A detection metric alone cannot tell the two apart. This wires the
+other half of the check — PLAN.md §8's fidelity floor, which `FidelityEvaluator` (M0.5) has
+had the machinery for since it was written but no caller for.
+
+- [x] `metrics/fidelity.py::evaluate_fidelity` — pairs an exported translated split against
+      the real visible frames and returns all five metrics through the existing
+      `FidelityEvaluator` (invariant 1: no second implementation)
+- [x] `engine/loop.py` — `StageResult.fidelity`, computed on the same export the zero-shot
+      arm scores, logged to the tracker under `stage{N}/fidelity/*`
+- [x] `t2o fidelity` subcommand — post-hoc scoring of any finished run, which is what M1's
+      two completed runs need
+- [ ] Run it on both completed runs and record the numbers beside the gate table
+
+**Decision — fidelity is scored on the exported PNGs, not the translator's float output.**
+Those files are the exact bytes both detectors were scored against, so fidelity and mAP
+describe the same artifact; scoring the float tensors would measure an image no reported
+detection number ever saw, and would leave `to_uint8`'s quantisation unmeasured. It also
+makes the metric recomputable for any finished run without loading a checkpoint — which is
+the only reason M1's existing runs can be scored at all. Consequence worth stating: these
+numbers include export quantisation, and are therefore very slightly pessimistic relative to
+what the translator emitted.
+
+**Decision — `data.dataset._to_tensor` became public `load_image_tensor`.** `evaluate_fidelity`
+reads images off disk and must decode them exactly the way training did; a second decoder
+with its own scaling convention would silently make fidelity numbers incomparable to
+everything else. Reused rather than reimplemented.
+
+**Decision — pools are paired by filename *stem*, and a partial overlap warns.** `export.py`
+writes `.png` regardless of the source suffix (`.jpg` here), so full-filename matching would
+find nothing. A fully disjoint pair raises `FidelityError` rather than scoring an empty
+intersection — that means the two directories are not the same split, which is a bug, not a
+degenerate case to average over.
+
+**Decision — `t2o fidelity` is standalone, taking paths rather than a `Config`.** Same
+spirit as `evaluate` (M0.8): it only ever scores artifacts that already exist on disk and
+needs no experiment definition to say what it is measuring. It accepts either the export root
+(`.../translated`) or the images directory itself, because `run_loop` names the former and
+the `data.yaml` inside it names the latter, and both are things that get pasted into a shell.
+
+**Not yet answered — what the numbers say.** The code is verified; the experiment is not run.
+Commands for the two completed runs:
+
+```
+uv run t2o fidelity --translated runs/pix2pix-baseline/stage0/translated \
+    --data <real paired data.yaml> --device cuda:0
+uv run t2o fidelity --translated runs/pix2pix-loop/stage<N>/translated \
+    --data <real paired data.yaml> --device cuda:0      # N = 0..3
+```
+
+Read against the zero-shot mAP column of M1's gate table. LPIPS and FID are the ones that
+matter (both lower-is-better); PSNR/SSIM reward blur and will look best on the least
+interesting translator (PLAN.md §12). **If LPIPS/FID hold flat or improve from stage 0 to
+stage 3 while zero-shot mAP climbs 0.7622 → 0.8696, the λ_det gain is real. If they degrade
+monotonically as mAP rises, it is reward hacking and the ramp needs `reward_target`/
+`grad_scale` retuning before M2.**
 
 ---
 

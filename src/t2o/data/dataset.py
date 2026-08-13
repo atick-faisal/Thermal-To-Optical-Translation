@@ -54,7 +54,13 @@ class TranslationBatch(TypedDict):
     names: list[str]
 
 
-def _to_tensor(path: Path, mode: str) -> Tensor:
+def load_image_tensor(path: Path, mode: str) -> Tensor:
+    """Read an image as a ``(C, H, W)`` float tensor in ``[0, 1]``.
+
+    Public because :mod:`t2o.metrics.fidelity` scores exported images off disk and must
+    decode them exactly the way training did -- a second decoder with its own scaling
+    convention would make fidelity numbers incomparable to everything else.
+    """
     array = np.asarray(Image.open(path).convert(mode), dtype=np.float32) / 255.0
     if array.ndim == 2:
         array = array[:, :, None]
@@ -203,8 +209,8 @@ class TranslationPairDataset(Dataset[TranslationSample]):
 
     def __getitem__(self, index: int) -> TranslationSample:
         visible_path = self.visible_paths[index]
-        visible = _to_tensor(visible_path, "RGB")
-        infrared = _to_tensor(self.pairing.infrared_path(visible_path), "L")
+        visible = load_image_tensor(visible_path, "RGB")
+        infrared = load_image_tensor(self.pairing.infrared_path(visible_path), "L")
 
         if visible.shape[1:] != infrared.shape[1:]:
             raise ValueError(

@@ -70,6 +70,7 @@ from t2o.data.manifest import DatasetManifest
 from t2o.engine.detector_stage import DetectorResult, train_detector
 from t2o.engine.export import export_translated
 from t2o.engine.trainer import LAST_CHECKPOINT, EpochStats, Trainer
+from t2o.metrics.fidelity import FidelityMetrics, evaluate_fidelity
 from t2o.metrics.task import TaskMetrics, evaluate_detector
 from t2o.tracking import RunTracker
 
@@ -90,6 +91,10 @@ class StageResult:
     # fine-tuning of any kind. `detector` above is the adapted arm and saturates; see the
     # module docstring for why only this one answers M1's gate.
     zero_shot: TaskMetrics | None = None
+    # PSNR/SSIM/LPIPS/FID/KID for the same export, against the real visible frames. Read
+    # *together* with zero_shot: a detection metric rising while these fall is the signature
+    # of reward hacking, and neither number diagnoses it alone (PLAN.md §8).
+    fidelity: FidelityMetrics | None = None
 
 
 def run_loop(
@@ -155,6 +160,7 @@ def run_loop(
 
         detector_result: DetectorResult | None = None
         zero_shot: TaskMetrics | None = None
+        fidelity: FidelityMetrics | None = None
         if train_detector_stages:
             data_yaml = export_translated(
                 translator,
@@ -172,8 +178,17 @@ def run_loop(
                 batch=config.detector.reference.batch,
                 device=config.runtime.device,
             )
+            fidelity = evaluate_fidelity(
+                data_yaml.parent / "val" / "images",
+                manifest.val_images,
+                lpips_net=config.metrics.lpips_net,
+                kid_subset_size=config.metrics.kid_subset_size,
+                device=config.runtime.device,
+                batch_size=config.detector.evaluation.batch,
+            )
             if tracker is not None:
                 tracker.log(_zero_shot_metrics(zero_shot, f"stage{stage}/zero_shot"))
+                tracker.log(_fidelity_metrics(fidelity, f"stage{stage}/fidelity"))
             detector_result = train_detector(
                 data_yaml=data_yaml,
                 init_weights=eval_weights,
@@ -192,6 +207,7 @@ def run_loop(
                 epochs=epochs,
                 detector=detector_result,
                 zero_shot=zero_shot,
+                fidelity=fidelity,
             )
         )
         _write_metrics(run_dir, results)
@@ -241,6 +257,17 @@ def _zero_shot_metrics(metrics: TaskMetrics, prefix: str) -> dict[str, float]:
     return flat
 
 
+def _fidelity_metrics(metrics: FidelityMetrics, prefix: str) -> dict[str, float]:
+    return {
+        f"{prefix}/psnr": metrics.psnr,
+        f"{prefix}/ssim": metrics.ssim,
+        f"{prefix}/lpips": metrics.lpips,
+        f"{prefix}/fid": metrics.fid,
+        f"{prefix}/kid_mean": metrics.kid_mean,
+        f"{prefix}/kid_std": metrics.kid_std,
+    }
+
+
 def _write_metrics(run_dir: Path, results: list[StageResult]) -> None:
     payload = [_stage_result_to_json(result) for result in results]
     (run_dir / METRICS_FILENAME).write_text(json.dumps(payload, indent=2))
@@ -266,6 +293,7 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
     # `.get`, not `[...]`: metrics.json files written before the zero-shot arm existed must
     # still resume rather than raising KeyError halfway through a long server run.
     zero_shot = data.get("zero_shot")
+    fidelity = data.get("fidelity")
     return StageResult(
         stage=data["stage"],
         task_weight=data["task_weight"],
@@ -274,4 +302,5 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
         if detector is not None
         else None,
         zero_shot=TaskMetrics(**zero_shot) if zero_shot is not None else None,
+        fidelity=FidelityMetrics(**fidelity) if fidelity is not None else None,
     )

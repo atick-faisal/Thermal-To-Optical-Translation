@@ -18,14 +18,24 @@ accumulated over an entire real-image pool and fake-image pool before one ``comp
 :class:`FidelityEvaluator` wraps all five uniformly behind ``update``/``compute``/``reset``
 so every translator feeds its exported batches through the same accumulator (PLAN.md
 invariant 1: one evaluation path).
+
+:func:`evaluate_fidelity` is the entry point, and it scores **images on disk** -- the PNGs
+``engine/export.py`` already wrote -- rather than a translator's float output. That is
+deliberate: those exported files are the exact bytes the evaluation and reference detectors
+were scored against, so fidelity and mAP describe the same artifact. Scoring the float
+tensors instead would measure an image that no reported detection number ever saw, and the
+uint8 quantisation would go unmeasured. It also means fidelity can be recomputed for any
+finished run without reloading a checkpoint, which is what M1's two completed runs needed.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, cast
 
+import torch
 from torch import Tensor
 from torchmetrics.image import (
     LearnedPerceptualImagePatchSimilarity,
@@ -35,10 +45,16 @@ from torchmetrics.image import (
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.kid import KernelInceptionDistance
 
+from t2o.data.dataset import IMAGE_SUFFIXES, load_image_tensor
+
 logger = logging.getLogger(__name__)
 
 # Images arrive as TranslationSample's native convention throughout t2o.
 _DATA_RANGE = 1.0
+
+
+class FidelityError(ValueError):
+    """Raised when two image pools cannot be compared."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,3 +163,100 @@ class FidelityEvaluator:
         self._lpips.reset()
         self._fid.reset()
         self._kid.reset()
+
+
+def _index_by_stem(images_dir: Path) -> dict[str, Path]:
+    if not images_dir.is_dir():
+        raise FidelityError(f"image directory not found: {images_dir}")
+    return {
+        path.stem: path
+        for path in sorted(images_dir.iterdir())
+        if path.suffix.lower() in IMAGE_SUFFIXES
+    }
+
+
+def _paired_stems(translated: dict[str, Path], reference: dict[str, Path]) -> list[str]:
+    """Match the two pools by filename stem, and refuse a partial overlap silently.
+
+    Stem, not full filename: ``export.py`` writes ``.png`` regardless of whether the source
+    visible frame was ``.jpg``, so the suffixes legitimately differ. Anything beyond that --
+    a stem present on one side only -- means the pools are not the same images, and scoring
+    the intersection anyway would report a fidelity number for a different set of frames
+    than the mAP beside it.
+    """
+    common = sorted(translated.keys() & reference.keys())
+    if not common:
+        raise FidelityError(
+            f"no filename stems in common between the {len(translated)} translated and "
+            f"{len(reference)} reference images. They are not the same split."
+        )
+
+    missing = sorted((translated.keys() | reference.keys()) - set(common))
+    if missing:
+        logger.warning(
+            "%d image(s) present in only one pool and skipped (e.g. %s); scoring the %d in common",
+            len(missing),
+            ", ".join(missing[:5]),
+            len(common),
+        )
+    return common
+
+
+def evaluate_fidelity(
+    translated_images: Path | str,
+    reference_images: Path | str,
+    lpips_net: Literal["alex", "vgg", "squeeze"] = "alex",
+    kid_subset_size: int = 50,
+    device: str | None = None,
+    batch_size: int = 8,
+) -> FidelityMetrics:
+    """Score an exported translated split against the real visible frames it came from.
+
+    ``translated_images`` is an ``images/`` directory written by ``engine/export.py``;
+    ``reference_images`` is the source split's real visible images (``manifest.val_images``).
+    Paired by filename stem.
+
+    This is the fidelity half of the reward-hacking check (PLAN.md §8): if the detection
+    metric climbs with lambda_det while these degrade, the translator is producing texture
+    that satisfies the detector rather than a faithful visible image.
+    """
+    translated = _index_by_stem(Path(translated_images))
+    reference = _index_by_stem(Path(reference_images))
+    stems = _paired_stems(translated, reference)
+
+    evaluator = FidelityEvaluator(
+        lpips_net=lpips_net, kid_subset_size=kid_subset_size, device=device
+    )
+    for start in range(0, len(stems), batch_size):
+        chunk = stems[start : start + batch_size]
+        pred = _stack(chunk, translated)
+        target = _stack(chunk, reference)
+        if device is not None:
+            pred, target = pred.to(device), target.to(device)
+        evaluator.update(pred, target)
+
+    metrics = evaluator.compute()
+    logger.info(
+        "fidelity %s vs %s (%d images): PSNR %.2f  SSIM %.4f  LPIPS %.4f  FID %.2f  KID %.4f+-%.4f",
+        Path(translated_images).parent.name,
+        Path(reference_images).parent.name,
+        len(stems),
+        metrics.psnr,
+        metrics.ssim,
+        metrics.lpips,
+        metrics.fid,
+        metrics.kid_mean,
+        metrics.kid_std,
+    )
+    return metrics
+
+
+def _stack(stems: list[str], index: dict[str, Path]) -> Tensor:
+    images = [load_image_tensor(index[stem], "RGB") for stem in stems]
+    shapes = {tuple(image.shape) for image in images}
+    if len(shapes) > 1:
+        raise FidelityError(
+            f"images in one batch have differing shapes {sorted(shapes)}; PSNR/SSIM/LPIPS "
+            f"are only defined between same-sized images"
+        )
+    return torch.stack(images)
