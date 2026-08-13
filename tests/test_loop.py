@@ -33,13 +33,13 @@ def _config(
     return Config.load(
         overrides={
             "data": {"manifest": str(data_yaml)},
-            "train": {"batch_size": 2, "workers": 0, "epochs_per_stage": 1},
+            "train": {"batch_size": 2, "epochs_per_stage": 1},
             "coupling": {"task_weights": list(task_weights)},
             "detector": {
                 "in_loop": {"weights": str(detector_weights)},
                 "evaluation": {"init_weights": str(detector_weights), "epochs": 1, "batch": 2},
             },
-            "runtime": {"device": "cpu"},
+            "runtime": {"device": "cpu", "workers": 0},
         }
     )
 

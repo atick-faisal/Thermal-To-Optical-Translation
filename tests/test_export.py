@@ -45,7 +45,7 @@ def _config(dataset_root: Path) -> Config:
     return Config.load(
         overrides={
             "data": {"manifest": str(dataset_root / "data.yaml")},
-            "train": {"workers": 0},
+            "runtime": {"workers": 0},
             "detector": {"evaluation": {"batch": 4}},
         }
     )

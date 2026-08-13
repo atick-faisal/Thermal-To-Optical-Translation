@@ -1591,8 +1591,8 @@ and Python's global `random` are never seeded, and the train DataLoader has no
 
 **Deliberately not** setting `torch.use_deterministic_algorithms(True)`: cuDNN
 non-determinism is precisely the variance E3 exists to quantify across seeds, so forcing it
-away would hide the measurement and cost throughput. Both arms keep `workers: 0`, matching
-M1.
+away would hide the measurement and cost throughput. Both arms use `workers: 16` — see step
+2b, which made the worker count result-neutral and therefore safe to raise for throughput.
 
 **Decision — `run_loop` reseeds once *per stage* from `train.seed + stage`, not once per
 run.** This is the only non-obvious choice in the step, and a single top-of-run seed is
@@ -1640,12 +1640,6 @@ torch's source — the cost is one line and the failure it guards against (a fut
 dropping the forwarding, silently unseeding CUDA on the only machine that has one) is
 invisible from the dev Mac.
 
-**Note, not changed:** `TrainConfig.workers` defaults to `4` while its own inline comment
-says "0 is the safe start". Both E3 arms set `workers: 0` explicitly, as does every
-`experiments/*.yaml` (M0.8), so this is a latent trap for a config that omits the field
-rather than a live bug. Changing the default would shift `config_hash()` for any such
-config, so it is left for a deliberate decision rather than folded in here.
-
 **Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
 (274 passed, 6 new), `pytest -m slow` (19 passed, unchanged — `test_resume_continues_through_a_completed_detector_stage`
 is the one test that exercises per-stage seeding across a real ultralytics fine-tune).
@@ -1654,11 +1648,69 @@ is the one test that exercises per-stage seeding across a real ultralytics fine-
 before the E3 campaign starts — a run made now is not comparable to one made after. Steps 3
 and 4 still stand between here and the campaign.
 
+### Step 2b — `workers` was silently experiment identity; now it is not
+
+Raised while closing step 2, and it turned out to be a real bug rather than the stale
+comment it looked like. `TrainConfig.workers` defaulted to `4` under a comment reading "0 is
+the safe start" — but the deeper problem was that **changing the worker count changed the
+training run**. `TranslationPairDataset.__getitem__`'s hflip/crop drew from the ambient
+global torch RNG, which at `workers = 0` is the main process's and at `workers > 0` is
+torch's per-worker derivation from the loader's generator. Two different augmentation
+streams. Raising `workers` for throughput therefore changed the reported numbers, and
+raising it via `--workers` changed `config_hash()` at the same time — so a paired E3 run
+launched with a different worker count would not have been paired at all.
+
+**User confirmed up to 16 workers runs clean on the server**, which is what made this worth
+fixing rather than documenting.
+
+- [x] `data/dataset.py` — augmentation draws from a per-sample generator seeded by
+      `(augment_seed, epoch, index)`, never the ambient RNG. Keying on the *sample index*
+      rather than call order is the load-bearing part: a worker only ever sees a strided
+      subset of the epoch, so any order-dependent stream necessarily varies with the worker
+      count. New `set_epoch(epoch)`, called by `Trainer.train()`, advances it so epoch *N*
+      does not replay epoch *N−1*'s flips
+- [x] `workers` moved `TrainConfig` → `RuntimeConfig`, i.e. out of `config_hash()` — now
+      true rather than merely asserted, and structurally so, matching how M0.2 handled
+      `device`/`name` and the reason `seed` went the other way
+- [x] `tests/test_trainer.py::test_training_is_bit_identical_at_any_worker_count` — the same
+      config trained at `workers=0` and `workers=2` must land on bit-identical weights.
+      Confirmed to **fail** with the per-sample generator reverted, so it is the actual
+      regression guard for this, not a restatement
+- [x] `tests/test_dataset.py` — augmentation ignores ambient RNG *and* call order (built
+      forwards, then rebuilt in reverse); `set_epoch` advances the stream; a different
+      `augment_seed` gives a different stream
+
+**Decision — `persistent_workers` must stay off, and `set_epoch` is why.** The epoch reaches
+the workers only because a `DataLoader` without `persistent_workers` re-pickles the dataset
+when each epoch's iterator is created. Turning it on for throughput without also propagating
+the epoch would silently replay epoch 0's augmentation forever — a bug that costs nothing
+visible and quietly removes most of the augmentation. Stated in
+`TranslationPairDataset.set_epoch`'s own docstring, where anyone about to enable it will
+read it.
+
+**Decision — `experiments/pix2pix_*.yaml` keep `workers: 0`,** now under `runtime:`. The
+move changes their `config_hash()` regardless (a field left the hashed section), but the
+*value* is documentary: it records how M1 actually ran. E3's configs (step 3) take
+**`workers: 16`**.
+
+**Consequence for step 4's aggregator — do not load an old snapshot through `Config`.** M1's
+two completed server runs have `train.workers` in their `runs/*/config.yaml`, which
+`extra="forbid"` now rejects (verified). Since the aggregator's whole reason for joining runs
+to their sibling snapshot is to keep those two runs readable, it must parse the snapshot as
+plain YAML and read the keys it needs, not round-trip it through `Config.load`.
+
+**M1's and M1.2's recorded numbers stand** — those runs are finished and their `metrics.json`
+files are untouched. But be explicit about what does *not* follow: the augmentation stream
+changed at **every** worker count, `0` included, since it no longer comes from the ambient
+RNG at all. Re-running `experiments/pix2pix_baseline.yaml` today would not reproduce M1's
+0.7851 exactly. That is the same "must land before the campaign starts" caveat as step 2, and
+it is why E3's six seeds are run fresh rather than reusing M1's two runs as a control.
+
 ### Step 3 — the two E3 configs
 
 - [ ] `experiments/e3_pix2pix_control.yaml` / `e3_pix2pix_loop.yaml`, differing in
       `coupling.task_weights` and `runtime.name` only, both pointing
-      `detector.reference.weights` at step 1's judge
+      `detector.reference.weights` at step 1's judge and both at `runtime.workers: 16`
 - [ ] A test mirroring `test_baseline_and_loop_configs_differ_only_by_design` for the E3
       pair. That test **is** the ablation's integrity check — it is what stops a stray
       hyperparameter edit turning the comparison into a confound

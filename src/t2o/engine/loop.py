@@ -218,7 +218,7 @@ def run_loop(
                 epochs=config.detector.evaluation.epochs,
                 imgsz=config.detector.evaluation.imgsz,
                 batch=config.detector.evaluation.batch,
-                workers=config.train.workers,
+                workers=config.runtime.workers,
                 seed=config.train.seed,
                 device=config.runtime.device,
                 tracker=tracker,

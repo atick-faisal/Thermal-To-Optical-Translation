@@ -78,7 +78,7 @@ def test_loop_config_runs_end_to_end_on_the_synthetic_fixture(
         LOOP_CONFIG_PATH,
         overrides={
             "data": {"manifest": str(data_yaml)},
-            "train": {"epochs_per_stage": 1, "batch_size": 2, "workers": 0},
+            "train": {"epochs_per_stage": 1, "batch_size": 2},
             "translator": {"net_g": "resnet_6blocks"},  # smaller, faster on CPU
             "loss": {"gan": 0.0, "lpips": 0.0},  # skip building D/LPIPS -- shape check only
             "detector": {

@@ -128,7 +128,7 @@ def export_translated(
             normalize=config.export.normalize,
             device=device,
             batch_size=config.detector.evaluation.batch,
-            workers=config.train.workers,
+            workers=config.runtime.workers,
         )
 
     return write_data_yaml(out_root, manifest)

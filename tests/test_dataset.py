@@ -93,9 +93,10 @@ def test_hflip_flips_image_and_bboxes_consistently(dataset_root: Path) -> None:
     plain = TranslationPairDataset(_images(dataset_root))
     flipped = TranslationPairDataset(_images(dataset_root), hflip=1.0)
 
-    torch.manual_seed(0)
+    # No `torch.manual_seed` bracketing needed since M1.2: augmentation draws from a
+    # per-sample generator keyed on (augment_seed, epoch, index), so `hflip=1.0` flips
+    # sample 1 regardless of ambient RNG state.
     original = plain[1]
-    torch.manual_seed(0)
     augmented = flipped[1]
 
     assert torch.equal(augmented.visible, torch.flip(original.visible, dims=(2,)))
@@ -109,6 +110,44 @@ def test_hflip_probability_zero_is_identity(dataset_root: Path) -> None:
     plain = TranslationPairDataset(_images(dataset_root))
     never = TranslationPairDataset(_images(dataset_root), hflip=0.0)
     assert torch.equal(plain[2].visible, never[2].visible)
+
+
+def test_augmentation_ignores_the_ambient_global_rng(dataset_root: Path) -> None:
+    """M1.2: the flip/crop stream is a pure function of (augment_seed, epoch, index).
+
+    This is what decouples a training run from `runtime.workers` -- a worker only ever sees
+    a strided subset of the epoch, so anything drawn from an ambient or call-ordered stream
+    necessarily varies with the worker count.
+    """
+    dataset = TranslationPairDataset(_images(dataset_root), hflip=0.5, crop=(64, 96))
+
+    torch.manual_seed(0)
+    first = [dataset[i] for i in range(len(dataset))]
+    torch.manual_seed(99)
+    # Reversed order as well as a different ambient seed: call order must not matter either.
+    second = {i: dataset[i] for i in reversed(range(len(dataset)))}
+
+    for i, sample in enumerate(first):
+        assert torch.equal(sample.visible, second[i].visible)
+        assert torch.equal(sample.bboxes, second[i].bboxes)
+
+
+def test_set_epoch_advances_the_augmentation_stream(dataset_root: Path) -> None:
+    """Otherwise every epoch would replay epoch 0's flips and crops."""
+    dataset = TranslationPairDataset(_images(dataset_root), hflip=0.5, crop=(64, 96))
+
+    epoch0 = [dataset[i].visible for i in range(len(dataset))]
+    dataset.set_epoch(1)
+    epoch1 = [dataset[i].visible for i in range(len(dataset))]
+
+    assert any(not torch.equal(a, b) for a, b in zip(epoch0, epoch1, strict=True))
+
+
+def test_a_different_augment_seed_gives_a_different_stream(dataset_root: Path) -> None:
+    a = TranslationPairDataset(_images(dataset_root), hflip=0.5, crop=(64, 96), augment_seed=0)
+    b = TranslationPairDataset(_images(dataset_root), hflip=0.5, crop=(64, 96), augment_seed=1)
+
+    assert any(not torch.equal(a[i].visible, b[i].visible) for i in range(len(a)))
 
 
 def test_crop_resizes_images_and_renormalises_bboxes(dataset_root: Path) -> None:

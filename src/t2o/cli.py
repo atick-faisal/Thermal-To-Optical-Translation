@@ -46,7 +46,7 @@ _OVERRIDES: dict[str, tuple[str, ...]] = {
     "epochs": ("train", "epochs_per_stage"),
     "batch_size": ("train", "batch_size"),
     "lr": ("train", "lr"),
-    "workers": ("train", "workers"),
+    "workers": ("runtime", "workers"),
     "task_weights": ("coupling", "task_weights"),
     "grad_scale": ("coupling", "grad_scale"),
     "in_loop_weights": ("detector", "in_loop", "weights"),

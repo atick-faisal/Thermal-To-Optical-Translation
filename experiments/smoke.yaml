@@ -18,7 +18,6 @@ train:
   lr_gamma: 0.95
   amp: true
   amp_dtype: bfloat16
-  workers: 0
   hflip: 0.5
   crop: null
   seed: 0
@@ -67,6 +66,7 @@ export:
 
 runtime:
   device: cpu
+  workers: 0
   wandb: false
   wandb_project: thermal-to-optical
   run_dir: runs

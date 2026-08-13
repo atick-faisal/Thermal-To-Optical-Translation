@@ -4,6 +4,15 @@ Augmentation is geometric only. Photometric augmentation is deliberately unavail
 the translator is scored against the real visible frame by L2 and LPIPS
 (``config.LossConfig``), so any brightness/contrast jitter would move the target those
 losses score against and turn a supervision signal into noise.
+
+**Augmentation draws from a per-sample generator seeded by (augment_seed, epoch, index),
+never from the ambient global RNG** (M1.2). This is what makes ``runtime.workers`` a pure
+throughput knob: previously the flip/crop stream came from the global RNG at
+``workers = 0`` but from torch's per-worker derivation at ``workers > 0``, so raising the
+worker count for speed silently changed the training run and therefore the reported
+numbers. Keying on the sample *index* rather than on call order is the load-bearing part --
+a worker only ever sees a strided subset of the epoch, so anything order-dependent
+necessarily varies with the worker count.
 """
 
 from __future__ import annotations
@@ -30,6 +39,12 @@ IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".
 # Boxes surviving a crop with less than this normalised side are dropped: a sliver of a
 # box is a worse training target than no box at all.
 _MIN_BOX_SIDE = 1e-3
+
+# Mixing constants for the per-sample augmentation seed. Both are primes chosen to exceed
+# any plausible dataset length / epoch count, which is what makes (seed, epoch, index) ->
+# stream injective: a collision needs index_a - index_b to be a multiple of _INDEX_STRIDE.
+_INDEX_STRIDE = 1_000_003
+_EPOCH_STRIDE = 1_000_033
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,10 +163,13 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         num_classes: int | None = None,
         annotation_fraction: float = 1.0,
         annotation_seed: int = 0,
+        augment_seed: int = 0,
     ) -> None:
         self.pairing = pairing or Pairing()
         self.hflip = hflip
         self.crop = crop
+        self.augment_seed = augment_seed
+        self._epoch = 0
 
         self.images_dir = Path(images_dir)
         if not self.images_dir.is_dir():
@@ -204,6 +222,26 @@ class TranslationPairDataset(Dataset[TranslationSample]):
                 f"must agree."
             )
 
+    def set_epoch(self, epoch: int) -> None:
+        """Advance the augmentation stream, so epoch N does not repeat epoch N-1's flips.
+
+        Called by :class:`t2o.engine.trainer.Trainer` before each epoch. It reaches the
+        workers because a ``DataLoader`` without ``persistent_workers`` re-pickles the
+        dataset when each epoch's iterator is created -- **do not enable
+        ``persistent_workers`` without also propagating this**, or every epoch after the
+        first would silently reuse epoch 0's augmentation.
+        """
+        self._epoch = epoch
+
+    def _augment_generator(self, index: int) -> torch.Generator:
+        """A stream determined by (augment_seed, epoch, index) and nothing else.
+
+        Deliberately not the ambient global RNG: see the module docstring. This is what
+        decouples the training run from ``runtime.workers``.
+        """
+        seed = (self.augment_seed * _EPOCH_STRIDE + self._epoch) * _INDEX_STRIDE + index
+        return torch.Generator().manual_seed(seed)
+
     def __len__(self) -> int:
         return len(self.visible_paths)
 
@@ -223,9 +261,13 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         else:
             cls, bboxes = torch.zeros(0, 1), torch.zeros(0, 4)
 
+        # One generator for both draws, built once so crop and flip share one stream.
+        generator = self._augment_generator(index)
         if self.crop is not None:
-            visible, infrared, cls, bboxes = self._apply_crop(visible, infrared, cls, bboxes)
-        if self.hflip > 0 and torch.rand(()).item() < self.hflip:
+            visible, infrared, cls, bboxes = self._apply_crop(
+                visible, infrared, cls, bboxes, generator
+            )
+        if self.hflip > 0 and torch.rand((), generator=generator).item() < self.hflip:
             visible = torch.flip(visible, dims=(2,))
             infrared = torch.flip(infrared, dims=(2,))
             bboxes = _flip_bboxes(bboxes)
@@ -239,14 +281,19 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         )
 
     def _apply_crop(
-        self, visible: Tensor, infrared: Tensor, cls: Tensor, bboxes: Tensor
+        self,
+        visible: Tensor,
+        infrared: Tensor,
+        cls: Tensor,
+        bboxes: Tensor,
+        generator: torch.Generator,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         assert self.crop is not None
         source_h, source_w = visible.shape[1], visible.shape[2]
         crop_h, crop_w = min(self.crop[0], source_h), min(self.crop[1], source_w)
 
-        top = int(torch.randint(0, source_h - crop_h + 1, ()).item())
-        left = int(torch.randint(0, source_w - crop_w + 1, ()).item())
+        top = int(torch.randint(0, source_h - crop_h + 1, (), generator=generator).item())
+        left = int(torch.randint(0, source_w - crop_w + 1, (), generator=generator).item())
 
         bboxes, keep = _crop_bboxes(bboxes, (source_h, source_w), (top, left, crop_h, crop_w))
         cls = cls[keep] if keep.numel() else cls

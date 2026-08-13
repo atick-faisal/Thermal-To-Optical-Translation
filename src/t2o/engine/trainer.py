@@ -128,6 +128,9 @@ class Trainer:
             num_classes=manifest.nc,
             annotation_fraction=config.data.annotation_fraction,
             annotation_seed=config.data.annotation_seed,
+            # Augmentation runs off its own (seed, epoch, index) stream rather than the
+            # ambient RNG, which is what keeps `runtime.workers` a pure throughput knob.
+            augment_seed=config.train.seed,
         )
         # No augmentation on val -- matches Clean-SeAFusion. Val loss never touches
         # cls/bboxes, so annotation_fraction is irrelevant here and left at its default.
@@ -145,13 +148,13 @@ class Trainer:
             self.train_dataset,
             batch_size=config.train.batch_size,
             shuffle=True,
-            num_workers=config.train.workers,
+            num_workers=config.runtime.workers,
             collate_fn=collate_translation_batch,
             generator=self._train_generator,
-            # torch seeds each worker's torch RNG from `generator` on its own, but leaves
-            # `random`/numpy unseeded there; `__getitem__`'s hflip/crop are torch draws
-            # today, so this is what keeps the augmentation stream auditable if that ever
-            # stops being true (M1.2 step 2: E3's runs must differ only by seed).
+            # Augmentation no longer depends on this (it has its own per-sample stream), so
+            # this is the backstop for everything else a worker might draw: torch seeds each
+            # worker's torch RNG from `generator` itself, but leaves `random` and numpy
+            # unseeded there (M1.2 step 2: E3's runs must differ only by seed).
             worker_init_fn=seed_worker,
             pin_memory=self.device.type == "cuda",
         )
@@ -161,7 +164,7 @@ class Trainer:
             self.val_dataset,
             batch_size=config.train.batch_size,
             shuffle=False,
-            num_workers=config.train.workers,
+            num_workers=config.runtime.workers,
             collate_fn=collate_translation_batch,
             pin_memory=self.device.type == "cuda",
         )
@@ -173,6 +176,10 @@ class Trainer:
         history: list[EpochStats] = []
         for epoch in range(self.start_epoch, self.config.train.epochs_per_stage):
             self._train_generator.manual_seed(self.config.train.seed + epoch)
+            # Advances the augmentation stream so epoch N does not repeat epoch N-1's
+            # flips; reaches the workers because each epoch's iterator re-pickles the
+            # dataset (see `TranslationPairDataset.set_epoch` on persistent_workers).
+            self.train_dataset.set_epoch(epoch)
             train_losses = self._train_epoch()
             val_loss = self._validate()
             history.append(EpochStats(epoch=epoch, train_losses=train_losses, val_loss=val_loss))

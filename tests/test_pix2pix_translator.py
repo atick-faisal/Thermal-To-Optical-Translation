@@ -171,7 +171,8 @@ def test_full_loop_runs_end_to_end_with_pix2pix(data_yaml: Path, tmp_path: Path)
     config = Config.load(
         overrides={
             "data": {"manifest": str(data_yaml)},
-            "train": {"batch_size": 2, "workers": 0, "epochs_per_stage": 1},
+            "train": {"batch_size": 2, "epochs_per_stage": 1},
+            "runtime": {"workers": 0},
             "translator": {"backbone": "pix2pix", "net_g": "resnet_6blocks"},
             "loss": {"gan": 0.0, "lpips": 0.0},
             "coupling": {"task_weights": [0.0]},

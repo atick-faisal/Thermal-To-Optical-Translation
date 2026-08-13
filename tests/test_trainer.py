@@ -19,13 +19,16 @@ from t2o.config import Config
 from t2o.data.dataset import TranslationBatch
 from t2o.data.manifest import DatasetManifest
 from t2o.engine.trainer import BEST_CHECKPOINT, LAST_CHECKPOINT, Trainer, resolve_device
-from t2o.seeding import seed_worker
+from t2o.seeding import seed_everything, seed_worker
 from t2o.translators import StubTranslator
 
 
-def _config(**train: object) -> Config:
+def _config(workers: int = 0, **train: object) -> Config:
     return Config.load(
-        overrides={"train": {"batch_size": 2, "workers": 0, "epochs_per_stage": 2, **train}}
+        overrides={
+            "train": {"batch_size": 2, "epochs_per_stage": 2, **train},
+            "runtime": {"workers": workers},
+        }
     )
 
 
@@ -103,7 +106,8 @@ def test_resume_warns_on_config_drift(
 
     drifted_config = Config.load(
         overrides={
-            "train": {"batch_size": 2, "workers": 0, "epochs_per_stage": 2},
+            "train": {"batch_size": 2, "epochs_per_stage": 2},
+            "runtime": {"workers": 0},
             "loss": {"gan": 1.0},
         }
     )
@@ -231,3 +235,32 @@ def test_only_the_train_loader_seeds_its_workers(data_yaml: Path, tmp_path: Path
 
     assert trainer.train_loader.worker_init_fn is seed_worker
     assert trainer.val_loader.worker_init_fn is None
+
+
+def test_training_is_bit_identical_at_any_worker_count(data_yaml: Path, tmp_path: Path) -> None:
+    """M1.2: `runtime.workers` is a throughput knob and nothing else.
+
+    Before augmentation got its own per-sample stream, the flip/crop draws came from the
+    main-process global RNG at `workers = 0` but from torch's per-worker derivation above
+    it -- so raising the worker count for speed silently changed the run, while sitting
+    outside `config_hash()` would have made that invisible. This is the test that lets
+    `workers` live in `RuntimeConfig`.
+    """
+    manifest = DatasetManifest.load(data_yaml)
+
+    # `build_translator` is what seeds init in production; these are constructed directly,
+    # so seed by hand or the two start from different weights and prove nothing.
+    seed_everything(0)
+    serial = Trainer(
+        _config(workers=0), manifest, StubTranslator(hidden_channels=4), tmp_path / "s"
+    )
+    serial.train()
+
+    seed_everything(0)
+    parallel = Trainer(
+        _config(workers=2), manifest, StubTranslator(hidden_channels=4), tmp_path / "p"
+    )
+    parallel.train()
+
+    for key, value in serial.translator.state_dict().items():
+        assert torch.equal(value, parallel.translator.state_dict()[key])

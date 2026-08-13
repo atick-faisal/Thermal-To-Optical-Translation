@@ -85,9 +85,6 @@ class TrainConfig(ConfigBase):
     # silent NaNs, which is why amp_dtype defaults to bfloat16.
     amp: bool = True
     amp_dtype: AmpDtype = AmpDtype.BFLOAT16
-    # (int) dataloader workers. Windows uses spawn, not fork -- raise this only after the
-    # loader is confirmed not to hang (PLAN.md §3, TASKS M0.10). 0 is the safe start.
-    workers: int = 4
     # (float) probability of a horizontal flip. Geometric augmentation only: photometric
     # jitter would move the visible target the reconstruction loss scores against.
     hflip: float = 0.5
@@ -346,6 +343,12 @@ class RuntimeConfig(ConfigBase):
     # (str|null) null auto-selects. "cpu", "cuda:0". No DDP: NCCL does not exist on
     # native Windows, so the second A100 is throughput, not scale (PLAN.md §3).
     device: str | None = None
+    # (int) dataloader workers. Held at 0 until proven, since Windows spawns rather than
+    # forks (PLAN.md §3); up to 16 now confirmed clean on the server. Belongs here, not in
+    # TrainConfig, only because augmentation draws from a per-sample generator keyed on
+    # (seed, epoch, index) -- see data/dataset.py. Change that and this silently becomes
+    # experiment identity again while sitting outside config_hash.
+    workers: int = 4
     # (bool) self-hosted W&B logging. The base URL and API key come from the server
     # environment; a key in this file would be committed to a public remote.
     wandb: bool = False

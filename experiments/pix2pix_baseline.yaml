@@ -32,9 +32,6 @@ train:
   lr_gamma: 0.95
   amp: true
   amp_dtype: bfloat16
-  # Safe starting point (PLAN.md §3, TASKS M0.10) -- raise via --workers once a higher value
-  # is confirmed stable on the server.
-  workers: 0
   hflip: 0.5
   crop: null
   seed: 0
@@ -101,6 +98,9 @@ runtime:
   # null auto-selects; pass --device cuda:0 explicitly if there's ever more than one GPU
   # visible (PLAN.md §3 -- no DDP, one experiment per GPU via CUDA_VISIBLE_DEVICES).
   device: null
+  # Result-neutral since M1.2 (augmentation has its own per-sample stream), so this is
+  # pure throughput and sits outside config_hash. Kept at the value M1 actually ran.
+  workers: 0
   # Off by default, same as smoke.yaml -- there's no --no-wandb flag (cli.py's --wandb can
   # only turn it on), so leaving it off here and opting in per-invocation with --wandb is
   # the reversible choice.
