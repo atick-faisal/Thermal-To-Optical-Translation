@@ -1585,14 +1585,74 @@ audit of which RNGs the training path touches. `torch.cuda.manual_seed_all`, `nu
 and Python's global `random` are never seeded, and the train DataLoader has no
 `worker_init_fn` (masked for now by `workers: 0`).
 
-- [ ] `t2o/seeding.py::seed_everything(seed)` — torch, CUDA, numpy, `random` — called from
+- [x] `t2o/seeding.py::seed_everything(seed)` — torch, CUDA, numpy, `random` — called from
       `translators/__init__.py` (replacing the bare `torch.manual_seed`) and from `run_loop`
-- [ ] `worker_init_fn` on the train DataLoader
+- [x] `worker_init_fn` on the train DataLoader
 
 **Deliberately not** setting `torch.use_deterministic_algorithms(True)`: cuDNN
 non-determinism is precisely the variance E3 exists to quantify across seeds, so forcing it
 away would hide the measurement and cost throughput. Both arms keep `workers: 0`, matching
 M1.
+
+**Decision — `run_loop` reseeds once *per stage* from `train.seed + stage`, not once per
+run.** This is the only non-obvious choice in the step, and a single top-of-run seed is
+actively wrong rather than merely coarser:
+
+- It would **break** `test_resume_skips_completed_stages_and_restores_warm_started_weights`.
+  An unbroken run enters stage 1 carrying stage 0's leftover RNG state; a resumed process
+  re-seeds and enters stage 1 freshly seeded. Final weights diverge.
+- Per-stage seeding makes that test pass *structurally* rather than by the accident it
+  relied on before — both paths happening to draw the same number of samples in one
+  process.
+- It severs a real dependency the E3 campaign would otherwise carry: stage *N*'s
+  augmentation stream currently depends on how many RNG draws stage *N−1*'s export and
+  ultralytics' detector fine-tune happened to make. E3 runs four stages with a detector
+  fine-tune between each, and its whole claim is that paired runs differ only by seed.
+- It is the convention already in the file next door: `Trainer.train()` reseeds
+  `_train_generator` from `seed + epoch` once per epoch for exactly this reason
+  (`engine/trainer.py`, "required for resume to reproduce training exactly").
+
+`tests/test_loop.py::test_a_run_is_unaffected_by_the_ambient_rng_state_it_inherits` is the
+direct test — it consumes differing amounts of ambient RNG before each of two otherwise
+identical runs and demands identical `metrics.json` and identical final weights. Confirmed
+to **fail** with the per-stage reseed removed, so it has teeth rather than passing
+vacuously.
+
+**Decision — `worker_init_fn` on the train loader only.** Val (`engine/trainer.py`) and the
+export loader (`engine/export.py`) neither shuffle nor augment, so no worker of theirs draws
+a random number; giving them one would imply a stream that does not exist. Also note the
+division of labour that makes this correct: torch already seeds each *worker's torch RNG*
+from the loader's `generator`, so today's hflip/crop draws (which are `torch.rand`/
+`torch.randint`) were already covered at `workers > 0`. `seed_worker` covers `random` and
+numpy, which were not — and is what keeps the augmentation stream auditable if a future
+augmentation reaches for either.
+
+**`seed_worker` must stay a module-level function** — asserted directly by
+`tests/test_seeding.py::test_seed_worker_is_picklable`. The training machine is native
+Windows and spawns rather than forks (PLAN.md §3), so `worker_init_fn` is pickled to reach
+the worker; a lambda or a closure over `Trainer` would fail there and nowhere else, which is
+precisely the silent-hang class of bug §3 warns about.
+
+**Verified, not assumed: `torch.manual_seed` already forwards to `torch.cuda.manual_seed_all`**
+(`torch/random.py::_manual_seed_impl`, installed torch 2.12.1). `seed_everything` calls it
+explicitly anyway so the set of covered RNGs reads off the function itself rather than off
+torch's source — the cost is one line and the failure it guards against (a future torch
+dropping the forwarding, silently unseeding CUDA on the only machine that has one) is
+invisible from the dev Mac.
+
+**Note, not changed:** `TrainConfig.workers` defaults to `4` while its own inline comment
+says "0 is the safe start". Both E3 arms set `workers: 0` explicitly, as does every
+`experiments/*.yaml` (M0.8), so this is a latent trap for a config that omits the field
+rather than a live bug. Changing the default would shift `config_hash()` for any such
+config, so it is left for a deliberate decision rather than folded in here.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(274 passed, 6 new), `pytest -m slow` (19 passed, unchanged — `test_resume_continues_through_a_completed_detector_stage`
+is the one test that exercises per-stage seeding across a real ultralytics fine-tune).
+
+**No server run needed for this step.** But it *changes the RNG streams*, so it must land
+before the E3 campaign starts — a run made now is not comparable to one made after. Steps 3
+and 4 still stand between here and the campaign.
 
 ### Step 3 — the two E3 configs
 

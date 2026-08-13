@@ -51,6 +51,20 @@ constructed (random init, or seeded via ``translators.build_translator``), so if
 about to run has no checkpoint of its own yet, its weights are restored from the last
 *completed* stage's checkpoint before training starts -- otherwise a resumed run would
 silently train the next stage from scratch atop a translator that only looks warm-started.
+
+**Every stage reseeds from ``train.seed + stage``** (M1.2 step 2), rather than the run
+seeding once at the top. Two reasons, both about making a property structural that was
+previously incidental:
+
+* Stage *N* would otherwise inherit whatever RNG state stage *N-1* left behind -- which
+  depends on how many draws its training, its export, and ultralytics' detector fine-tune
+  each happened to make. E3 runs four stages with a detector fine-tune between each, and
+  its entire claim is that paired runs differ only by seed.
+* It is what makes resume reproduce state *by construction*. A single top-of-run seed would
+  break it outright: an unbroken run enters stage 1 with stage 0's leftover RNG state,
+  where a resumed process would enter it freshly seeded. Seeding once per stage is the
+  same convention ``Trainer.train()`` already applies once per epoch to its shuffle
+  generator, for the same stated reason.
 """
 
 from __future__ import annotations
@@ -72,6 +86,7 @@ from t2o.engine.export import export_translated
 from t2o.engine.trainer import LAST_CHECKPOINT, EpochStats, Trainer
 from t2o.metrics.fidelity import FidelityMetrics, evaluate_fidelity
 from t2o.metrics.task import TaskMetrics, evaluate_detector
+from t2o.seeding import seed_everything
 from t2o.tracking import RunTracker
 
 logger = logging.getLogger(__name__)
@@ -139,6 +154,10 @@ def run_loop(
             translator.load_state_dict(state["translator"])
 
     for stage in range(start_stage, len(config.coupling.task_weights)):
+        # Per stage, not per run -- see the module docstring. This is what makes a stage's
+        # RNG stream independent of everything that ran before it, including a resumed
+        # process having skipped those stages entirely.
+        seed_everything(config.train.seed + stage)
         stage_dir = run_dir / f"stage{stage}"
         task_weight = weight_for_stage(config.coupling, stage)
         task_loss = build_detection_loss(

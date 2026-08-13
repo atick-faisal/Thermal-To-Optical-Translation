@@ -184,6 +184,31 @@ def test_running_the_same_config_and_seed_twice_yields_identical_metrics(
         assert torch.equal(value, translator_b.state_dict()[key])
 
 
+def test_a_run_is_unaffected_by_the_ambient_rng_state_it_inherits(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """M1.2 step 2: each stage reseeds from `train.seed + stage`, so a stage's RNG stream
+    does not depend on how many draws anything before it happened to make. Without that,
+    the two runs below diverge -- and on a real 4-stage run the "anything before it" is
+    ultralytics' detector fine-tune, whose draw count is entirely outside our control.
+    """
+    config = _config(data_yaml, detector_weights)
+
+    translator_a = build_translator(config)
+    torch.rand(17)  # an arbitrary amount of ambient RNG consumed before the run starts
+    run_loop(config, translator_a, run_dir=tmp_path / "a", train_detector_stages=False)
+
+    translator_b = build_translator(config)
+    torch.rand(3)  # ...and a different amount before the second
+    run_loop(config, translator_b, run_dir=tmp_path / "b", train_detector_stages=False)
+
+    assert json.loads((tmp_path / "a" / "metrics.json").read_text()) == json.loads(
+        (tmp_path / "b" / "metrics.json").read_text()
+    )
+    for key, value in translator_a.state_dict().items():
+        assert torch.equal(value, translator_b.state_dict()[key])
+
+
 def test_reference_weights_default_to_the_evaluation_bootstrap(
     data_yaml: Path, detector_weights: Path
 ) -> None:

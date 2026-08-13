@@ -19,6 +19,7 @@ from t2o.config import Config
 from t2o.data.dataset import TranslationBatch
 from t2o.data.manifest import DatasetManifest
 from t2o.engine.trainer import BEST_CHECKPOINT, LAST_CHECKPOINT, Trainer, resolve_device
+from t2o.seeding import seed_worker
 from t2o.translators import StubTranslator
 
 
@@ -217,3 +218,16 @@ def test_shuffle_is_deterministic_for_a_given_epoch_seed(data_yaml: Path, tmp_pa
     second_names = next(iter(trainer.train_loader))["names"]
 
     assert first_names == second_names
+
+
+def test_only_the_train_loader_seeds_its_workers(data_yaml: Path, tmp_path: Path) -> None:
+    """M1.2 step 2. Val neither shuffles nor augments, so no worker of its own draws a
+    random number -- giving it a `worker_init_fn` would imply a stream that does not exist.
+    Asserted rather than actually spawning workers: the mechanism under test is the wiring,
+    and `workers > 0` is slow here and spawn-risky on macOS.
+    """
+    manifest = DatasetManifest.load(data_yaml)
+    trainer = Trainer(_config(), manifest, StubTranslator(hidden_channels=4), tmp_path / "run")
+
+    assert trainer.train_loader.worker_init_fn is seed_worker
+    assert trainer.val_loader.worker_init_fn is None

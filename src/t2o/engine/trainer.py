@@ -52,6 +52,7 @@ from torch.utils.data import DataLoader
 from t2o.config import Config
 from t2o.data.dataset import TranslationBatch, TranslationPairDataset, collate_translation_batch
 from t2o.data.manifest import DatasetManifest
+from t2o.seeding import seed_worker
 from t2o.tracking import RunTracker
 from t2o.translators.protocol import Translator
 
@@ -147,8 +148,15 @@ class Trainer:
             num_workers=config.train.workers,
             collate_fn=collate_translation_batch,
             generator=self._train_generator,
+            # torch seeds each worker's torch RNG from `generator` on its own, but leaves
+            # `random`/numpy unseeded there; `__getitem__`'s hflip/crop are torch draws
+            # today, so this is what keeps the augmentation stream auditable if that ever
+            # stops being true (M1.2 step 2: E3's runs must differ only by seed).
+            worker_init_fn=seed_worker,
             pin_memory=self.device.type == "cuda",
         )
+        # No `worker_init_fn` on val, and none on `engine/export.py`'s loader either:
+        # neither shuffles nor augments, so no worker there consumes a random number.
         self.val_loader = DataLoader(
             self.val_dataset,
             batch_size=config.train.batch_size,
