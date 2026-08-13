@@ -1493,8 +1493,8 @@ Falling back to 3 seeds is allowed but then the writeup says "consistent across 
 - [x] **Server:** train the judge on the **visible train split only**, validating on visible
       val — `yolo11s`, seed 1, 100 epochs: **P 0.8931 R 0.9030 mAP50 0.9364 mAP50-95 0.6822**
       on the 153-image / 423-instance val split
-- [ ] **Server:** re-score everything M1 already produced under the new judge — validation
-      passes only, minutes, no retraining
+- [x] **Server:** re-score everything M1 already produced under the new judge — validation
+      passes only, minutes, no retraining. Results and gate decision below
 
 ```
 uv run t2o train-detector --data <real paired data.yaml> --init-weights yolo11s.pt \
@@ -1523,6 +1523,60 @@ uv run t2o evaluate --weights runs/reference-yolo11s/weights/best.pt \
   the other way and is the size expected from `yolo11s` being the larger model. M1's ceiling
   row stands.
 - **Judge-to-judge agreement** is itself a reportable number.
+
+### GATE DECISION: **proceed with E3** — the trend survives, the noise floor is 4.6× larger
+
+Same 153-image / 423-instance val split, same `metrics.task.evaluate_detector` path, only the
+judge differs. The old judge is `yolo11n` — the checkpoint that supplied the in-loop gradient.
+The new one is `yolo11s`, seed 1, trained on visible train and never on anything this project
+produced.
+
+| arm | old mAP50 | **new mAP50** | Δ | new mAP50-95 | Fuse | Pole | Switch | Transformer |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| raw thermal (floor) | 0.1887 | **0.1552** | −0.034 | 0.0675 | 0.0321 | 0.3949 | 0.0130 | 0.1810 |
+| baseline, λ=0, 100 ep | 0.7751 | **0.7851** | +0.010 | 0.5082 | 0.8515 | 0.9514 | 0.5279 | 0.8095 |
+| loop stage 0, λ=0, 100 ep | 0.7622 | **0.7260** | −0.036 | 0.4806 | 0.8172 | 0.9440 | 0.4128 | 0.7300 |
+| loop stage 1, λ=1, 200 ep | 0.8218 | **0.8244** | +0.003 | 0.5503 | 0.8791 | 0.9679 | 0.5336 | 0.9169 |
+| loop stage 2, λ=2, 300 ep | 0.8332 | **0.8106** | −0.023 | 0.5421 | 0.8596 | 0.9724 | 0.5127 | 0.8978 |
+| loop stage 3, λ=3, 400 ep | 0.8696 | **0.8470** | −0.023 | 0.5593 | 0.8852 | 0.9696 | 0.6175 | 0.9156 |
+| real visible (ceiling) | 0.9213 | **0.9366** | +0.015 | 0.6831 | 0.9746 | 0.9719 | 0.8507 | 0.9492 |
+
+**1. M1's gate is confirmed by a detector that supplied no gradient to anything.** Baseline
+0.7851 against the thermal floor's 0.1552 is **+0.630 mAP50**, all four classes improving.
+Nothing about the headline claim depended on the contaminated judge.
+
+**2. Self-grading was real but small — about 2 points.** The λ>0 arms lose ~0.023 on average
+when the judge changes; the λ=0 arms move −0.036 and +0.010, i.e. in both directions. So the
+in-loop checkpoint inflated the arms it had trained, but by less than run-to-run noise. This
+is a genuinely favourable result: the translator was not exploiting that specific checkpoint
+in any large way, which is consistent with M1.1's fidelity finding.
+
+**3. Monotonicity was partly an artifact.** Old: 0.7622 → 0.8218 → 0.8332 → 0.8696, strictly
+increasing. New: 0.7260 → 0.8244 → **0.8106** → 0.8470 — stage 2 dips below stage 1. The clean
+ramp does not survive an honest judge; the overall direction does. Any writeup must show the
+new column, and must not describe λ_det's effect as monotone.
+
+**4. The binding finding: the noise floor is 0.059, not 0.013.** Baseline and loop stage 0 are
+the same computation at the same seed. Under the old judge they differed by 0.0129; under the
+new one, by **0.0591**. That reframes everything measured against it:
+
+| comparison | Δ mAP50 | vs. the 0.059 noise floor |
+| --- | --- | --- |
+| stage 3 vs. the **baseline** arm (λ=0) | +0.062 | ~1× — indistinguishable from one noise draw |
+| stage 3 vs. **loop stage 0** (λ=0, epoch-matched) | +0.121 | ~2×, but confounded by 400 vs 100 epochs |
+
+Both λ=0 comparators are the same condition, and they disagree by more than the effect being
+claimed. **λ_det's benefit is of the same order as run-to-run variance and cannot be separated
+from it at n = 1.** That is not a setback — it is the exact situation E3's design anticipated,
+and it converts the six-seed budget-matched campaign from rigour into necessity.
+
+**Where the gain lives, still: Switch.** 0.4128 → 0.6175 stage 0 → stage 3, the hardest class
+and the one raw thermal fails on completely (0.0130). Pole is saturated at ~0.95 in every
+translated arm and will not separate anything.
+
+**Consequences for the rest of M1.2:** none of the design changes. `detector.reference.weights`
+in both E3 configs points at this judge. The measured 0.059 noise floor is the number the
+aggregator's stage-0 null control has to beat, and it is what the paired test is up against.
 
 ### Step 2 — make "differ only by seed" true rather than merely likely
 

@@ -459,10 +459,15 @@ detector, run on raw thermal (E1's 0.1887 floor) and on translated images. The a
 answers a different question and lands near 0.9 either way, so reading the gate off it would
 pass it for the wrong reason.
 
-**Result: the gate passed** (TASKS.md M1). pix2pix at λ_det=0 scores 0.7751 zero-shot mAP50
-against the thermal floor's 0.1887, improving all four classes; λ_det=3 reaches 0.8696, 94% of
-the real-visible ceiling. The λ_det gain is monotone but currently self-graded — see the
-caveats recorded with the decision.
+**Result: the gate passed** (TASKS.md M1), and was re-confirmed in M1.2 under an
+independently-trained judge that supplied no gradient to anything: pix2pix at λ_det=0 scores
+**0.7851** zero-shot mAP50 against the thermal floor's **0.1552**, +0.630, improving all four
+classes. λ_det=3 reaches 0.8470, 90% of the real-visible ceiling.
+
+The λ_det gain itself is **not** established. Re-scoring under the honest judge showed the
+apparent monotone ramp was partly self-grading (stage 2 now dips below stage 1), and put the
+run-to-run noise floor at 0.059 mAP50 — about the size of the effect being claimed. E3 exists
+to settle it.
 
 ### Phase 2a — One-step diffusion loop (primary)
 
