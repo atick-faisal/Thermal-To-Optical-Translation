@@ -203,9 +203,34 @@ class EvalDetectorConfig(ConfigBase):
     batch: int = 16
 
 
+class ReferenceDetectorConfig(ConfigBase):
+    """The fixed, never-trained detector that scores translations *zero-shot*.
+
+    A third role, distinct from both of the above. :class:`EvalDetectorConfig`'s detector is
+    fine-tuned on each stage's translated images before it is measured, so its mAP is an
+    in-domain, post-adaptation number -- and M0.10's E1 bracket showed that number saturates
+    near 0.9 for *any* consistent domain on this dataset, including raw thermal. It therefore
+    cannot answer M1's gate ("does translation beat raw thermal"), which is a question about
+    an **unadapted** detector: the same visible-trained weights E1 measured at < 0.05 mAP50 on
+    raw thermal, run on translated images instead. That is what this detector is for.
+    """
+
+    # (path|null) null falls back to detector.evaluation.init_weights, which is the right
+    # detector when no independently-trained one exists yet. Resolving to the same file as
+    # detector.in_loop.weights makes every lambda_det > 0 stage self-graded -- the loop warns
+    # rather than failing, because the lambda_det = 0 arm stays clean either way.
+    weights: Path | None = None
+    # (int) validation resolution. Diverging from evaluation.imgsz would compare the two arms
+    # at different scales, so keep them equal unless something specifically demands otherwise.
+    imgsz: int = 640
+    # (int) validation batch. Throughput only -- mAP is batch-invariant here, unlike export.
+    batch: int = 16
+
+
 class DetectorConfig(ConfigBase):
     in_loop: InLoopDetectorConfig = InLoopDetectorConfig()
     evaluation: EvalDetectorConfig = EvalDetectorConfig()
+    reference: ReferenceDetectorConfig = ReferenceDetectorConfig()
 
 
 class StubTranslatorConfig(ConfigBase):

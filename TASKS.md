@@ -958,9 +958,23 @@ spellings pass through, `None` matches `torch.cuda.is_available()`).
       `translate` is `netG(x)`
 - [x] Wire the detection loss where `fake_B` is already un-detached
 - [x] Smoke-test the full loop on the fixture
-- [ ] Train on the custom dataset, λ_det = 0 → baseline translation quality
-- [ ] Train with λ_det > 0 → the loop arm
-- [ ] Evaluate both through the single evaluation path
+- [x] Train on the custom dataset, λ_det = 0 → baseline translation quality. Run on the
+      server via `experiments/pix2pix_baseline.yaml`: **mAP50 0.9199**
+- [x] Train with λ_det > 0 → the loop arm. Run on the server via
+      `experiments/pix2pix_loop.yaml`, 100 epochs per stage:
+
+      | stage | task_weight | mAP50 |
+      | --- | --- | --- |
+      | 0 | 0.0 | 0.9053 |
+      | 1 | 1.0 | 0.9191 |
+      | 2 | 2.0 | 0.8984 |
+      | 3 | 3.0 | 0.9132 |
+
+- [x] Evaluate both through the single evaluation path — **the metric above is the wrong
+      one, and finding that out is what this step produced.** See "The reported mAP cannot
+      answer the gate" below. `engine/loop.py` now records a second, zero-shot arm per stage.
+- [ ] Run the zero-shot evaluation on the two completed runs (server; validation passes
+      only, no retraining — the exports already exist)
 
 **GATE:** if translated mAP does not beat raw-thermal mAP on at least one class, **stop**.
 Re-frame around the low-annotation regime before escalating to diffusion. **The bar this
@@ -1118,6 +1132,79 @@ uv run t2o loop --config experiments/pix2pix_loop.yaml --data <real data.yaml> \
 
 Report the mAP numbers back once run; the gate decision above gets recorded here at that
 point, not before.
+
+**The reported mAP cannot answer the gate — the zero-shot arm (`detector.reference`).**
+
+Both runs completed and every stage landed between 0.8984 and 0.9199. That number is
+`DetectorResult.map50`, which comes from `train_detector`: the evaluation detector
+**fine-tuned for 50 epochs on that stage's translated train images, then validated on its
+translated val**. It is an in-domain, post-adaptation number, and it cannot discriminate
+between the arms for two independent reasons:
+
+- **It is saturated.** M0.10's E1 bracket already put a same-domain-trained detector above
+  0.9 mAP50 on *raw thermal* as well. So ~0.92 on translated images says a YOLO fine-tune
+  converges on this dataset whichever domain it is shown — not that translation did
+  anything.
+- **The spread is inside the noise floor.** `pix2pix_baseline.yaml`'s single stage and
+  `pix2pix_loop.yaml`'s stage 0 are *the same computation*: same seed, same 100 epochs,
+  `task_weight=0`, and the two files differ only in `coupling.task_weights` and
+  `runtime.name` (pinned by
+  `test_pix2pix_experiments.py::test_baseline_and_loop_configs_differ_only_by_design`).
+  They returned 0.9199 and 0.9053 — a 1.5-point gap with no experimental difference behind
+  it. Every loop stage falls within that band.
+
+It also quietly defeats the research framing: fine-tuning a detector on translated images
+needs exactly the thermal-domain annotations the low-annotation story (E8) exists to avoid
+depending on.
+
+The gate's bar is the **unadapted** visible-trained detector: < 0.05 mAP50 on raw thermal
+(M0.10). The measurement that compares against it is that same unadapted detector run on
+*translated* images — which `run_loop` never computed. It does now:
+
+- **`ReferenceDetectorConfig`** (`config/schema.py`) is a third detector role beside
+  `in_loop` and `evaluation`, extending the M0.2 structural encoding of invariant 7 rather
+  than overloading either existing one. `weights: null` falls back to
+  `evaluation.init_weights` — the un-fine-tuned bootstrap, i.e. "the detector you already
+  have because you could label visible data for it", which is precisely the detector the
+  gate is about. Participates in `config_hash()`: it changes the reported number.
+- **`StageResult.zero_shot: TaskMetrics | None`** (`engine/loop.py`), filled by
+  `metrics.task.evaluate_detector` — the same single evaluation path `evaluate` and E1 use
+  (invariant 1), no new metric code. Called **before** `train_detector`, so the gate number
+  survives a detector fine-tune that OOMs or diverges, and costs one extra val pass.
+  `_stage_result_from_json` reads it with `.get`, so the two completed runs' existing
+  `metrics.json` files still `--resume` instead of dying on a `KeyError` mid-run.
+- **The adapted arm is kept, not replaced.** It is still the right number for E7 (detector
+  identity) and for "how good can a detector get on these images". `cli.py`'s summary now
+  labels both explicitly (`zero-shot mAP50 ... | fine-tuned mAP50 ...`) — reading the
+  adapted number as the gate metric is the specific mistake that wording exists to prevent.
+- **Contamination warning.** Only one optical `.pt` exists on the server, passed as both
+  `in_loop.weights` and `eval_init_weights`, so the fallback makes the zero-shot judge the
+  same checkpoint that supplied the training gradient. `_resolve_reference_weights` warns at
+  run start when that is true *and* some `task_weight > 0`. It warns rather than raising
+  because the λ_det = 0 arm never constructs the in-loop detector at all
+  (`coupling/schedule.py`), so the baseline's zero-shot number is clean regardless — and
+  that arm alone decides the gate. **An independently-trained visible detector is needed
+  before the λ_det > 0 numbers are reported anywhere.**
+
+**Server commands to close the gate** (validation only — no training, the exports at
+`runs/<name>/stage*/translated/data.yaml` already exist):
+
+```
+uv run t2o evaluate --weights <optical.pt> --data <thermal data.yaml> --device 0
+uv run t2o evaluate --weights <optical.pt> --data <real paired data.yaml> --device 0
+uv run t2o evaluate --weights <optical.pt> \
+    --data runs/pix2pix-baseline/stage0/translated/data.yaml --device 0
+uv run t2o evaluate --weights <optical.pt> \
+    --data runs/pix2pix-loop/stage<N>/translated/data.yaml --device 0   # N = 0..3
+```
+
+The first two re-establish the bracket (raw-thermal floor, real-visible ceiling) on the
+identical val split and evaluation path. Baseline zero-shot **> ~0.05** passes the gate.
+Loop stages vs. baseline is the first real signal on λ_det, with loop stage 0 as the
+epoch-matched control — subject to the contamination caveat above for stages 1–3.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(260 passed, 7 new), `pytest -m slow`.
 
 ---
 

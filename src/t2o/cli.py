@@ -50,6 +50,7 @@ _OVERRIDES: dict[str, tuple[str, ...]] = {
     "grad_scale": ("coupling", "grad_scale"),
     "in_loop_weights": ("detector", "in_loop", "weights"),
     "eval_init_weights": ("detector", "evaluation", "init_weights"),
+    "reference_weights": ("detector", "reference", "weights"),
     "detector_epochs": ("detector", "evaluation", "epochs"),
     "detector_batch": ("detector", "evaluation", "batch"),
     "normalize": ("export", "normalize"),
@@ -129,6 +130,11 @@ def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--in-loop-weights", type=Path, help="frozen in-loop detector weights")
     parser.add_argument(
         "--eval-init-weights", type=Path, help="evaluation detector bootstrap weights"
+    )
+    parser.add_argument(
+        "--reference-weights",
+        type=Path,
+        help="fixed detector scoring translations zero-shot; defaults to --eval-init-weights",
     )
     parser.add_argument("--detector-epochs", type=int, help="evaluation detector epochs per stage")
     parser.add_argument("--detector-batch", type=int)
@@ -222,12 +228,21 @@ def _run_loop(args: argparse.Namespace, config: Config) -> int:
         )
 
     for result in results:
-        detector_note = f" | mAP50 {result.detector.map50:.4f}" if result.detector else ""
+        # Both arms are labelled, never a bare "mAP50": the adapted number saturates near 0.9
+        # for any consistent domain (M0.10's E1 bracket), so reading it as the gate metric is
+        # the specific mistake this wording exists to prevent. See engine/loop.py's docstring.
+        zero_shot_note = (
+            f" | zero-shot mAP50 {result.zero_shot.map50:.4f}" if result.zero_shot else ""
+        )
+        detector_note = (
+            f" | fine-tuned mAP50 {result.detector.map50:.4f}" if result.detector else ""
+        )
         logger.info(
-            "stage %d (task_weight=%s): %d epochs%s",
+            "stage %d (task_weight=%s): %d epochs%s%s",
             result.stage,
             result.task_weight,
             len(result.epochs),
+            zero_shot_note,
             detector_note,
         )
     return 0

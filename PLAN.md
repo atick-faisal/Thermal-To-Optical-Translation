@@ -158,8 +158,12 @@ Configs must reach the server via git; results must not come back through it.
 5. **The loop is a first-class component**, switchable off cleanly — because switching it
    off *is* the central ablation.
 6. **An experiment is a config file.** Results carry their config hash.
-7. **Two detectors, never conflated.** The in-loop detector guides training and receives
-   generator gradients. The evaluation detector is trained independently and never does.
+7. **Three detector roles, never conflated.** The *in-loop* detector guides training and
+   receives generator gradients. The *evaluation* detector is fine-tuned on translated
+   exports and never receives them. The *reference* detector is never trained at all — it
+   only scores translations zero-shot, and is what §12's gate arm is measured with. Encoded
+   structurally as three sub-sections of `DetectorConfig` (`config/schema.py`), so no two
+   roles can share a weights file by accident.
 
 ---
 
@@ -444,6 +448,11 @@ already un-detached.
 **Gate: if translated mAP does not beat raw-thermal mAP on at least one class, stop and
 re-frame before escalating to diffusion.** Cheap by construction — hours, single card.
 
+Both sides of that comparison are §12's **zero-shot** arm — one unadapted visible-trained
+detector, run on raw thermal (E1's < 0.05 floor) and on translated images. The adapted arm
+answers a different question and lands near 0.9 either way, so reading the gate off it would
+pass it for the wrong reason.
+
 ### Phase 2a — One-step diffusion loop (primary)
 
 pix2pix-turbo behind the translator interface. LLVIP pretrain → custom fine-tune. Exact
@@ -507,7 +516,7 @@ E1–E10 from `RESEARCH_FINDINGS.md` §7 survive. Changes:
 | --- | --- |
 | E1 reference bracket | Unchanged. Detector on {raw thermal, real visible} × {detector trained on thermal, on visible}. The server's existing weights cover most of this. |
 | E2 backbone comparison | `{pix2pix, pix2pix-turbo, LBBDM-f4}` paired at λ_det=0; `{CUT}` unpaired. UNSB optional. |
-| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × 3 seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** |
+| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × 3 seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. |
 | **E4 coupling mechanism** | **Scope reduced.** Was `{cascaded, bilevel (TarDAL), meta-feature (MetaFusion)}`. Both comparison arms are unportable — see below. Becomes `{cascaded, bilevel-reimplemented}`, meta-feature deferred. |
 | **E5 gradient tractability** | **Reframed.** Was "which approximation makes backprop fit". Now: *exact* full-generator gradients through a one-step distilled model vs. *truncated* ReFL/K gradients through multi-step LBBDM. A cleaner and more publishable question. |
 | E6 schedule | Unchanged. Warmup vs none; joint vs alternating; λ_det sweep. |
@@ -543,7 +552,20 @@ E4 shows gradient conflict the cascaded and bilevel arms cannot resolve.
 insufficient. PSNR/SSIM reward blur; FID/KID use ImageNet backbones insensitive to
 domain-specific structure and are unreliable on small sets.
 
-**Task:** mAP@50, mAP@50:95, per-class AP.
+**Task:** mAP@50, mAP@50:95, per-class AP — reported in **two arms**, which answer different
+questions and must never be conflated:
+
+- **Zero-shot** (`detector.reference`): a fixed, visible-trained detector, never fine-tuned on
+  anything this project produced, run straight at the translated images. This is the arm the
+  Phase 1 gate and E3 are decided on, because it is the only one directly comparable to E1's
+  raw-thermal floor (< 0.05 mAP@50) and the only one that does not presuppose thermal-domain
+  annotations — the very thing E8 exists to avoid depending on.
+- **Adapted** (`detector.evaluation`): the evaluation detector fine-tuned on each stage's
+  translated export, then measured. Still the right number for E7 and for "how good can a
+  detector get on these images", but it **saturates**: M0.10's E1 bracket put a
+  same-domain-trained detector above 0.9 mAP@50 on raw thermal too, and M1's two runs landed
+  every arm in 0.8984–0.9199 — a band narrower than the noise between two runs of the *same*
+  configuration. It cannot separate methods on this dataset.
 
 **Faithfulness (C2):** false-object rate, missed-object rate, detection-consistency between
 translated and real-visible, and an adapted Hallucination Index.

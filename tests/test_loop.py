@@ -22,7 +22,7 @@ import pytest
 import torch
 
 from t2o.config import Config
-from t2o.engine.loop import run_loop
+from t2o.engine.loop import _resolve_reference_weights, run_loop
 from t2o.translators import StubTranslator, build_translator
 
 
@@ -83,11 +83,21 @@ def test_full_loop_fine_tunes_a_detector_every_stage(
         assert result.detector is not None
         assert result.detector.weights.is_file()
         assert 0.0 <= result.detector.map50 <= 1.0
+        # The gate metric (M1): the reference detector scored on the same translated export,
+        # with no fine-tuning at all. Recorded alongside the adapted number, never instead
+        # of it -- see engine/loop.py's docstring for why only this arm answers the gate.
+        assert result.zero_shot is not None
+        assert 0.0 <= result.zero_shot.map50 <= 1.0
+        assert 0.0 <= result.zero_shot.map50_95 <= 1.0
 
     metrics = json.loads((tmp_path / "run" / "metrics.json").read_text())
     assert len(metrics) == 2
     assert metrics[0]["detector"]["weights"]
     assert metrics[1]["detector"]["weights"]
+    for entry in metrics:
+        assert entry["zero_shot"] is not None
+        assert 0.0 <= entry["zero_shot"]["map50"] <= 1.0
+        assert "per_class_ap50" in entry["zero_shot"]
 
 
 def test_resume_on_a_fresh_run_dir_behaves_like_a_normal_run(
@@ -164,6 +174,80 @@ def test_running_the_same_config_and_seed_twice_yields_identical_metrics(
     assert metrics_a == metrics_b
     for key, value in translator_a.state_dict().items():
         assert torch.equal(value, translator_b.state_dict()[key])
+
+
+def test_reference_weights_default_to_the_evaluation_bootstrap(
+    data_yaml: Path, detector_weights: Path
+) -> None:
+    config = _config(data_yaml, detector_weights)
+
+    assert config.detector.reference.weights is None
+    assert _resolve_reference_weights(config) == detector_weights
+
+
+def test_an_explicit_reference_detector_wins_over_the_fallback(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    independent = tmp_path / "independent.pt"
+    config = Config.load(
+        overrides={
+            "data": {"manifest": str(data_yaml)},
+            "detector": {
+                "in_loop": {"weights": str(detector_weights)},
+                "evaluation": {"init_weights": str(detector_weights)},
+                "reference": {"weights": str(independent)},
+            },
+        }
+    )
+
+    assert _resolve_reference_weights(config) == independent
+
+
+def test_a_self_graded_reference_detector_warns_only_when_the_loop_couples(
+    data_yaml: Path, detector_weights: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The reference detector falling back onto the in-loop checkpoint is the realistic
+    configuration while only one optical detector exists, so it must not fail -- but a
+    `task_weight > 0` stage scored by the detector that trained it is not clean evidence,
+    and that has to be visible in the log rather than inferred from the config later.
+    """
+    coupled = _config(data_yaml, detector_weights, task_weights=(0.0, 1.0))
+    with caplog.at_level("WARNING"):
+        _resolve_reference_weights(coupled)
+    assert "same checkpoint as the in-loop detector" in caplog.text
+
+    caplog.clear()
+    baseline = _config(data_yaml, detector_weights, task_weights=(0.0,))
+    with caplog.at_level("WARNING"):
+        _resolve_reference_weights(baseline)
+    assert caplog.text == ""
+
+
+def test_metrics_json_written_before_the_zero_shot_arm_existed_still_resumes(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """A long server run must not die on `KeyError: 'zero_shot'` halfway through."""
+    run_dir = tmp_path / "run"
+    config = _config(data_yaml, detector_weights)
+    translator = build_translator(config)
+    run_loop(
+        _config(data_yaml, detector_weights, task_weights=(0.0,)),
+        translator,
+        run_dir=run_dir,
+        train_detector_stages=False,
+    )
+
+    legacy = json.loads((run_dir / "metrics.json").read_text())
+    for entry in legacy:
+        del entry["zero_shot"]
+    (run_dir / "metrics.json").write_text(json.dumps(legacy))
+
+    results = run_loop(
+        config, translator, run_dir=run_dir, train_detector_stages=False, resume=True
+    )
+
+    assert [r.stage for r in results] == [0, 1]
+    assert results[0].zero_shot is None
 
 
 @pytest.mark.slow

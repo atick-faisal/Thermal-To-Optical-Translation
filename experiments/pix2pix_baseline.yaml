@@ -68,6 +68,17 @@ detector:
     epochs: 50
     imgsz: 640
     batch: 16
+  reference:
+    # The gate metric's detector: never fine-tuned, run straight at the translated images.
+    # This is the arm M1's gate is decided on -- `evaluation` above measures a detector that
+    # was fine-tuned on translated data first, and that number saturates near 0.9 for any
+    # consistent domain (M0.10's E1 bracket), so it cannot answer "does translation beat raw
+    # thermal". null falls back to evaluation.init_weights, which is the right detector while
+    # only one optical checkpoint exists; the lambda_det = 0 arm never sees the in-loop
+    # detector at all, so this arm stays uncontaminated in this file regardless.
+    weights: null
+    imgsz: 640
+    batch: 16
 
 translator:
   backbone: pix2pix

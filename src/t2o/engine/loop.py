@@ -27,6 +27,18 @@ Clean-SeAFusion's table: stage 0 trains no coupling term but still bootstraps a 
 from the translation-only output). Only ``build_detection_loss``'s own weight-vs-zero check
 (M0.7) decides whether a stage's coupling term exists at all.
 
+**Every stage reports its task metric in two arms, and they answer different questions.**
+``StageResult.detector`` is the *adapted* arm: the evaluation detector fine-tuned on this
+stage's translated images, then measured. ``StageResult.zero_shot`` is the *unadapted* arm:
+a fixed reference detector (``config.detector.reference``), never trained on anything this
+project produced, run straight at the translated images. Only the second one answers M1's
+gate. The first saturates -- M0.10's E1 bracket put a same-domain-trained detector above 0.9
+mAP50 on raw thermal too, so ~0.9 on translated images says only that a YOLO fine-tune
+converges on this dataset, whichever domain it is shown. It also presupposes exactly the
+thermal-domain annotations the low-annotation framing (E8) exists to avoid needing. Both are
+recorded because the adapted arm is still the right number for E7 (detector identity); the
+gate and E3 are decided on the zero-shot arm.
+
 ``resume=True`` (M0.8's own "Tests" item, deferred here until now) picks up an interrupted
 multi-stage run: stages already recorded in ``run_dir/metrics.json`` are not re-run at all,
 and the first not-yet-recorded stage resumes its `Trainer` from a checkpoint if one exists,
@@ -58,6 +70,7 @@ from t2o.data.manifest import DatasetManifest
 from t2o.engine.detector_stage import DetectorResult, train_detector
 from t2o.engine.export import export_translated
 from t2o.engine.trainer import LAST_CHECKPOINT, EpochStats, Trainer
+from t2o.metrics.task import TaskMetrics, evaluate_detector
 from t2o.tracking import RunTracker
 
 logger = logging.getLogger(__name__)
@@ -67,12 +80,16 @@ METRICS_FILENAME = "metrics.json"
 
 @dataclass(frozen=True, slots=True)
 class StageResult:
-    """One stage's outcome: the translator epochs it ran, and its detector fine-tune."""
+    """One stage's outcome: translator epochs, zero-shot score, and its detector fine-tune."""
 
     stage: int
     task_weight: float
     epochs: list[EpochStats]
     detector: DetectorResult | None
+    # The gate metric: a fixed reference detector on this stage's translated images, with no
+    # fine-tuning of any kind. `detector` above is the adapted arm and saturates; see the
+    # module docstring for why only this one answers M1's gate.
+    zero_shot: TaskMetrics | None = None
 
 
 def run_loop(
@@ -98,6 +115,8 @@ def run_loop(
     run_dir = Path(run_dir) if run_dir is not None else config.runtime.path
     run_dir.mkdir(parents=True, exist_ok=True)
     config.snapshot(run_dir)
+
+    reference_weights = _resolve_reference_weights(config)
 
     results: list[StageResult] = _load_existing_results(run_dir) if resume else []
     start_stage = len(results)
@@ -135,6 +154,7 @@ def run_loop(
         epochs = trainer.train()
 
         detector_result: DetectorResult | None = None
+        zero_shot: TaskMetrics | None = None
         if train_detector_stages:
             data_yaml = export_translated(
                 translator,
@@ -143,6 +163,17 @@ def run_loop(
                 device=trainer.device,
                 manifest=manifest,
             )
+            # Before train_detector, deliberately: this is the gate metric, and it must
+            # survive a detector fine-tune that OOMs or diverges. It also costs one val pass.
+            zero_shot = evaluate_detector(
+                reference_weights,
+                data_yaml,
+                imgsz=config.detector.reference.imgsz,
+                batch=config.detector.reference.batch,
+                device=config.runtime.device,
+            )
+            if tracker is not None:
+                tracker.log(_zero_shot_metrics(zero_shot, f"stage{stage}/zero_shot"))
             detector_result = train_detector(
                 data_yaml=data_yaml,
                 init_weights=eval_weights,
@@ -156,13 +187,58 @@ def run_loop(
 
         results.append(
             StageResult(
-                stage=stage, task_weight=task_weight, epochs=epochs, detector=detector_result
+                stage=stage,
+                task_weight=task_weight,
+                epochs=epochs,
+                detector=detector_result,
+                zero_shot=zero_shot,
             )
         )
         _write_metrics(run_dir, results)
         logger.info("stage %d done: task_weight=%s epochs=%d", stage, task_weight, len(epochs))
 
     return results
+
+
+def _resolve_reference_weights(config: Config) -> Path:
+    """Pick the detector that scores translations zero-shot, and warn if it is compromised.
+
+    Falling back to ``detector.evaluation.init_weights`` is the honest default: it is the
+    un-fine-tuned bootstrap checkpoint, i.e. exactly "the detector you already have because
+    you could label visible data for it", which is the detector M1's gate is about.
+
+    The warning matters because that fallback frequently resolves to the same file as
+    ``detector.in_loop.weights`` -- the frozen detector whose gradient trained the translator
+    in every ``lambda_det > 0`` stage. Scoring those stages with it grades the translator
+    against the objective it was optimised for, so a gain there is not separable from reward
+    hacking. This warns rather than raising: the ``lambda_det = 0`` arm never touches the
+    in-loop detector at all, so its number stays clean regardless, and that arm alone is
+    enough to decide the gate.
+    """
+    reference = config.detector.reference.weights or config.detector.evaluation.init_weights
+    couples = any(weight > 0.0 for weight in config.coupling.task_weights)
+    if couples and Path(reference) == Path(config.detector.in_loop.weights):
+        logger.warning(
+            "zero-shot reference detector (%s) is the same checkpoint as the in-loop "
+            "detector, so every task_weight > 0 stage is graded against the objective it "
+            "was trained on. The task_weight == 0 stages remain uncontaminated. Set "
+            "detector.reference.weights to an independently trained detector before "
+            "reporting the coupled arm.",
+            reference,
+        )
+    return Path(reference)
+
+
+def _zero_shot_metrics(metrics: TaskMetrics, prefix: str) -> dict[str, float]:
+    """Flatten TaskMetrics for the tracker, per-class AP included."""
+    flat = {
+        f"{prefix}/precision": metrics.precision,
+        f"{prefix}/recall": metrics.recall,
+        f"{prefix}/mAP50": metrics.map50,
+        f"{prefix}/mAP50-95": metrics.map50_95,
+    }
+    flat.update({f"{prefix}/AP50/{name}": ap for name, ap in metrics.per_class_ap50.items()})
+    return flat
 
 
 def _write_metrics(run_dir: Path, results: list[StageResult]) -> None:
@@ -187,6 +263,9 @@ def _load_existing_results(run_dir: Path) -> list[StageResult]:
 
 def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
     detector = data["detector"]
+    # `.get`, not `[...]`: metrics.json files written before the zero-shot arm existed must
+    # still resume rather than raising KeyError halfway through a long server run.
+    zero_shot = data.get("zero_shot")
     return StageResult(
         stage=data["stage"],
         task_weight=data["task_weight"],
@@ -194,4 +273,5 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
         detector=DetectorResult(**{**detector, "weights": Path(detector["weights"])})
         if detector is not None
         else None,
+        zero_shot=TaskMetrics(**zero_shot) if zero_shot is not None else None,
     )

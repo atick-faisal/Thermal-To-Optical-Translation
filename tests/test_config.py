@@ -37,11 +37,23 @@ def test_defaults_are_the_documented_ones() -> None:
     assert config.data.annotation_fraction == pytest.approx(1.0)
 
 
-def test_the_two_detectors_are_separate_objects() -> None:
+def test_the_three_detector_roles_are_separate_objects() -> None:
     # PLAN.md invariant 7 encoded structurally: nothing can conflate them by accident.
+    # `reference` is the third role (M1's gate metric) -- never trained, never in the loop.
     config = Config.load(overrides={"detector": {"in_loop": {"weights": "frozen.pt"}}})
     assert config.detector.in_loop.weights == Path("frozen.pt")
     assert config.detector.evaluation.init_weights == Path("yolo11n.pt")
+    # Defaults to null, which engine/loop.py resolves to evaluation.init_weights. Stated as
+    # a test because that fallback is what makes the field optional in every config on disk.
+    assert config.detector.reference.weights is None
+
+
+def test_the_reference_detector_participates_in_the_config_hash() -> None:
+    # It changes the reported gate number, so it is experiment identity, not invocation
+    # detail -- the same reasoning that put MetricsConfig in the hash (M0.5).
+    baseline = Config.load().config_hash()
+    swapped = Config.load(overrides={"detector": {"reference": {"weights": "independent.pt"}}})
+    assert swapped.config_hash() != baseline
 
 
 # --------------------------------------------------------------------------- loading

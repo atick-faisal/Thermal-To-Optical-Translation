@@ -54,6 +54,18 @@ detector:
     epochs: 50
     imgsz: 640
     batch: 16
+  reference:
+    # The gate metric's detector -- see pix2pix_baseline.yaml for the full rationale. Must
+    # match that file exactly, for the same reason evaluation.init_weights must.
+    #
+    # Read stages 1-3 with care here, unlike in the baseline: null resolves to
+    # evaluation.init_weights, which on the server is the same optical checkpoint passed to
+    # in_loop.weights, so those stages are graded against the objective they were trained on
+    # (engine/loop.py warns at run start). Point this at an independently trained detector
+    # before the coupled arm's numbers are reported anywhere.
+    weights: null
+    imgsz: 640
+    batch: 16
 
 translator:
   backbone: pix2pix

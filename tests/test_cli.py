@@ -28,6 +28,8 @@ def test_overrides_from_args_maps_flags_including_a_three_level_path() -> None:
             "w.pt",
             "--eval-init-weights",
             "e.pt",
+            "--reference-weights",
+            "r.pt",
             "--detector-epochs",
             "3",
         ]
@@ -36,13 +38,14 @@ def test_overrides_from_args_maps_flags_including_a_three_level_path() -> None:
     overrides = overrides_from_args(args)
 
     assert overrides["data"] == {"manifest": "foo/data.yaml"}
-    # Two flags land under the same top-level "detector" key -- this is the merge that
-    # a 1-tuple/2-tuple-only override table (Clean-SeAFusion's own) cannot express, and the
-    # two sibling sub-dicts (in_loop/evaluation) must both survive rather than one
-    # clobbering the other.
+    # Three flags land under the same top-level "detector" key -- this is the merge that
+    # a 1-tuple/2-tuple-only override table (Clean-SeAFusion's own) cannot express, and all
+    # three sibling sub-dicts (in_loop/evaluation/reference) must survive rather than one
+    # clobbering the others.
     assert overrides["detector"] == {
         "in_loop": {"weights": "w.pt"},
         "evaluation": {"init_weights": "e.pt", "epochs": 3},
+        "reference": {"weights": "r.pt"},
     }
 
 

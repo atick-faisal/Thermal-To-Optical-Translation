@@ -44,6 +44,12 @@ detector:
     epochs: 1
     imgsz: 640
     batch: 2
+  reference:
+    # null falls back to evaluation.init_weights -- the intended shape for the real configs
+    # too, until an independently trained detector exists to point this at.
+    weights: null
+    imgsz: 640
+    batch: 2
 
 translator:
   # The CPU stand-in (M0.6) -- the only backbone that can even be imported on the Mac.
