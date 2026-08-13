@@ -1706,16 +1706,65 @@ RNG at all. Re-running `experiments/pix2pix_baseline.yaml` today would not repro
 0.7851 exactly. That is the same "must land before the campaign starts" caveat as step 2, and
 it is why E3's six seeds are run fresh rather than reusing M1's two runs as a control.
 
-### Step 3 — the two E3 configs
+### Step 3 — the two E3 configs ✅
 
-- [ ] `experiments/e3_pix2pix_control.yaml` / `e3_pix2pix_loop.yaml`, differing in
+- [x] `experiments/e3_pix2pix_control.yaml` / `e3_pix2pix_loop.yaml`, differing in
       `coupling.task_weights` and `runtime.name` only, both pointing
       `detector.reference.weights` at step 1's judge and both at `runtime.workers: 16`
-- [ ] A test mirroring `test_baseline_and_loop_configs_differ_only_by_design` for the E3
+- [x] A test mirroring `test_baseline_and_loop_configs_differ_only_by_design` for the E3
       pair. That test **is** the ablation's integrity check — it is what stops a stray
       hyperparameter edit turning the comparison into a confound
-- [ ] `RuntimeConfig.group` + `group=`/`tags=` on `wandb.init`; 12 runs are unnavigable as
+- [x] `RuntimeConfig.group` + `group=`/`tags=` on `wandb.init`; 12 runs are unnavigable as
       untagged siblings
+
+**Decision — `detector.reference.weights` is the one concrete path in these files, while
+`data.manifest`/`detector.in_loop.weights`/`detector.evaluation.init_weights` stay
+placeholders** (confirmed with the user). Those three are machine-specific and follow
+`pix2pix_baseline.yaml`'s convention: supplied per-invocation by `--data`/`--in-loop-weights`/
+`--eval-init-weights`. The reference judge is different in kind — `runs/reference-yolo11s/weights/best.pt`
+is repo-relative and is exactly where step 1's own documented `t2o train-detector --out
+runs/reference-yolo11s` command writes, so it is reproducible rather than machine-specific.
+Leaving it `null` would make a forgotten `--reference-weights` fall back silently to
+`evaluation.init_weights` — the same `yolo11n` checkpoint that supplies the loop arm's training
+gradient — producing a self-graded number that looks entirely normal and that this whole
+milestone exists to eliminate. A missing file at a concrete path fails loudly at load; `null`
+fails quietly at the level of the scientific claim. Still overridable with
+`--reference-weights`.
+`test_the_judge_is_not_the_detector_that_supplies_the_gradient` pins all three inequalities.
+
+**Decision — W&B tags are *derived* from the resolved config (`tracking.py::run_tags`), not
+authored in YAML.** The campaign launches 12 runs off two files with `--seed` and `--name`
+overridden on every one, so a YAML-authored `seed:0` tag would be wrong on ten of them and
+right on two — the worst possible failure mode for a label whose only job is filtering.
+Derived tags cannot disagree with the run they describe. Three of them, the facts a campaign
+is actually filtered on: `backbone:pix2pix`, `seed:<train.seed>`, and `lambda_det:on|off`
+(computed from whether *any* `task_weights` entry exceeds 0, so the control's four-stage
+all-zero ramp tags `off` rather than being mistaken for a coupled run with a zero first stage).
+`RuntimeConfig.group` is a plain field, set to `e3-pix2pix` in both arms and overridable with
+the new `--group` flag; it sits in `RuntimeConfig` (outside `config_hash()`) because regrouping
+runs must never change what is being measured.
+
+**Decision — `runtime` is compared field-by-field in the integrity test, not wholesale.**
+`name` is one of the two intended differences, so a wholesale `control.runtime == loop.runtime`
+is impossible and skipping the section entirely would leave `workers` and `group` unguarded —
+a campaign where one arm ran at a different worker count is exactly the drift this test exists
+to catch. The fields that must not differ are therefore named explicitly.
+
+**Both arms carry `runtime.workers: 16`,** unlike `experiments/pix2pix_*.yaml`'s documentary
+`0`. Safe since step 2b made the worker count result-neutral, and M1's runs are not comparable
+to these regardless — step 2b changed the augmentation stream at *every* worker count.
+
+**Test teeth confirmed, not assumed:** `test_control_and_loop_configs_differ_only_by_design`
+was verified to **fail** with a one-field edit (`ngf: 64` → `32`) to one arm, then reverted.
+The two configs also hash differently (`a08e1b86` vs `bcf00e33`) — they are different
+experiments, as they must be, while every non-`coupling` section is identical.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(291 passed, 13 new — 10 in `tests/test_e3_experiments.py`, 2 in `test_tracking.py`, 1 in
+`test_cli.py`), `pytest -m slow` (20 passed, 1 new — the control arm's four all-zero stages
+completing end to end on the synthetic fixture).
+
+**No server run for this step.** Step 4's aggregator stands between here and the campaign.
 
 ### Step 4 — aggregation and statistics
 
@@ -1738,13 +1787,31 @@ than changing `metrics.json`'s format — which keeps M1's two completed server 
 `--seed 1` writes straight over seed 0's `metrics.json`, `config.yaml` and every
 `stage*/translator_*.pt`.
 
+The three machine-specific paths are flags, not config (step 3's decision), so they appear on
+every launch. `detector.reference.weights` is already correct in both files and needs no flag.
+Both arms **must** be launched with identical flags — a difference in any of them is a
+confound, which is the same thing
+`test_control_and_loop_configs_differ_only_by_design` guards inside the files.
+
 ```bash
+DATA=<real paired data.yaml>
+OPTICAL=<visible-trained yolo11n.pt>
+
 for s in 0 1 2 3 4 5; do
-  uv run t2o loop --config experiments/e3_pix2pix_control.yaml --seed $s --name e3-control-s$s --device cuda:0
-  uv run t2o loop --config experiments/e3_pix2pix_loop.yaml    --seed $s --name e3-loop-s$s    --device cuda:0
+  for arm in control loop; do
+    uv run t2o loop --config experiments/e3_pix2pix_$arm.yaml \
+      --data "$DATA" --in-loop-weights "$OPTICAL" --eval-init-weights "$OPTICAL" \
+      --seed $s --name e3-$arm-s$s --wandb --device cuda:0
+  done
 done
 uv run t2o aggregate --runs 'runs/e3-*' --stage 3 --metric zero_shot.map50
 ```
+
+`--wandb` is opt-in per invocation (there is no `--no-wandb`); the group is already
+`e3-pix2pix` in both files, overridable with `--group` if a second campaign needs its own.
+With two GPUs, split the seed range across two shells via `CUDA_VISIBLE_DEVICES` rather than
+reaching for DDP (PLAN.md §3) — but keep each *pair* on one card, since the paired comparison
+is per seed.
 
 ### Step 6 — record the outcome
 

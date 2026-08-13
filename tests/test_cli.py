@@ -49,6 +49,15 @@ def test_overrides_from_args_maps_flags_including_a_three_level_path() -> None:
     }
 
 
+def test_group_flag_is_wired_through_to_runtime() -> None:
+    """Otherwise E3's campaign can only set the group by editing the tracked YAML, which is
+    the one thing a 12-run sweep of two files should not have to do per launch.
+    """
+    args = build_parser().parse_args(["loop", "--group", "e3-pix2pix"])
+
+    assert overrides_from_args(args)["runtime"] == {"group": "e3-pix2pix"}
+
+
 def test_overrides_from_args_omits_unset_flags() -> None:
     args = build_parser().parse_args(["train"])
 

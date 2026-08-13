@@ -17,6 +17,23 @@ from t2o.config import Config
 logger = logging.getLogger(__name__)
 
 
+def run_tags(config: Config) -> list[str]:
+    """The W&B tags for a run, *derived* from the resolved config rather than authored.
+
+    E3's campaign (TASKS.md M1.2 step 5) launches 12 runs off two YAML files, overriding
+    ``--seed`` and ``--name`` on every one of them. A tag written into either file would
+    therefore be wrong on most launches; deriving them here means a tag cannot disagree with
+    the run it labels. Kept to the three facts a campaign is actually filtered on -- which
+    backbone, which seed, and whether the coupling term exists at all.
+    """
+    coupled = any(weight > 0.0 for weight in config.coupling.task_weights)
+    return [
+        f"backbone:{config.translator.backbone.value}",
+        f"seed:{config.train.seed}",
+        f"lambda_det:{'on' if coupled else 'off'}",
+    ]
+
+
 class RunTracker:
     """Logs to wandb; silently does nothing if ``runtime.wandb`` is off."""
 
@@ -40,13 +57,16 @@ class RunTracker:
         self._run = wandb.init(
             project=config.runtime.wandb_project,
             name=config.runtime.name,
+            group=config.runtime.group,
+            tags=run_tags(config),
             config=config.to_dict(),
             dir=str(run_dir),
         )
         logger.info(
-            "wandb run '%s' initialised under project '%s'",
+            "wandb run '%s' initialised under project '%s' (group %s)",
             config.runtime.name,
             config.runtime.wandb_project,
+            config.runtime.group or "none",
         )
 
     def log(self, metrics: dict[str, float], step: int | None = None) -> None:

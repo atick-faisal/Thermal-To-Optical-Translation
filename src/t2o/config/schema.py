@@ -361,6 +361,11 @@ class RuntimeConfig(ConfigBase):
     # (str) this run's directory name. Reusing a name resumes into that directory, which
     # is deliberate but means a copy-pasted name silently continues someone else's run.
     name: str = "t2o"
+    # (str|null) W&B group. E3's campaign is 12 runs that only mean anything read against
+    # each other; ungrouped they are unnavigable siblings in the project list. null leaves
+    # a run ungrouped. Purely organisational, hence here rather than anywhere hashed --
+    # regrouping runs must never change what is being measured.
+    group: str | None = None
 
     @property
     def path(self) -> Path:

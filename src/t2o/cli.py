@@ -40,6 +40,7 @@ _OVERRIDES: dict[str, tuple[str, ...]] = {
     "seed": ("train", "seed"),
     "run_dir": ("runtime", "run_dir"),
     "name": ("runtime", "name"),
+    "group": ("runtime", "group"),
     "wandb": ("runtime", "wandb"),
     "data": ("data", "manifest"),
     "annotation_fraction": ("data", "annotation_fraction"),
@@ -163,6 +164,7 @@ def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--name", help="run name under run_dir")
+    parser.add_argument("--group", help="W&B group; the campaign's runs share one")
     parser.add_argument("--wandb", action="store_true", default=None)
     parser.add_argument(
         "--data",

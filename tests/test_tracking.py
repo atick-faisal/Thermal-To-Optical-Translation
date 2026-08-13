@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from t2o.config import Config
-from t2o.tracking import RunTracker
+from t2o.tracking import RunTracker, run_tags
 
 
 def _config(tmp_path: Path, **runtime: Any) -> Config:
@@ -51,6 +51,45 @@ def test_project_and_name_are_not_swapped(tmp_path: Path, monkeypatch: pytest.Mo
 
     assert captured["project"] == "t2o-experiments"
     assert captured["name"] == "loop_v1"
+
+
+def test_group_and_derived_tags_reach_wandb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E3's campaign is 12 runs off two YAML files, with `--seed`/`--name` overridden on
+    every launch -- so tags are derived from the resolved config (tracking.py::run_tags)
+    rather than authored, and cannot disagree with the run they label.
+    """
+    import wandb
+
+    captured: dict[str, Any] = {}
+
+    def fake_init(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return SimpleNamespace(log=lambda *a, **k: None, finish=lambda: None)
+
+    monkeypatch.setattr(wandb, "init", fake_init)
+    config = Config.load(
+        overrides={
+            "runtime": {"run_dir": str(tmp_path), "name": "t", "wandb": True, "group": "e3"},
+            "train": {"seed": 4},
+            "coupling": {"task_weights": [0.0, 1.0]},
+        }
+    )
+    RunTracker(config)
+
+    assert captured["group"] == "e3"
+    assert "seed:4" in captured["tags"]
+    assert "lambda_det:on" in captured["tags"]
+
+
+def test_lambda_det_tag_is_off_for_an_all_zero_ramp(tmp_path: Path) -> None:
+    """The control arm must be filterable as such -- a `[0,0,0,0]` ramp has four stages but
+    no coupling term, and tagging it `on` would mislabel exactly half of E3's runs.
+    """
+    config = Config.load(overrides={"coupling": {"task_weights": [0.0, 0.0, 0.0, 0.0]}})
+
+    assert "lambda_det:off" in run_tags(config)
 
 
 def test_run_directory_is_created_before_init(

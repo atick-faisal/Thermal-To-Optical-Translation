@@ -1,0 +1,124 @@
+# E3's control arm -- lambda_det = 0 for all four stages (TASKS.md M1.2).
+#
+# E3 is PLAN.md §11's "most important experiment in the project": is the lambda_det gain
+# causal? M1.1 left that open with three measured defects -- the arms were not budget-matched
+# (400 warm-started epochs vs 100), the judge was the same checkpoint that supplied the
+# training gradient, and n = 1. This pair of files fixes all three.
+#
+# This file is the control. `coupling.task_weights: [0,0,0,0]` runs the identical machinery as
+# the sibling experiments/e3_pix2pix_loop.yaml -- four warm-started stages, four exports, four
+# evaluation-detector fine-tunes, the same seed -- with the coupling term simply absent, since
+# build_detection_loss returns None at weight 0 (coupling/schedule.py) and no in-loop detector
+# is ever constructed. **lambda_det is the only difference in the entire computation.**
+#
+# The two files are identical except `coupling.task_weights` and `runtime.name`, pinned by
+# tests/test_e3_experiments.py::test_control_and_loop_configs_differ_only_by_design. That test
+# IS the ablation's integrity check -- it is what stops a stray hyperparameter edit turning the
+# comparison into a confound.
+#
+# Stage 0 is a free null control: both arms are lambda = 0 there, so the paired stage-0
+# difference at each seed measures run-to-run noise from inside the experiment itself, at no
+# extra GPU cost. M1.2's gate re-score put that noise floor at 0.059 mAP50 -- roughly the size
+# of the effect being claimed, which is why the campaign runs six seeds. Six is the smallest n
+# at which an exact two-sided sign-flip permutation test can reach p < 0.05 at all (2/2^6 =
+# 0.031), whatever the effect size.
+#
+# `data.manifest`/`detector.in_loop.weights`/`detector.evaluation.init_weights` are
+# placeholders, same convention as experiments/pix2pix_baseline.yaml: paths are resolved per
+# machine and never checked at load time (config/schema.py). Supply them with
+# `--data`/`--in-loop-weights`/`--eval-init-weights`. See TASKS.md M1.2 step 5 for the full
+# campaign command.
+
+data:
+  manifest: dataset/yolo_rgbt/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+
+train:
+  epochs_per_stage: 100
+  batch_size: 8
+  lr: 2.0e-4
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  hflip: 0.5
+  crop: null
+  # Overridden per run by --seed; the campaign sweeps 0..5. The value here is only the
+  # default a bare invocation would take.
+  seed: 0
+
+loss:
+  l2: 1.0
+  lpips: 5.0
+  gan: 1.0
+
+coupling:
+  # The control arm, and the whole point of this file: four stages at lambda_det = 0. Not a
+  # single [0.0] stage -- that would reintroduce M1.1's budget confound, since the loop arm
+  # trains 400 warm-started epochs across its four stages and this must match exactly.
+  task_weights: [0.0, 0.0, 0.0, 0.0]
+  grad_scale: 1.0e-2
+  reward_target: null
+
+detector:
+  in_loop:
+    # Never constructed in this file (every task_weight is 0), but must still match the loop
+    # arm's value or test_control_and_loop_configs_differ_only_by_design fails -- which is the
+    # correct behaviour, since a difference here would be a difference between the arms.
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    # M1.2 step 1's independently-trained judge -- yolo11s, seed 1, trained on the visible
+    # train split only and never on anything this project produced (mAP50 0.9364 on held-out
+    # visible val). E3's numbers are read off this detector.
+    #
+    # Written as a concrete path rather than left null, unlike every other path in this file.
+    # It is not machine-specific: it is exactly where step 1's own documented
+    # `t2o train-detector --out runs/reference-yolo11s` command writes. null would fall back
+    # to evaluation.init_weights above -- the same yolo11n checkpoint that supplies the loop
+    # arm's training gradient -- so a forgotten --reference-weights would silently produce a
+    # self-graded number that looks entirely normal. A missing file here fails loudly instead.
+    # Still overridable with --reference-weights.
+    weights: runs/reference-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: pix2pix
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  gan_mode: vanilla
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  # Result-neutral since M1.2 step 2b (augmentation draws from a per-sample generator keyed on
+  # (seed, epoch, index), never the ambient RNG), so this is pure throughput and sits outside
+  # config_hash. 16 confirmed clean on the server; M1's runs used 0 and are not comparable to
+  # these regardless -- step 2b changed the augmentation stream at every worker count.
+  workers: 16
+  wandb: false
+  wandb_project: thermal-to-optical
+  # Shared with the loop arm: the campaign's 12 runs only mean anything read against each
+  # other, so they land in one W&B group. Tags (backbone/seed/lambda_det) are derived from
+  # this config at init time rather than written here -- see tracking.py::run_tags.
+  group: e3-pix2pix
+  run_dir: runs
+  # Always overridden by --name in the campaign (`e3-control-s$s`): runs/<name> has no seed
+  # component, so a bare default would write six seeds over each other.
+  name: e3-pix2pix-control
