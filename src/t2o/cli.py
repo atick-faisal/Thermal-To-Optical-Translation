@@ -2,11 +2,12 @@
 
 Subcommands wrap the engine entry points built in M0.8: `train` (one stage of
 `engine.trainer.Trainer`), `loop` (the full `engine.loop.run_loop` alternation), `export`
-(`engine.export.export_translated`), and `evaluate` (`metrics.task.evaluate_detector`,
-standalone -- PLAN.md §1 rules out an inference service, so this only ever scores an
-existing detector checkpoint, never runs a translator). This module is the sole caller of
-``logging.basicConfig`` (PLAN.md §13); library modules only ever take
-``logging.getLogger(__name__)``.
+(`engine.export.export_translated`), `evaluate` (`metrics.task.evaluate_detector`), `fidelity`
+(`metrics.fidelity.evaluate_fidelity`), and `train-detector`
+(`engine.detector_stage.train_detector`). PLAN.md §1 rules out an inference service, so
+nothing here serves predictions; `evaluate` only ever scores an existing detector checkpoint.
+This module is the sole caller of ``logging.basicConfig`` (PLAN.md §13); library modules only
+ever take ``logging.getLogger(__name__)``.
 
 Heavy submodules (torch, ultralytics) are imported inside each subcommand function rather
 than at module level, so `t2o --version` and `t2o --help` stay fast and importable without a
@@ -122,6 +123,34 @@ def build_parser() -> argparse.ArgumentParser:
     fidelity.add_argument("--batch", type=int, default=8)
     fidelity.add_argument("--device", help="null/auto, 'cpu', or 'cuda:0'")
 
+    train_detector = subparsers.add_parser(
+        "train-detector",
+        help="train a detector on real data, e.g. E3's independent zero-shot judge",
+    )
+    train_detector.add_argument(
+        "--data", type=Path, required=True, help="data.yaml to train and validate on"
+    )
+    train_detector.add_argument(
+        "--init-weights",
+        type=Path,
+        default=Path("yolo11s.pt"),
+        help="starting checkpoint; use an architecture other than the in-loop detector's",
+    )
+    train_detector.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="directory to write into; weights land in out/weights",
+    )
+    train_detector.add_argument("--epochs", type=int, default=100)
+    train_detector.add_argument("--imgsz", type=int, default=640)
+    train_detector.add_argument("--batch", type=int, default=16)
+    train_detector.add_argument("--workers", type=int, default=0)
+    # Not defaulted to train.seed's 0: the whole point of this judge is that it shares no
+    # seed with the in-loop detector, so making the difference explicit is worth the flag.
+    train_detector.add_argument("--seed", type=int, default=1)
+    train_detector.add_argument("--device", help="null/auto, 'cpu', '0', or 'cuda:0'")
+
     return parser
 
 
@@ -188,13 +217,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         format=LOG_FORMAT,
     )
 
-    # Both take their inputs directly rather than through Config -- they only ever score
+    # These three take their inputs directly rather than through Config -- they act on
     # artifacts that already exist on disk, same spirit as Clean-SeAFusion's standalone
-    # `predict`. Neither needs an experiment definition to say what it is measuring.
+    # `predict`. None needs an experiment definition to say what it is doing, and
+    # `train-detector` in particular must not: the judge it produces has to be independent
+    # of the experiment whose translations it will later score (TASKS.md M1.2).
     if args.command == "evaluate":
         return _run_evaluate(args)
     if args.command == "fidelity":
         return _run_fidelity(args)
+    if args.command == "train-detector":
+        return _run_train_detector(args)
 
     config = config_from_args(args)
     return _COMMANDS[args.command](args, config)
@@ -338,6 +371,31 @@ def _run_fidelity(args: argparse.Namespace) -> int:
     logger.info("  LPIPS      %.4f  (LOWER better)", metrics.lpips)
     logger.info("  FID        %.4f  (LOWER better)", metrics.fid)
     logger.info("  KID        %.4f +- %.4f  (LOWER better)", metrics.kid_mean, metrics.kid_std)
+    return 0
+
+
+def _run_train_detector(args: argparse.Namespace) -> int:
+    from t2o.engine.detector_stage import train_detector
+
+    out = Path(args.out)
+    result = train_detector(
+        data_yaml=args.data,
+        init_weights=args.init_weights,
+        # ultralytics writes into project/name, so splitting --out this way makes the
+        # checkpoint land exactly where the flag says rather than one level deeper.
+        project=out.parent,
+        name=out.name,
+        epochs=args.epochs,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        workers=args.workers,
+        seed=args.seed,
+        device=args.device,
+    )
+    # The path is the deliverable: it is what gets pasted into --reference-weights, and
+    # `_resolve_weights` may have fallen back to last.pt, so it must not be guessed.
+    logger.info("detector weights: %s", result.weights)
+    logger.info("  mAP50 %.4f  mAP50-95 %.4f", result.map50, result.map50_95)
     return 0
 
 

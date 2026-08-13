@@ -296,3 +296,79 @@ def test_main_fidelity_scores_an_export_against_the_real_visible_split(
     )
 
     assert exit_code == 0
+
+
+def test_train_detector_splits_out_into_ultralytics_project_and_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--out` names the directory the weights land in, not its parent.
+
+    ultralytics writes into `project/name`, so passing `--out` straight through as `project`
+    would bury the checkpoint one level deeper than the flag promises -- and the printed path
+    is what gets pasted into `--reference-weights` (M1.2).
+    """
+    from t2o.engine.detector_stage import DetectorResult
+
+    captured: dict[str, object] = {}
+
+    def fake_train_detector(**kwargs: object) -> DetectorResult:
+        captured.update(kwargs)
+        return DetectorResult(
+            weights=tmp_path / "judge" / "weights" / "best.pt",
+            precision=0.0,
+            recall=0.0,
+            map50=0.0,
+            map50_95=0.0,
+        )
+
+    monkeypatch.setattr("t2o.engine.detector_stage.train_detector", fake_train_detector)
+
+    exit_code = main(
+        ["train-detector", "--data", "d.yaml", "--out", str(tmp_path / "judge"), "--epochs", "3"]
+    )
+
+    assert exit_code == 0
+    assert captured["project"] == tmp_path
+    assert captured["name"] == "judge"
+    assert captured["epochs"] == 3
+    # Defaults that exist to keep E3's judge independent of the in-loop detector: a
+    # different architecture, and a seed that is not train.seed's 0.
+    assert captured["seed"] == 1
+    assert Path(str(captured["init_weights"])).name == "yolo11s.pt"
+
+
+def test_train_detector_takes_no_config(tmp_path: Path) -> None:
+    """Standalone like `evaluate`/`fidelity`: an experiment config must not be able to reach
+    the judge, because the judge has to be independent of the experiment it will score."""
+    args = build_parser().parse_args(["train-detector", "--data", "d.yaml", "--out", str(tmp_path)])
+
+    assert not hasattr(args, "config")
+
+
+@pytest.mark.slow
+def test_main_train_detector_writes_a_checkpoint(
+    detector_weights: Path, data_yaml: Path, tmp_path: Path
+) -> None:
+    exit_code = main(
+        [
+            "train-detector",
+            "--data",
+            str(data_yaml),
+            "--init-weights",
+            str(detector_weights),
+            "--out",
+            str(tmp_path / "judge"),
+            "--epochs",
+            "1",
+            "--imgsz",
+            "64",
+            "--batch",
+            "2",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    assert exit_code == 0
+    weights = tmp_path / "judge" / "weights"
+    assert (weights / "best.pt").is_file() or (weights / "last.pt").is_file()

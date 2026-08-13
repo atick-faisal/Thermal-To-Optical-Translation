@@ -192,9 +192,16 @@ def run_loop(
             detector_result = train_detector(
                 data_yaml=data_yaml,
                 init_weights=eval_weights,
-                config=config,
                 project=stage_dir / "detector",
                 name=f"stage{stage}",
+                # Every setting below comes from `detector.evaluation`, never
+                # `detector.in_loop`: this call trains the adapted arm and nothing else.
+                epochs=config.detector.evaluation.epochs,
+                imgsz=config.detector.evaluation.imgsz,
+                batch=config.detector.evaluation.batch,
+                workers=config.train.workers,
+                seed=config.train.seed,
+                device=config.runtime.device,
                 tracker=tracker,
                 metric_prefix=f"stage{stage}/detector",
             )

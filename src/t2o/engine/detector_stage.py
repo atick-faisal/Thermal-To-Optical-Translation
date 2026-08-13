@@ -1,19 +1,24 @@
-"""Thin wrapper over ultralytics' own trainer, run on the exported translated images.
+"""Thin wrapper over ultralytics' own trainer.
 
 Delegating rather than reimplementing means the detector stage inherits mosaic
 augmentation, EMA, mAP validation, checkpoint selection, and ultralytics' own DDP -- all
 of which would be a large and pointless surface to rebuild here.
 
-Ported from ``../Clean-SeAFusion/src/seafusion/engine/detector_stage.py`` with two
-deliberate deviations, both driven by how ``t2o.config.Config`` differs from
-``seafusion.config.Config``:
+Ported from ``../Clean-SeAFusion/src/seafusion/engine/detector_stage.py``, which reads its
+settings straight off a ``Config``. ``train_detector`` takes them as explicit parameters
+instead, because it has two callers with genuinely different provenance (M1.2/E3):
 
-* ``config.detector`` there is flat (``epochs_per_stage``/``imgsz``/``batch``); here it is
-  split into ``in_loop``/``evaluation`` (PLAN.md invariant 7, M0.2). ``train_detector``
-  always trains the *evaluation* detector -- the in-loop one is never trained -- so field
-  access below goes through ``config.detector.evaluation``.
-* ``seed`` there lives on ``config.runtime.seed``; here it lives on ``config.train.seed``
-  (M0.2 decision: a seed is scientific and belongs in the hashed part of the config).
+* ``engine.loop`` fine-tunes the **evaluation** detector on each stage's translated export,
+  reading ``config.detector.evaluation`` / ``config.train`` at the call site. The in-loop
+  detector is never trained, so no call here ever touches ``config.detector.in_loop``.
+* ``cli train-detector`` trains a **reference** detector on real visible data from paths
+  alone, with no experiment config in sight -- the same standalone spirit as ``evaluate``
+  and ``fidelity`` (M0.8). E3 needs this to produce a zero-shot judge that is not the
+  checkpoint which supplied the in-loop gradient (PLAN.md invariant 7, TASKS.md M1.1).
+
+One implementation, two roles, no branch on which role is being trained: ultralytics'
+``model.train()`` is the same call either way, and the roles stay separated by *who calls
+it with which weights*, not by a flag inside it.
 
 ``_extract_metrics`` is imported from :mod:`t2o.metrics.task` rather than defined here
 (M0.5 step 2): it is the same P/R/mAP extraction ``evaluate_detector`` uses for standalone
@@ -30,7 +35,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from t2o.config import Config
 from t2o.metrics.task import _extract_metrics
 
 logger = logging.getLogger(__name__)
@@ -107,20 +111,27 @@ def _forward_epoch_metrics(tracker: Any, prefix: str) -> Any:
 def train_detector(
     data_yaml: Path,
     init_weights: Path,
-    config: Config,
     project: Path,
     name: str,
-    epochs: int | None = None,
+    epochs: int,
+    imgsz: int = 640,
+    batch: int = 16,
+    workers: int = 0,
+    seed: int = 0,
+    device: str | None = None,
     tracker: Any = None,
     metric_prefix: str = "detector",
 ) -> DetectorResult:
-    """Fine-tune the evaluation detector on translated images and report its validation mAP.
+    """Train a detector with ultralytics' own trainer and report its validation mAP.
 
-    ``init_weights`` warm-starts from the previous stage's ``best.pt`` so the evaluation
-    detector accumulates across stages, the same way the translator does. This never
-    touches :class:`t2o.detection.frozen.FrozenDetector` -- ultralytics' own ``model.train()``
-    has no connection to the translator's autograd graph, which is what keeps the reported
-    mAP an honest, un-gamed number (PLAN.md invariant 7).
+    From ``engine.loop`` this fine-tunes the evaluation detector on translated images, and
+    ``init_weights`` warm-starts from the previous stage's ``best.pt`` so it accumulates
+    across stages the same way the translator does. From ``cli train-detector`` the same
+    call trains a reference detector on real visible data from COCO weights.
+
+    Neither path touches :class:`t2o.detection.frozen.FrozenDetector` -- ultralytics'
+    ``model.train()`` has no connection to the translator's autograd graph, which is what
+    keeps the reported mAP an honest, un-gamed number (PLAN.md invariant 7).
     """
     from ultralytics import YOLO
 
@@ -130,12 +141,12 @@ def train_detector(
     with wandb_integration_disabled():
         results = model.train(
             data=str(data_yaml),
-            epochs=epochs if epochs is not None else config.detector.evaluation.epochs,
-            imgsz=config.detector.evaluation.imgsz,
-            batch=config.detector.evaluation.batch,
-            workers=config.train.workers,
-            seed=config.train.seed,
-            device=config.runtime.device,
+            epochs=epochs,
+            imgsz=imgsz,
+            batch=batch,
+            workers=workers,
+            seed=seed,
+            device=device,
             project=str(project),
             name=name,
             exist_ok=True,

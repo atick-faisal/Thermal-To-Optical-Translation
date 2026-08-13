@@ -1421,6 +1421,156 @@ monotonically as mAP rises, it is reward hacking and the ramp needs `reward_targ
 
 ---
 
+## M1.2 — E3: is the λ_det gain causal?
+
+M1.1 left one claim open, and it is the project's central one. Three defects block it, all
+measured rather than suspected:
+
+1. **Not budget-matched.** The loop's stage 3 is the translator after 400 warm-started
+   epochs; its λ=0 comparator ran 100. Every stage-to-stage gain is confounded with simply
+   training longer.
+2. **Self-graded.** One `yolo11n` checkpoint is both `detector.in_loop.weights` and — via
+   `reference.weights: null` — the zero-shot judge. `engine/loop.py::_resolve_reference_weights`
+   already warns about exactly this.
+3. **n = 1.** Baseline and loop stage 0 are the same computation at the same seed, yet differ
+   by 17.6 FID and 0.045 SSIM.
+
+PLAN.md §11 calls E3 "the most important experiment in the project"; §16 makes it the
+**causality** acceptance criterion. Scope here is the **pix2pix arm only** — the
+`pix2pix-turbo` cell waits on M2a and reuses every piece of tooling below.
+
+### Design
+
+| arm | `coupling.task_weights` | translator epochs | in-loop detector |
+| --- | --- | --- | --- |
+| control | `[0, 0, 0, 0]` | 400, warm-started | **never constructed** |
+| loop | `[0, 1, 2, 3]` | 400, warm-started | constructed from stage 1 |
+
+Everything else — warm-start, four exports, four evaluation-detector fine-tunes, the seed —
+is identical per pair. **The only difference in the entire computation is λ_det.** The
+control needs no new machinery: `build_detection_loss` returns `None` at weight 0
+(`coupling/schedule.py`), so an all-zero ramp is the same code path with the coupling term
+absent, four times over.
+
+**Stage 0 is a free null control.** Both arms are λ=0 there, so the paired stage-0 difference
+at each seed measures run-to-run noise *from inside the experiment itself*, at no extra GPU
+cost. If the stage-3 effect is not clearly larger than the stage-0 difference, E3 is negative
+and gets reported that way.
+
+**Six seeds, and the number is not arbitrary.** The comparison is paired (seed *i*'s control
+vs seed *i*'s loop), and the assumption-free test on paired data is an exact sign-flip
+permutation over 2ⁿ assignments. Smallest attainable two-sided p: 0.25 at n=3, 0.0625 at
+n=5, **0.031 at n=6** — n=6 is the first size where a distribution-free two-sided test can
+clear 0.05 *at all*, whatever the effect size. At ~6h per 4-stage run that is ~72 GPU-hours.
+Falling back to 3 seeds is allowed but then the writeup says "consistent across 3 seeds", not
+"significant".
+
+### Step 1 — an honest judge, and a gate before spending three days
+
+- [x] `engine/detector_stage.py::train_detector` takes explicit parameters instead of a
+      `Config`. It now has two callers with different provenance: `engine/loop.py` (evaluation
+      detector, settings from `detector.evaluation`/`train`) and `cli train-detector`
+      (reference detector, paths only). One implementation, no role flag inside it — the roles
+      stay separated by *who calls it with which weights* (invariant 1 and invariant 7 both
+      hold)
+- [x] `t2o train-detector` subcommand, standalone like `evaluate`/`fidelity` (M0.8). Defaults
+      chosen to make independence the easy path: `--init-weights yolo11s.pt` (a different
+      architecture from the in-loop `yolo11n`) and `--seed 1` (not `train.seed`'s 0)
+- [ ] **Server:** train the judge on the **visible train split only**, validating on visible
+      val
+- [ ] **Server:** re-score everything M1 already produced under the new judge — validation
+      passes only, minutes, no retraining
+
+```
+uv run t2o train-detector --data <real paired data.yaml> --init-weights yolo11s.pt \
+    --epochs 100 --seed 1 --out runs/reference-yolo11s --device cuda:0
+
+# then, with the printed weights path:
+uv run t2o evaluate --weights runs/reference-yolo11s/weights/best.pt --data <thermal data.yaml> --device 0
+uv run t2o evaluate --weights runs/reference-yolo11s/weights/best.pt --data <real paired data.yaml> --device 0
+uv run t2o evaluate --weights runs/reference-yolo11s/weights/best.pt \
+    --data runs/pix2pix-baseline/stage0/translated/data.yaml --device 0
+uv run t2o evaluate --weights runs/reference-yolo11s/weights/best.pt \
+    --data runs/pix2pix-loop/stage<N>/translated/data.yaml --device 0     # N = 0..3
+```
+
+**GATE — three things to read off that table before any campaign starts:**
+
+- **Does the λ_det ordering survive an honest judge?** If stage 3 no longer beats stage 0,
+  M1's trend was self-grading and E3's hypothesis changes before 72 GPU-hours are spent.
+- **Was the old `yolo11n` trained on val?** Its recorded provenance is "the dataset with
+  ultralytics defaults", which does not confirm a held-out split. If the old judge scores
+  *real visible* far above what the new train-split-only judge does, the old one memorised
+  val — which would inflate M1's 0.9213 "ceiling" **and** every translated arm sharing val's
+  scene layout. The new judge fixes it either way; this measures how much it mattered.
+- **Judge-to-judge agreement** is itself a reportable number.
+
+### Step 2 — make "differ only by seed" true rather than merely likely
+
+E3's whole claim is that paired runs differ only by seed; today that rests on an implicit
+audit of which RNGs the training path touches. `torch.cuda.manual_seed_all`, `numpy.random`
+and Python's global `random` are never seeded, and the train DataLoader has no
+`worker_init_fn` (masked for now by `workers: 0`).
+
+- [ ] `t2o/seeding.py::seed_everything(seed)` — torch, CUDA, numpy, `random` — called from
+      `translators/__init__.py` (replacing the bare `torch.manual_seed`) and from `run_loop`
+- [ ] `worker_init_fn` on the train DataLoader
+
+**Deliberately not** setting `torch.use_deterministic_algorithms(True)`: cuDNN
+non-determinism is precisely the variance E3 exists to quantify across seeds, so forcing it
+away would hide the measurement and cost throughput. Both arms keep `workers: 0`, matching
+M1.
+
+### Step 3 — the two E3 configs
+
+- [ ] `experiments/e3_pix2pix_control.yaml` / `e3_pix2pix_loop.yaml`, differing in
+      `coupling.task_weights` and `runtime.name` only, both pointing
+      `detector.reference.weights` at step 1's judge
+- [ ] A test mirroring `test_baseline_and_loop_configs_differ_only_by_design` for the E3
+      pair. That test **is** the ablation's integrity check — it is what stops a stray
+      hyperparameter edit turning the comparison into a confound
+- [ ] `RuntimeConfig.group` + `group=`/`tags=` on `wandb.init`; 12 runs are unnavigable as
+      untagged siblings
+
+### Step 4 — aggregation and statistics
+
+Nothing in the repo reads more than one run today. `metrics.json` records **no seed and no
+config hash**, so the aggregator joins each run to its sibling `config.yaml` snapshot rather
+than changing `metrics.json`'s format — which keeps M1's two completed server runs readable.
+
+- [ ] `t2o/analysis/aggregate.py`: tidy rows per (run, seed, arm, stage); mean ± std per
+      arm × stage; paired per-seed differences with **stage 0 reported beside stage 3**;
+      exact sign-flip permutation test (2ⁿ enumeration, n ≤ 6 → 64 cases, no scipy, no
+      distributional assumption); bootstrap CI on the mean difference
+- [ ] Refuse to test unpaired arms — a missing seed on one side raises rather than silently
+      dropping the pair
+- [ ] `t2o aggregate`, standalone (paths, no `Config`). Runs on the server; `runs/` is
+      gitignored and results must not travel back through git
+
+### Step 5 — the campaign (server)
+
+`--name` is mandatory per run. `runs/<runtime.name>` has no seed component, so a bare
+`--seed 1` writes straight over seed 0's `metrics.json`, `config.yaml` and every
+`stage*/translator_*.pt`.
+
+```bash
+for s in 0 1 2 3 4 5; do
+  uv run t2o loop --config experiments/e3_pix2pix_control.yaml --seed $s --name e3-control-s$s --device cuda:0
+  uv run t2o loop --config experiments/e3_pix2pix_loop.yaml    --seed $s --name e3-loop-s$s    --device cuda:0
+done
+uv run t2o aggregate --runs 'runs/e3-*' --stage 3 --metric zero_shot.map50
+```
+
+### Step 6 — record the outcome
+
+- [ ] Results here; PLAN.md §11's E3 row and §16's causality criterion marked satisfied or not
+
+**A negative result is a real outcome.** If the paired stage-3 difference is not
+distinguishable from the stage-0 null, that is reportable, and it redirects the paper toward
+E8's low-annotation framing (PLAN.md §16's stated fallback) rather than C1's coupling claim.
+
+---
+
 ## M2 — Phase 2: Diffusion loop
 
 Detail this section once the M1 gate passes.
