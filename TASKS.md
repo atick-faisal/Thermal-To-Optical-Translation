@@ -906,7 +906,13 @@ disk-space decision rather than default caution.
       | detector trained on \ evaluated on | thermal | visible |
       | --- | --- | --- |
       | thermal | **> 0.9 mAP50** | — |
-      | visible | **< 0.05 mAP50** | **> 0.9 mAP50** |
+      | visible | **0.1887 mAP50** | **0.9213 mAP50** |
+
+      **Both cross/in-domain numbers on the visible-trained row were corrected at M1.** This
+      row originally read "< 0.05" and "> 0.9" from an ad-hoc measurement; M1's gate
+      evaluation re-ran them through `metrics.task.evaluate_detector` on the frozen val split
+      (153 images / 423 instances) and got 0.1887 on raw thermal, 0.9213 on real visible. The
+      directional conclusions below are unchanged; the numbers to cite are these.
 
       **In-domain detection is excellent on both modalities** (> 0.9 mAP50 whichever side
       the detector is trained and run on) — thermal frames are not fundamentally
@@ -914,14 +920,16 @@ disk-space decision rather than default caution.
       even help over direct thermal detection") already has a clear directional answer: the
       signal is there, the *domain gap* is the problem, not the sensor.
 
-      **Cross-domain transfer is catastrophic** (< 0.05 mAP50, visible-trained detector run
+      **Cross-domain transfer collapses** (0.1887 mAP50, visible-trained detector run
       directly on raw thermal, untranslated) — and this is the actual number M1's gate
       ("translated mAP must beat raw-thermal mAP on at least one class, or stop") measures
       against. The realistic deployment baseline is "run the detector you can actually label
       data for (visible) on whatever raw sensor frame you have," not the thermal-trained
       detector — training a thermal-domain detector requires exactly the thermal-domain
-      annotations the low-annotation framing (E8) exists to avoid depending on. **The gate's
-      bar is very low — a good sign for M1's feasibility.**
+      annotations the low-annotation framing (E8) exists to avoid depending on. The collapse
+      is very uneven across classes (M1's table): Pole survives at 0.5551 — a pole's silhouette
+      is thermally obvious — while Switch is 0.0047 and Fuse 0.0377, i.e. gone. **The gate's
+      bar is low — a good sign for M1's feasibility**, and M1 cleared it on all four classes.
 - [x] Confirm W&B self-hosted logging works end to end. Confirmed on the server.
 
 **Found while running these checks — `--device 0` failed, `--device cuda:0` was needed as a
@@ -973,15 +981,74 @@ spellings pass through, `None` matches `torch.cuda.is_available()`).
 - [x] Evaluate both through the single evaluation path — **the metric above is the wrong
       one, and finding that out is what this step produced.** See "The reported mAP cannot
       answer the gate" below. `engine/loop.py` now records a second, zero-shot arm per stage.
-- [ ] Run the zero-shot evaluation on the two completed runs (server; validation passes
-      only, no retraining — the exports already exist)
+- [x] Run the zero-shot evaluation on the two completed runs (server; validation passes
+      only, no retraining — the exports already existed). Results in the gate section below.
 
 **GATE:** if translated mAP does not beat raw-thermal mAP on at least one class, **stop**.
-Re-frame around the low-annotation regime before escalating to diffusion. **The bar this
-measures against is now known** (M0.10's E1 bracket): < 0.05 mAP50, the visible-trained
-detector run directly on raw thermal, untranslated. Deliberately low.
+Re-frame around the low-annotation regime before escalating to diffusion.
 
-- [ ] Record the gate decision and evidence in this file before proceeding
+- [x] Record the gate decision and evidence in this file before proceeding
+
+### GATE DECISION: **PASS** — proceed to M2 (Phase 2, diffusion)
+
+Every number below is one detector — `optical_best_n_1.pt`, visible-trained, **never
+fine-tuned on anything this project produced** — run through `t2o evaluate` on the identical
+val split (153 images, 423 instances). This is §12's zero-shot arm.
+
+| arm | mAP50 | mAP50-95 | Fuse | Pole | Switch | Transformer |
+| --- | --- | --- | --- | --- | --- | --- |
+| raw thermal (floor) | 0.1887 | 0.0829 | 0.0377 | 0.5551 | 0.0047 | 0.1573 |
+| pix2pix baseline, λ_det=0 | **0.7751** | 0.5244 | 0.8582 | 0.9592 | 0.4320 | 0.8512 |
+| loop stage 0, λ_det=0 | 0.7622 | 0.5031 | 0.8199 | 0.9526 | 0.3966 | 0.8799 |
+| loop stage 1, λ_det=1 | 0.8218 | 0.5784 | 0.8874 | 0.9558 | 0.5478 | 0.8961 |
+| loop stage 2, λ_det=2 | 0.8332 | 0.5536 | 0.8729 | 0.9670 | 0.5781 | 0.9149 |
+| loop stage 3, λ_det=3 | **0.8696** | 0.5841 | 0.8942 | 0.9695 | 0.7127 | 0.9019 |
+| real visible (ceiling) | 0.9213 | 0.6530 | 0.9448 | 0.9624 | 0.8226 | 0.9554 |
+
+**The gate passes on the clean arm, by a wide margin and on all four classes.** The bar was
+"beat raw thermal on at least one class". The λ_det=0 baseline — which never constructs the
+in-loop detector at all (`coupling/schedule.py`), so it cannot be contaminated by it — scores
+0.7751 against the thermal floor's 0.1887, **+0.586 mAP50**, with every class improving and
+Fuse (0.0377 → 0.8582) and Switch (0.0047 → 0.4320) going from unusable to usable. C4's
+premise ("does translation beat direct thermal detection") is answered affirmatively without
+needing the loop at all.
+
+**Correction to M0.10's E1 bracket: the raw-thermal floor is 0.1887, not < 0.05.** That entry
+was recorded from an ad-hoc measurement; this one goes through `metrics.task.evaluate_detector`
+on the same val split as every other row, so it is the number to cite. It does not change any
+conclusion — the floor is still far below every translated arm — but the paper must not
+report < 0.05.
+
+**λ_det improves the zero-shot metric monotonically, and this is the finding that needs
+defending, not celebrating yet.** Against the epoch-matched control (loop stage 0, λ=0,
+0.7622): λ=1 → +0.060, λ=2 → +0.071, λ=3 → **+0.107**. Against the baseline arm, stage 3 is
++0.095. For scale, the noise floor between two runs of the *same* configuration (baseline vs.
+loop stage 0, identical computation) is 0.0129 on this arm — so stage 3's gain is ~8x noise
+and comfortably past PLAN.md §16's "+2–4 mAP50 over the strongest baseline" criterion. The
+gain is concentrated in **Switch**, the hardest class and the one raw thermal fails on
+completely (0.0047): 0.3966 → 0.7127. Stage 3 reaches 94% of the real-visible ceiling, up
+from 83%.
+
+**Why this is not yet reportable, and what has to happen before M2 results are trusted:** the
+λ_det > 0 stages are graded by *the same checkpoint that supplied their training gradient*
+(one optical `.pt` serves as `in_loop.weights` and, by fallback, `detector.reference.weights`
+— `engine/loop.py` warns about exactly this). A monotone gain in λ_det is precisely the shape
+reward hacking produces. Two pieces of evidence would separate them, neither of which exists
+yet:
+
+1. **An independently-trained visible detector as judge** (different seed, ideally different
+   architecture). Until then the honest claim is the gate itself, which rests entirely on the
+   uncontaminated λ_det = 0 arm.
+2. **Fidelity metrics.** `FidelityEvaluator` (M0.5) still has no caller in `engine/`, so no
+   PSNR/SSIM/LPIPS/FID exists for any run and PLAN.md §8's fidelity-floor guardrail is
+   unwired. If LPIPS/FID degrade as λ_det rises while zero-shot mAP climbs, that is reward
+   hacking; if they hold, the gain is real.
+
+**The metric change is what produced this result.** The adapted arm reported
+0.9199 / 0.9053 / 0.9191 / 0.8984 / 0.9132 — flat, and it ranked stage 3 (0.9132) *below* the
+baseline (0.9199). The zero-shot arm ranks stage 3 **+0.095 above** it. The two arms do not
+merely differ in precision; they invert the ordering. Anything measured on the adapted arm
+alone should be treated as uninformative.
 
 **Vendor + wrapper decisions:**
 
@@ -1157,9 +1224,11 @@ It also quietly defeats the research framing: fine-tuning a detector on translat
 needs exactly the thermal-domain annotations the low-annotation story (E8) exists to avoid
 depending on.
 
-The gate's bar is the **unadapted** visible-trained detector: < 0.05 mAP50 on raw thermal
-(M0.10). The measurement that compares against it is that same unadapted detector run on
-*translated* images — which `run_loop` never computed. It does now:
+The gate's bar is the **unadapted** visible-trained detector on raw thermal — 0.1887 mAP50,
+re-measured through this same path as part of the gate evaluation (M0.10's "< 0.05" was
+ad-hoc; see the correction in the gate section above). The measurement that compares against
+it is that same unadapted detector run on *translated* images — which `run_loop` never
+computed. It does now:
 
 - **`ReferenceDetectorConfig`** (`config/schema.py`) is a third detector role beside
   `in_loop` and `evaluation`, extending the M0.2 structural encoding of invariant 7 rather
@@ -1199,9 +1268,8 @@ uv run t2o evaluate --weights <optical.pt> \
 ```
 
 The first two re-establish the bracket (raw-thermal floor, real-visible ceiling) on the
-identical val split and evaluation path. Baseline zero-shot **> ~0.05** passes the gate.
-Loop stages vs. baseline is the first real signal on λ_det, with loop stage 0 as the
-epoch-matched control — subject to the contamination caveat above for stages 1–3.
+identical val split and evaluation path. **These were run; results and the gate decision are
+in the "GATE DECISION" section above.**
 
 **Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
 (260 passed, 7 new), `pytest -m slow`.

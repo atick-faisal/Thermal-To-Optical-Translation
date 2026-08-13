@@ -449,9 +449,14 @@ already un-detached.
 re-frame before escalating to diffusion.** Cheap by construction — hours, single card.
 
 Both sides of that comparison are §12's **zero-shot** arm — one unadapted visible-trained
-detector, run on raw thermal (E1's < 0.05 floor) and on translated images. The adapted arm
+detector, run on raw thermal (E1's 0.1887 floor) and on translated images. The adapted arm
 answers a different question and lands near 0.9 either way, so reading the gate off it would
 pass it for the wrong reason.
+
+**Result: the gate passed** (TASKS.md M1). pix2pix at λ_det=0 scores 0.7751 zero-shot mAP50
+against the thermal floor's 0.1887, improving all four classes; λ_det=3 reaches 0.8696, 94% of
+the real-visible ceiling. The λ_det gain is monotone but currently self-graded — see the
+caveats recorded with the decision.
 
 ### Phase 2a — One-step diffusion loop (primary)
 
@@ -558,7 +563,7 @@ questions and must never be conflated:
 - **Zero-shot** (`detector.reference`): a fixed, visible-trained detector, never fine-tuned on
   anything this project produced, run straight at the translated images. This is the arm the
   Phase 1 gate and E3 are decided on, because it is the only one directly comparable to E1's
-  raw-thermal floor (< 0.05 mAP@50) and the only one that does not presuppose thermal-domain
+  raw-thermal floor (0.1887 mAP@50) and the only one that does not presuppose thermal-domain
   annotations — the very thing E8 exists to avoid depending on.
 - **Adapted** (`detector.evaluation`): the evaluation detector fine-tuned on each stage's
   translated export, then measured. Still the right number for E7 and for "how good can a
@@ -636,7 +641,7 @@ warned on a renamed run.
 
 | Risk | Signal | Mitigation |
 | --- | --- | --- |
-| Phase 1 fails — translation never beats raw thermal | E1 vs E3 at λ_det=0 | Stop before diffusion. Re-frame around the low-annotation regime. |
+| ~~Phase 1 fails — translation never beats raw thermal~~ | E1 vs E3 at λ_det=0 | **Retired.** Measured: 0.7751 vs 0.1887 zero-shot mAP50, all four classes improved (TASKS.md M1). |
 | 850 pairs too few even for LoRA fine-tuning | Turbo overfits during Phase 2a | LLVIP pretrain is already in the plan; escalate to heavier augmentation and lower LoRA rank. |
 | Reward hacking — mAP rises, images degrade | LPIPS/FID rising with λ_det | Saturating reward, LoRA scaling, fidelity floor, early stopping, E6 sweep. |
 | Gradient conflict — training unstable | Loss oscillation, collapse | Escalate cascaded → bilevel (E4). Meta-feature only if both fail. |
