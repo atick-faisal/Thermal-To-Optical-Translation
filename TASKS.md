@@ -1894,18 +1894,131 @@ E8's low-annotation framing (PLAN.md §16's stated fallback) rather than C1's co
 
 ## M2 — Phase 2: Diffusion loop
 
-Detail this section once the M1 gate passes.
+The M1 gate passed, so M2a is detailed below. M2b stays a bullet list until M2a's backbone
+has produced numbers worth comparing against.
+
+Note the ordering against M1.2: E3's twelve-run **pix2pix** campaign is server work that
+does not touch any of this — its two configs are `backbone: pix2pix` and stay that way. M2a
+builds the arm PLAN.md §11 calls the strong one; the pix2pix campaign is the cheap control
+that runs in parallel.
 
 ### M2a — pix2pix-turbo (primary)
 
-- [ ] Vendor `src/pix2pix_turbo.py` + `src/model.py` helpers at `463b2d3`; modernise
-      against *current* diffusers rather than inheriting the 2023-era pinned stack
-- [ ] Wrapper owns device placement (upstream hardcodes `.cuda()`)
-- [ ] Data prep: thermal → `train_A`, visible → `train_B`, constant-caption
-      `train_prompts.json`. Watch the normalisation asymmetry — input [0,1], target [-1,1]
-- [ ] LLVIP pretrain → custom fine-tune
-- [ ] Exact end-to-end detection-loss backprop, LoRA-scaled, λ_det warmed from near-zero
-- [ ] Fidelity floor on LPIPS (`net_lpips` is already in the loss assembly)
+#### Step 1 — the backbone behind the `Translator` interface ✅
+
+- [x] Vendor `src/model.py` at `463b2d3` (`my_vae_encoder_fwd`/`my_vae_decoder_fwd`) and
+      reimplement `Pix2Pix_Turbo` against *current* diffusers rather than inheriting the
+      2023-era pinned stack
+- [x] Wrapper owns device placement (upstream hardcodes `.cuda()` in six places)
+- [x] `Backbone.PIX2PIX_TURBO` + `Pix2PixTurboTranslatorConfig` in the discriminated union;
+      one new branch in `build_translator`
+
+**Decision — `Pix2Pix_Turbo` is reimplemented, not vendored** (PLAN.md §7's row corrected).
+It cannot be vendored verbatim: the file opens with `sys.path.append("src/")` +
+`from model import ...` and does not import outside upstream's own cwd, and 100 of its 229
+lines are `requests`/`tqdm` downloads for two pretrained tasks we never use. What is left is
+the random-init branch and a 12-line forward. This is the same split M1 made — `networks.py`
+vendored, `Pix2PixModel`/`BaseModel` reimplemented. `make_1step_sched` comes with the
+vendored file but is never called; it does `set_timesteps(1, device="cuda")` and a network
+fetch.
+
+**Decision — components are injected, not loaded inside `__init__`.** `load_sd_turbo()` is
+the only function that touches HuggingFace. That is what lets the fast tests build a small
+`AutoencoderKL`/`UNet2DConditionModel` locally and still exercise the real LoRA adapters, the
+real vendored skip forwards and real gradient flow with no network — the fixture philosophy
+M0.3 applied to the dataset, applied to a 1.3B-parameter checkpoint.
+
+**Decision — the skip-conv widths are derived from `vae.config["block_out_channels"].`**
+Upstream writes `Conv2d(512,512)`, `(256,512)`, `(128,512)`, `(128,256)` as literals, which
+is sd-turbo's geometry spelled out. Deriving them is what makes a tiny test VAE possible at
+all, and `test_skip_widths_reproduce_upstreams_hardcoded_convs` pins the derivation against
+those four literals so the generalisation cannot drift from the model it was read off.
+
+**Decision — the timestep is named, not inferred.** Upstream calls `set_timesteps(1)` and
+gets `[999]` only because sd-turbo's scheduler config happens to say
+`timestep_spacing: "trailing"`. Under diffusers' `"leading"` default the identical call
+yields `[0]` and `step()` denoises from the wrong end of the chain **without erroring** —
+found by a tiny-model test, which is exactly the class of bug a tiny model exists to find.
+`set_timesteps(timesteps=[999])` states the thing the distillation is about.
+
+**Decision — input is reflect-padded to a multiple of 64 inside the wrapper.** The VAE is f8
+and the UNet downsamples 8× more. The dataset is 640×480 and 480 % 64 == 32, so a full frame
+shape-mismatches inside the UNet's skip concat. `train.crop` cannot fix this: validation and
+export always run whole images. Reflect rather than zero — a black band at the frame edge is
+a structure the VAE has never seen and would bleed inside the crop-back region.
+
+**Decision — `state_dict()` carries only what trains** (LoRA + `unet.conv_in` + the four
+skip convs, the same selection upstream's `save_model` makes). Measured on the real
+checkpoint: **9.5M trainable parameters, a 38MB checkpoint**, against ~2.5GB for the full
+module. `Trainer` writes one twice per stage and `engine/loop.py` warm-starts from it, so
+unreduced this is ~20GB per run and ~240GB for a twelve-run campaign, all of it frozen base
+weights `load_sd_turbo` reproduces bit for bit. `load_state_dict` accepts the partial dict
+but **raises on unexpected keys** — `strict=False` alone would silently accept a checkpoint
+from a different model.
+
+**Decision — evaluation uses the VAE posterior's mode, training keeps upstream's sample.**
+Upstream calls `.latent_dist.sample()` in both. Sampling at eval makes an exported image a
+function of RNG state, so two evaluations of the same checkpoint disagree — not acceptable in
+something whose entire job is measurement. Training keeps the stochasticity, which is where
+it was doing work.
+
+**Decision — `loss.gan` reuses M1's already-vendored PatchGAN** (`define_D`/`GANLoss`), not
+upstream's `vision_aided_loss` CLIP discriminator (confirmed with the user). PLAN.md §8's
+loss is the same four knobs for every backbone; a different adversarial objective per
+backbone would confound E2's and E3's backbone comparison with a change nobody asked for. It
+also avoids the dependency PLAN.md §7 already declined.
+
+**Decision — `train.amp`/`amp_dtype` are finally consumed, CUDA only.** They have sat unused
+in the schema since M0.8 with `engine/trainer.py`'s docstring saying they exist "for a future
+translator's own constructor to read". This is that translator. No `GradScaler`: the schema's
+own comment already records that `float16` without one produces silent NaNs, which is why the
+default is `bfloat16`.
+
+**Tests (`tests/test_pix2pix_turbo_translator.py`, 20 fast + 1 slow).** The fast ones run in
+~5s on tiny modules. The `slow` one loads the genuine `stabilityai/sd-turbo` and runs a
+forward and a `fit` step at 96×128 on CPU in ~15s — the only check that `add_adapter`,
+`latent_dist`, `scaling_factor` and `sched.step().prev_sample` still mean what upstream's
+2023-era pinned stack meant by them under diffusers 0.39 / transformers 5.15 / peft 0.20. It
+**skips itself** unless the checkpoint is already in the HuggingFace cache, so the suite
+stays offline for anyone who has not fetched it. Weights live in `~/.cache/huggingface`
+(~4.8GB), never in the repo.
+
+Also fixed: `test_unknown_backbone_lists_the_valid_discriminators` used `"pix2pix_turbo"` as
+its example of an invalid tag, which this step made valid. A test whose meaning depends on
+what has not shipped yet stops testing anything the moment it does; it now uses a name no
+milestone will claim.
+
+**Verify:** `ruff format`, `ruff check`, `pyright` (0 errors), `pytest -m "not slow"`
+(336 passed, 21 new), `pytest -m slow` (22 passed, 1 new).
+
+**No server run for this step.** The sd-turbo fetch happened on the Mac, as PLAN.md §17's
+risk row anticipated.
+
+#### Step 2 — data prep and LLVIP pretrain
+
+- [ ] Constant-caption pipeline end to end: the prompt is a config field already; confirm the
+      normalisation asymmetry upstream carries (input [0,1], target [-1,1]) has no analogue
+      left in our path, which stays [0,1] throughout
+- [ ] LLVIP pretrain → custom fine-tune. **Blocked on M0.9**: LLVIP is not fetched or
+      re-hosted yet
+
+#### Step 3 — the fidelity floor
+
+- [ ] Early-stop / clamp when LPIPS rises past a threshold while λ_det > 0. The LPIPS network
+      is already in the loss assembly at `loss.lpips > 0`, so this is a schedule decision, not
+      new machinery. M1.1 measured no reward hacking on pix2pix; the turbo arm has far more
+      capacity to find it
+
+#### Step 4 — the turbo experiment configs
+
+- [ ] `experiments/e3_turbo_{control,loop}.yaml`, mirroring the pix2pix pair and pinned by the
+      same differ-only-by-design test. Batch size and `train.crop` need a VRAM measurement on
+      the server first — a 1.3B model at 640×512 is not the same budget as `resnet_9blocks`
+
+#### Step 5 — the turbo campaign (server)
+
+- [ ] Six seeds × two arms, aggregated with `t2o aggregate` exactly as M1.2 step 5 does. This
+      is E3's strong arm; the pix2pix campaign is the control it is read against
 
 ### M2b — LBBDM-f4 + ReFL (comparison arm, lower priority)
 

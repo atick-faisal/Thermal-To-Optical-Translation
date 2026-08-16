@@ -192,8 +192,11 @@ def test_stub_backbone_builds_the_stub_model() -> None:
 
 
 def test_unknown_backbone_lists_the_valid_discriminators() -> None:
+    # Deliberately a name no milestone will ever claim. This used to be "pix2pix_turbo",
+    # which M2a then made valid -- a test whose meaning depends on what has not shipped yet
+    # silently stops testing anything the moment it does.
     with pytest.raises(ConfigError, match="does not match any of the expected tags"):
-        Config.load(overrides={"translator": {"backbone": "pix2pix_turbo"}})
+        Config.load(overrides={"translator": {"backbone": "not_a_backbone"}})
 
 
 def test_pix2pix_backbone_builds_the_pix2pix_model() -> None:
@@ -203,6 +206,17 @@ def test_pix2pix_backbone_builds_the_pix2pix_model() -> None:
     assert isinstance(config.translator, Pix2PixTranslatorConfig)
     assert config.translator.backbone is Backbone.PIX2PIX
     assert config.translator.ngf == 32
+
+
+def test_pix2pix_turbo_backbone_builds_the_turbo_model() -> None:
+    from t2o.config import Pix2PixTurboTranslatorConfig
+
+    config = Config.load(
+        overrides={"translator": {"backbone": "pix2pix_turbo", "lora_rank_unet": 4}}
+    )
+    assert isinstance(config.translator, Pix2PixTurboTranslatorConfig)
+    assert config.translator.backbone is Backbone.PIX2PIX_TURBO
+    assert config.translator.lora_rank_unet == 4
 
 
 def test_a_partial_translator_section_must_still_name_its_backbone() -> None:

@@ -47,6 +47,7 @@ class Backbone(StrEnum):
 
     STUB = "stub"
     PIX2PIX = "pix2pix"
+    PIX2PIX_TURBO = "pix2pix_turbo"
 
 
 class DataConfig(ConfigBase):
@@ -233,9 +234,9 @@ class DetectorConfig(ConfigBase):
 class StubTranslatorConfig(ConfigBase):
     """The CPU stand-in translator (M0.6).
 
-    Load-bearing, not a test fixture: ``Pix2Pix_Turbo`` hardcodes ``.cuda()`` and cannot be
-    imported on the Mac, so this is the only way the data -> coupling -> export -> eval path
-    stays locally testable (PLAN.md §9).
+    Load-bearing, not a test fixture: it is the only backbone small enough to run the full
+    data -> coupling -> export -> eval path in seconds on a CPU, which is what keeps that
+    path locally testable at all (PLAN.md §9).
     """
 
     backbone: Literal[Backbone.STUB] = Backbone.STUB
@@ -286,11 +287,63 @@ class Pix2PixTranslatorConfig(ConfigBase):
         return value
 
 
+class Pix2PixTurboTranslatorConfig(ConfigBase):
+    """M2a's one-step diffusion backbone (`PLAN.md` §4, §10 Phase 2a) -- sd-turbo with LoRA
+    adapters, vendored from `GaParmar/img2img-turbo` at `463b2d3`.
+
+    Same discipline as the pix2pix member: only knobs worth sweeping appear. The fixed
+    timestep (999), the LoRA target-module lists, the padding multiple, AdamW's betas and the
+    gradient-clip norm live in `translators/pix2pix_turbo.py`. Loss weights come from the
+    shared `LossConfig.{l2,lpips,gan}` -- the adversarial term reuses M1's already-vendored
+    PatchGAN rather than upstream's `vision_aided_loss`, so a backbone comparison changes the
+    backbone and nothing else.
+    """
+
+    backbone: Literal[Backbone.PIX2PIX_TURBO] = Backbone.PIX2PIX_TURBO
+    # (str) HuggingFace repo id for the frozen base. Downloaded to the HF cache on first use,
+    # never into this repo. Changing it changes every number the run produces, which is why
+    # it is an experiment field and not a runtime one.
+    pretrained: str = "stabilityai/sd-turbo"
+    # (str) the constant caption. Encoded once at construction, so it costs nothing per step
+    # -- but it conditions every generated image, so it is part of experiment identity.
+    prompt: str = "a photo of overhead power line components in daylight"
+    # (int) LoRA rank on the UNet. Upstream's default is 8. Lowering it is the primary
+    # anti-reward-hacking lever (PLAN.md §4): less capacity to distort the image in whatever
+    # direction the detector happens to reward.
+    lora_rank_unet: int = 8
+    # (int) LoRA rank on the VAE. Upstream's default is 4 -- deliberately below the UNet's,
+    # since the VAE path also carries the skip connections that preserve input structure.
+    lora_rank_vae: int = 4
+    # (basic|n_layers|pixel) discriminator architecture, only built when `loss.gan > 0`.
+    # Same field as the pix2pix member on purpose: it is the same vendored PatchGAN.
+    net_d: Literal["basic", "n_layers", "pixel"] = "basic"
+    # (int) discriminator's first-conv filter width. Inert at `loss.gan == 0`.
+    ndf: int = 64
+    # (vanilla|lsgan) adversarial objective; `wgangp` is excluded for the same reason as in
+    # the pix2pix member -- the gradient-penalty wiring does not exist.
+    gan_mode: Literal["vanilla", "lsgan"] = "vanilla"
+
+    @field_validator("lora_rank_unet", "lora_rank_vae", "ndf")
+    @classmethod
+    def _at_least_one(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("must be >= 1")
+        return value
+
+    @field_validator("prompt")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank; the caption conditions every generated image")
+        return value
+
+
 # A discriminated union: each new backbone adds a model with its own `backbone: Literal[...]`
 # tag plus one entry here; nothing else in the config layer changes, which is what makes
 # PLAN.md invariant 3 ("swapping backbones is a config change") true rather than aspirational.
 TranslatorConfig = Annotated[
-    StubTranslatorConfig | Pix2PixTranslatorConfig, Field(discriminator="backbone")
+    StubTranslatorConfig | Pix2PixTranslatorConfig | Pix2PixTurboTranslatorConfig,
+    Field(discriminator="backbone"),
 ]
 
 

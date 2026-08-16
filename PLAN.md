@@ -217,7 +217,7 @@ trainer ported from Clean-SeAFusion.
 | --- | --- | --- | --- |
 | pix2pix / CycleGAN | `2a7afba` (2025-08-06) | `models/networks.py` — `define_G`, `define_D`, `GANLoss` | `BaseModel`, `options/`, `data/`, `train.py`, `scripts/*.sh` |
 | CUT / FastCUT | `b3ac297` (2023-09-05) | generator + `models/patchnce.py::PatchNCELoss` + `PatchSampleF` | everything else |
-| pix2pix-turbo | `463b2d3` (local checkout is current) | `src/pix2pix_turbo.py::Pix2Pix_Turbo`, `src/model.py` helpers | `train_pix2pix_turbo.py` — reimplement its loss assembly |
+| pix2pix-turbo | `463b2d3` (local checkout is current) | `src/model.py` — `my_vae_encoder_fwd`, `my_vae_decoder_fwd` | `train_pix2pix_turbo.py` — reimplement its loss assembly. Also `src/pix2pix_turbo.py::Pix2Pix_Turbo`: **reimplemented, not vendored** (M2a). It starts with `sys.path.append("src/")` + `from model import`, so it does not import outside upstream's cwd, and 100 of its 229 lines are checkpoint downloads for tasks we do not use. Same split M1 made between `networks.py` and `Pix2PixModel`. |
 | LBBDM-f4 | `02c3b13` (2024-08-01) | `BrownianBridgeModel`, `LatentBrownianBridgeModel`, `model/VQGAN/` | `runners/`, `main.py`, `configs/` |
 
 This makes invariant 3 real, and it defuses the single biggest practical risk in the
@@ -405,10 +405,12 @@ Every component must run end-to-end on the synthetic fixture, on CPU, in seconds
 pytest. `experiments/smoke.yaml` mirrors every real config at tiny scale. Nothing is pushed
 to the server without the smoke suite passing.
 
-Because `Pix2Pix_Turbo` cannot even be *imported* on the Mac (hardcoded `.cuda()`), the
-suite needs a tiny CPU stand-in translator implementing the same interface, so the
-data → coupling → export → eval path stays locally testable. **That stand-in is part of the
-design, not a test fixture afterthought.**
+The suite needs a tiny CPU stand-in translator implementing the same interface, so the
+data → coupling → export → eval path stays locally testable in seconds. **That stand-in is
+part of the design, not a test fixture afterthought.** (The original reason was that
+`Pix2Pix_Turbo` hardcodes `.cuda()` and cannot be imported on the Mac at all. M2a's wrapper
+owns device placement, so the turbo backbone *does* now run on CPU — but a 1.3B-parameter
+model is not what the data-path tests should be paying for.)
 
 ### Public datasets
 
