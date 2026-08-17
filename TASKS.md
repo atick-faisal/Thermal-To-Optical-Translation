@@ -1882,6 +1882,34 @@ With two GPUs, split the seed range across two shells via `CUDA_VISIBLE_DEVICES`
 reaching for DDP (PLAN.md §3) — but keep each *pair* on one card, since the paired comparison
 is per seed.
 
+**Fixed mid-campaign — W&B dropped stages 1–n's loss curves, and the campaign was *not*
+stopped.** Fourteen hours in, the server logged thousands of `Tried to log to step 46 that is
+less than the current step 258`. Cause: `Trainer.train()` logged with an explicit
+`step=epoch`, and `epoch` restarts at 0 in every stage while W&B's counter only increases.
+Everything else in a loop run (zero-shot, fidelity, the detector callback) logs implicitly and
+rides the auto-increment, so the counter was already at 151 by the time stage 1's epoch 0
+arrived; all 100 were rejected, and so on per stage.
+
+**Diagnosed as cosmetic before deciding not to stop, on three specific grounds:** the
+per-epoch history is in `metrics.json` regardless (`asdict(StageResult)` carries every
+`EpochStats`, written after each stage); `t2o aggregate` reads `metrics.json` plus the
+`config.yaml` snapshot and never touches W&B, so **no number E3 is read off was affected**; and
+the stage-level metrics in W&B (`stage*/zero_shot/*`, `stage*/fidelity/*`,
+`stage*/detector/*`) all log implicitly and were all accepted. The only loss was the live view
+of the generator curves for stages 1–3.
+
+The fix drops the explicit `step=`, carries the epoch as a *value*, and adds
+`Trainer(metric_prefix=...)` — set to `stage{N}` by `run_loop`. The prefix repairs a second
+latent defect the step problem masked: the trainer's keys were the only ones in a loop run not
+namespaced by stage, so stage 1's `train/l2` would have plotted on top of stage 0's even with
+monotonic steps. Both now match `detector_stage.py::_forward_epoch_metrics`, which uses this
+shape already and is why the detector curves never hit the bug.
+
+**Not pulled onto the server until the campaign finished.** Logging touches no RNG, so the
+change is result-neutral — but pulling mid-campaign would have left seeds 0–2 and 3–5 on
+different trees, which is the same comparability rule step 2b's caveat states.
+`test_epoch_metrics_are_namespaced_and_never_carry_an_explicit_step` pins both halves.
+
 ### Step 6 — record the outcome
 
 - [ ] Results here; PLAN.md §11's E3 row and §16's causality criterion marked satisfied or not

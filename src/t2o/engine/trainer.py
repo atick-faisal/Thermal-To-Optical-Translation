@@ -99,6 +99,7 @@ class Trainer:
         tracker: RunTracker | None = None,
         task_loss: Callable[[Tensor, TranslationBatch], Tensor] | None = None,
         task_weight: float = 0.0,
+        metric_prefix: str = "",
     ) -> None:
         if not isinstance(translator, Translator):
             raise TypeError("translator must implement fit()/translate() (the Translator protocol)")
@@ -109,6 +110,7 @@ class Trainer:
         self.tracker = tracker
         self.task_loss = task_loss
         self.task_weight = task_weight
+        self.metric_prefix = metric_prefix
 
         self.device = resolve_device(config.runtime.device)
         self.translator.to(self.device)
@@ -185,9 +187,18 @@ class Trainer:
             history.append(EpochStats(epoch=epoch, train_losses=train_losses, val_loss=val_loss))
 
             if self.tracker is not None:
-                metrics = {f"train/{k}": v for k, v in train_losses.items()}
-                metrics["val/pixel_l2"] = val_loss
-                self.tracker.log(metrics, step=epoch)
+                # No `step=`, and the epoch travels as a *value* -- same shape as
+                # detector_stage.py::_forward_epoch_metrics, and for the same reason. `epoch`
+                # restarts at 0 in every stage of a loop run while wandb's step counter only
+                # ever increases, so an explicit `step=epoch` made stages 1..n log into the
+                # past and wandb dropped all of them ("Tried to log to step 46 that is less
+                # than the current step 258"). The per-epoch history is in metrics.json
+                # either way; this is what puts it on a chart.
+                prefix = f"{self.metric_prefix}/" if self.metric_prefix else ""
+                metrics = {f"{prefix}train/{k}": v for k, v in train_losses.items()}
+                metrics[f"{prefix}val/pixel_l2"] = val_loss
+                metrics[f"{prefix}epoch"] = float(epoch)
+                self.tracker.log(metrics)
 
             self._checkpoint(epoch, val_loss)
         return history

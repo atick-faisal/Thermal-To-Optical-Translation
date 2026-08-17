@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -20,6 +21,7 @@ from t2o.data.dataset import TranslationBatch
 from t2o.data.manifest import DatasetManifest
 from t2o.engine.trainer import BEST_CHECKPOINT, LAST_CHECKPOINT, Trainer, resolve_device
 from t2o.seeding import seed_everything, seed_worker
+from t2o.tracking import RunTracker
 from t2o.translators import StubTranslator
 
 
@@ -125,6 +127,54 @@ def test_resume_without_a_checkpoint_raises(data_yaml: Path, tmp_path: Path) -> 
 
     with pytest.raises(FileNotFoundError):
         trainer.resume()
+
+
+def test_epoch_metrics_are_namespaced_and_never_carry_an_explicit_step(
+    data_yaml: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stage's curves must not collide with, or be rejected against, another stage's.
+
+    `epoch` restarts at 0 in every stage of a loop run while wandb's step counter only ever
+    increases, so logging with `step=epoch` silently dropped every epoch of stages 1..n
+    ("Tried to log to step 46 that is less than the current step 258") -- observed 14 hours
+    into E3's campaign. Two things stop that recurring: no explicit `step`, and a per-stage
+    key prefix so the curves are distinguishable once they do arrive.
+    """
+    import wandb
+
+    calls: list[tuple[dict[str, float], dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        wandb,
+        "init",
+        lambda **kw: SimpleNamespace(
+            log=lambda metrics, **kwargs: calls.append((metrics, kwargs)), finish=lambda: None
+        ),
+    )
+    manifest = DatasetManifest.load(data_yaml)
+    config = Config.load(
+        overrides={
+            "train": {"batch_size": 2, "epochs_per_stage": 2},
+            "runtime": {"workers": 0, "wandb": True, "run_dir": str(tmp_path), "name": "t"},
+        }
+    )
+    trainer = Trainer(
+        config,
+        manifest,
+        StubTranslator(hidden_channels=4),
+        tmp_path / "run",
+        tracker=RunTracker(config),
+        metric_prefix="stage1",
+    )
+
+    trainer.train()
+
+    assert len(calls) == config.train.epochs_per_stage
+    for metrics, kwargs in calls:
+        # RunTracker always forwards a `step` kwarg; None is what makes wandb auto-increment.
+        assert kwargs.get("step") is None
+        assert all(key.startswith("stage1/") for key in metrics)
+    assert [metrics["stage1/epoch"] for metrics, _ in calls] == [0.0, 1.0]
 
 
 def test_translator_must_implement_the_protocol(data_yaml: Path, tmp_path: Path) -> None:

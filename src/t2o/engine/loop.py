@@ -172,6 +172,10 @@ def run_loop(
             tracker=tracker,
             task_loss=task_loss,
             task_weight=task_weight,
+            # Without this every stage's loss curves share one set of key names and plot on
+            # top of each other -- the same reason the zero-shot, fidelity and detector
+            # metrics below are all namespaced by stage.
+            metric_prefix=f"stage{stage}",
         )
         if resume and stage == start_stage and (stage_dir / LAST_CHECKPOINT).is_file():
             trainer.resume()
