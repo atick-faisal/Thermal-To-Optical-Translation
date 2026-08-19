@@ -720,11 +720,23 @@ bullet.
       directory is precisely what `git clean -fd` removes — keep a copy outside the checkout.
       `--check` against the on-disk record still works on the server and is the drift guard
       before any future run on this dataset.
-- [ ] **600 + 153 = 753, not the ~850 this document has assumed since PLAN.md §2.** Unresolved:
-      either ~850 was always approximate, or ~100 pairs are being dropped by the pairing/label
-      stage. Does not invalidate E3 (both arms and the judge read the same frozen split), but
-      every "at 850 pairs" framing — E8's headline included — cites a number no artifact
-      supports. Reconcile against the adapter's own pair count before the paper claims either.
+**The ~850 pairs are 753 train+val plus ~100 held out as an unseen test set** (confirmed with
+the user) — so "850" is the dataset, and 753 is what any experiment in this repo has ever
+touched. Worth stating because the frozen record shows only the 753 and the difference reads
+like loss otherwise.
+
+**The held-out set is isolated structurally, not by discipline.** `DatasetManifest` reads only
+`path`/`train`/`val`/`nc`/`names`/`rgbt` and drops every other key (`data/manifest.py`), so a
+`test:` entry in `data.yaml` is invisible to the trainer, the exporter, both detector roles and
+`freeze_splits.py` alike. Nothing in the project *can* read those pairs, which is the strongest
+form this guarantee takes — stronger than the frozen-split contract, which only detects misuse
+after the fact.
+
+Consequence, deliberate for now: the test split's membership is unpinned — `freeze_split` can
+only ever record train/val. A leak *into* train/val is still caught (the 753 hashes change);
+a reshuffle *within* the held-out set is not. That only starts to matter when the set is first
+used, so freeze it then rather than teaching the manifest a third split it must otherwise
+ignore. Report every count as "753 train+val of 853" in the paper, not "850 pairs".
 
 **`data/splits.py` decisions:**
 
