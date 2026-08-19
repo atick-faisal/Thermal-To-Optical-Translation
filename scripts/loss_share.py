@@ -17,6 +17,12 @@ Nothing here is available any other way. `analysis/aggregate.py::metric_value` w
 `epochs` is a list, so `t2o aggregate --metric` cannot reach these; and W&B is no help either --
 the step bug fixed in `accfe56` dropped exactly the stages that have a detection term at all.
 
+Every figure is a mean over epochs, so two runs of different length are not comparable even
+at identical settings: the opening epochs are the loud ones, and a mean over the first 25 sits
+above a mean over 100 in every term at once. `--first-epochs` truncates the pool so a probe can
+be read against a campaign; the `epochs` column exists so that a run of the wrong length cannot
+be mistaken for a run in a different condition.
+
 Control runs are skipped rather than pooled in: their `loss_det` does not exist (`fit` only
 records the key when `task_weight > 0`), and averaging them into a loop campaign's share would
 dilute the number the decision rests on.
@@ -59,6 +65,11 @@ class StageShare:
 
     stage: int
     n_runs: int
+    # Epoch counts pooled, one entry per distinct value across the runs. Reported because a
+    # short probe and a full campaign are not comparable and nothing else on the row says so:
+    # a mean over the first 25 epochs sits above a mean over 100 in every term at once, which
+    # reads as a changed condition rather than a shorter one (M1.2 step 8).
+    n_epochs: tuple[int, ...]
     task_weight: float
     effective_lambda: float
     means: dict[str, float]
@@ -66,13 +77,16 @@ class StageShare:
     share: float  # detection_term / mean(loss_total); nan if the total is zero
 
 
-def epoch_means(stage: dict[str, Any]) -> dict[str, float]:
+def epoch_means(stage: dict[str, Any], first_epochs: int | None = None) -> dict[str, float]:
     """Mean over a stage's epochs of every loss key its `train_losses` recorded.
 
     Keys are whatever `translator.fit()` returned, so a term the config disabled is simply
     absent rather than zero -- and `loss_det` is absent from every stage at weight 0.
+
+    `first_epochs` truncates to the stage's opening epochs, which is what makes a short probe
+    comparable to a full-length campaign run rather than merely adjacent to one.
     """
-    epochs = stage.get("epochs") or []
+    epochs = (stage.get("epochs") or [])[:first_epochs]
     keys = {key for epoch in epochs for key in epoch.get("train_losses", {})}
     return {
         key: fmean([epoch["train_losses"][key] for epoch in epochs if key in epoch["train_losses"]])
@@ -90,7 +104,7 @@ def grad_scale_of(run: RunRecord) -> float:
     return float(snapshot["coupling"]["grad_scale"])
 
 
-def stage_shares(runs: Sequence[RunRecord]) -> list[StageShare]:
+def stage_shares(runs: Sequence[RunRecord], first_epochs: int | None = None) -> list[StageShare]:
     per_stage: dict[int, list[tuple[RunRecord, dict[str, Any]]]] = {}
     for run in runs:
         for stage in run.stages:
@@ -112,7 +126,10 @@ def stage_shares(runs: Sequence[RunRecord]) -> list[StageShare]:
         if len(scales) > 1:
             raise SystemExit(f"stage {stage_index}: runs disagree on grad_scale ({sorted(scales)})")
 
-        per_run = [epoch_means(stage) for _, stage in entries]
+        per_run = [epoch_means(stage, first_epochs) for _, stage in entries]
+        n_epochs = tuple(
+            sorted({len((stage.get("epochs") or [])[:first_epochs]) for _, stage in entries})
+        )
         keys = {key for means in per_run for key in means}
         means = {
             key: fmean([means[key] for means in per_run if key in means]) for key in sorted(keys)
@@ -125,6 +142,7 @@ def stage_shares(runs: Sequence[RunRecord]) -> list[StageShare]:
             StageShare(
                 stage=stage_index,
                 n_runs=len(entries),
+                n_epochs=n_epochs,
                 task_weight=task_weight,
                 effective_lambda=task_weight * scales.pop(),
                 means=means,
@@ -135,9 +153,16 @@ def stage_shares(runs: Sequence[RunRecord]) -> list[StageShare]:
     return shares
 
 
+def _format_epochs(counts: tuple[int, ...]) -> str:
+    """`25`, or `25-100` when the pooled runs were not all the same length."""
+    if not counts:
+        return "0"
+    return str(counts[0]) if len(counts) == 1 else f"{counts[0]}-{counts[-1]}"
+
+
 def report(shares: Sequence[StageShare]) -> None:
     header = (
-        f"{'stage':>5} {'runs':>4} {'w':>5} {'lambda_eff':>10} "
+        f"{'stage':>5} {'runs':>4} {'epochs':>7} {'w':>5} {'lambda_eff':>10} "
         + " ".join(f"{key:>11}" for key in (*FIDELITY_KEYS, DETECTION_KEY, TOTAL_KEY))
         + f" {'w*det':>9} {'share':>7}"
     )
@@ -148,9 +173,10 @@ def report(shares: Sequence[StageShare]) -> None:
             for key in (*FIDELITY_KEYS, DETECTION_KEY, TOTAL_KEY)
         )
         logger.info(
-            "%5d %4d %5.1f %10.4f %s %9.4f %6.1f%%",
+            "%5d %4d %7s %5.1f %10.4f %s %9.4f %6.1f%%",
             share.stage,
             share.n_runs,
+            _format_epochs(share.n_epochs),
             share.task_weight,
             share.effective_lambda,
             cells,
@@ -167,6 +193,13 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="run directories, or globs over them -- quote the glob ('runs/e3-*') so it "
         "reaches this process unexpanded",
+    )
+    parser.add_argument(
+        "--first-epochs",
+        type=int,
+        default=None,
+        help="pool only each stage's first N epochs, so a short probe can be compared against "
+        "a full-length campaign run on equal terms",
     )
     return parser
 
@@ -185,7 +218,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(loop_runs) < len(runs):
         logger.info("skipped %d control run(s)", len(runs) - len(loop_runs))
 
-    report(stage_shares(loop_runs))
+    report(stage_shares(loop_runs, args.first_epochs))
     return 0
 
 

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from scripts.loss_share import epoch_means, stage_shares
+from scripts.loss_share import _format_epochs, epoch_means, stage_shares
 
 from t2o.analysis.aggregate import load_run
 
@@ -111,3 +111,33 @@ def test_runs_from_two_different_experiments_are_refused(tmp_path: Path) -> None
 
     with pytest.raises(SystemExit, match="disagree on task_weight"):
         stage_shares(runs)
+
+
+def test_first_epochs_truncates_the_pool_and_changes_the_share(tmp_path: Path) -> None:
+    """The confound that cost M1.2 step 8 a round trip: a 25-epoch probe is not a 100-epoch run.
+
+    Stage 1's `loss_det` runs 0.05/0.15/0.55/0.85 against totals 1.62/1.82/2.62/3.22. Pooled
+    whole that is det 0.40 and total 2.32, so at weight 2.0 the share is 0.80/2.32 == 34.48%.
+    Pooled over the opening two epochs it is det 0.10 and total 1.72 -- share 0.20/1.72 ==
+    11.63%. Same run, same lambda, three-fold difference in the number a campaign is launched
+    on, which is why the epoch count is on the report row rather than left implicit.
+    """
+    run = load_run(_write_run(tmp_path, "r", 0, [0.0, 2.0], [[], [0.05, 0.15, 0.55, 0.85]]))
+
+    whole = stage_shares([run])[1]
+    assert whole.n_epochs == (4,)
+    assert whole.share == pytest.approx(0.80 / 2.32)
+
+    opening = stage_shares([run], first_epochs=2)[1]
+    assert opening.n_epochs == (2,)
+    assert opening.share == pytest.approx(0.20 / 1.72)
+
+
+def test_pooling_runs_of_unequal_length_reports_the_span(tmp_path: Path) -> None:
+    """Unequal lengths are pooled, not refused -- but the row has to admit it happened."""
+    short = load_run(_write_run(tmp_path, "short", 0, [0.0, 2.0], [[], [0.05, 0.15]]))
+    long = load_run(_write_run(tmp_path, "long", 1, [0.0, 2.0], [[], [0.05, 0.15, 0.55, 0.85]]))
+
+    assert stage_shares([short, long])[1].n_epochs == (2, 4)
+    assert _format_epochs((2, 4)) == "2-4"
+    assert _format_epochs((25,)) == "25"

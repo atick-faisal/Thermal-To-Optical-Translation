@@ -2133,7 +2133,9 @@ once the share says the dose is real.
 
 ### Step 8 — recalibrate the dose, then re-run E3
 
-- [ ] Probe: one seed at the candidate `grad_scale`, share re-read, stability confirmed
+- [x] Probe: one seed at the candidate `grad_scale`, share re-read, stability confirmed
+- [x] `scripts/loss_share.py --first-epochs N` and an `epochs` column on the report — the probe
+      is a quarter the length of a campaign run and nothing on the row said so
 - [ ] Both E3 configs bumped to the calibrated value
 - [ ] The twelve-run campaign relaunched, and step 6's tables replaced with its result
 
@@ -2157,11 +2159,56 @@ share is a loss-composition ratio and is legible within a few epochs. Read three
 1. **Share** per stage, from `loss_share.py`. In the 20–30% band → proceed. Still under ~10% →
    raise `grad_scale` by the shortfall ratio and re-probe. Over ~40% → lower it; the detection
    term should not dominate the objective it is meant to inform.
-2. **Fidelity**, from the run's own `stage*/fidelity/lpips`. Rising sharply against E3's ~0.30
-   is reward hacking becoming affordable — set `coupling.reward_target` (config-file-only) and
-   re-probe rather than pressing on.
+2. **Fidelity**, from the run's own `stage*/fidelity/lpips`, read **against its own stage 0 and
+   never against E3's ~0.30** — see the probe result below for why that instruction, as first
+   written, was wrong. Rising sharply within the run is reward hacking becoming affordable — set
+   `coupling.reward_target` (config-file-only) and re-probe rather than pressing on.
 3. **Stability**: `loss_det` should fall rather than oscillate, and `loss_gan` should not
    diverge. A one-step check that the dose is trainable at all.
+
+#### Probe result — `grad_scale: 0.15` lands the dose
+
+```
+stage runs epochs   w lambda_eff  loss_l2 loss_lpips loss_gan loss_det loss_total   w*det  share
+    0    1     25 0.0     0.0000   0.0492     2.1006   1.7234       --     3.8732  0.0000   0.0%
+    1    1     25 1.0     0.1500   0.0430     1.9252   1.6868   0.4462     4.1012  0.4462  10.9%
+    2    1     25 2.0     0.3000   0.0461     2.0174   2.4022   0.4456     5.3570  0.8913  16.6%
+    3    1     25 3.0     0.4500   0.0431     1.9002   2.3294   0.4136     5.5136  1.2409  22.5%
+```
+
+**In band.** 10.9 / 16.6 / 22.5% against a predicted 12 / 21 / 27, and the ramp now spans a real
+dose range rather than step 7's 0.9–2.3%. Stability held: four stages completed, `loss_gan` did
+not diverge, nothing collapsed. `grad_scale: 0.15` is the calibrated value.
+
+**The epoch-length trap, recorded because it cost a round trip.** The probe ran `--epochs 25`;
+`epochs_per_stage` in both E3 configs is **100**. Every figure here is a mean over epochs, and
+the opening epochs are the loud ones, so the probe's numbers sit above a campaign run's in
+*every* term at once — which reads as a changed condition rather than a shorter one. Two false
+alarms came out of that before the cause was found:
+
+* Stage 0 is provably inert to `grad_scale` (`translators/pix2pix.py::fit` gates the detector on
+  `task_weight > 0.0`), so the probe's stage 0 should reproduce `e3-loop-s0`'s. It did not —
+  `loss_lpips` 2.1006 vs 1.8608, val `map50` 0.7451 vs 0.7951, val `lpips` 0.3451 vs 0.3020.
+  That looked like a determinism failure large enough to invalidate step 2/2b. It was the epoch
+  count. **Determinism is not in question; nothing about steps 2, 2b or 6 changes.**
+* Raw detection loss (`loss_det / grad_scale`) reads 2.97 / 2.97 / 2.76 here against step 7's
+  2.98 / 2.75 / 2.61 — i.e. *worse* under 15× the pressure. **Withdrawn**: a 25-epoch mean
+  against a 100-epoch mean is not a comparison. The `loss_gan` observation (this run rises 35%
+  across stages 0→3 where `e3-loop-s0` rises 12%) is within-run on both sides so it survives the
+  level offset, but 25 epochs leaves less room to re-equilibrate; logged as a watch item for the
+  campaign's per-stage LPIPS readout, not a finding.
+
+`--first-epochs` exists so this cannot recur silently: it truncates the pool, and the `epochs`
+column puts the length on the row. The apples-to-apples check is
+`scripts/loss_share.py --runs 'runs/e3-loop-s0' --first-epochs 25`, which reads E3's share over
+the same window the probe covers. The share verdict does not depend on it — 2.3% → 22.5% is a
+10× shift against a 15× change in `grad_scale`, which no epoch count can manufacture — but the
+raw-detection-loss and `loss_gan` questions above are only answerable there.
+
+**Nothing about the probe's mAP is usable**, and not only for step 6 finding 2's reason: at 25
+epochs the translator is a quarter trained, so its 0.7451 → 0.8158 stage ramp measures training
+length as much as anything else. That confound is exactly what the control arm exists to
+subtract, and the probe has no control arm.
 
 Then bump `coupling.grad_scale` in **both** `experiments/e3_pix2pix_{control,loop}.yaml` — the
 control's value is inert (no detector is built at weight 0) but must match, which
