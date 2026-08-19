@@ -707,11 +707,24 @@ bullet.
       `write_split_manifest`/`load_split_manifest`, `verify_split` + `SplitDriftError`) plus
       `scripts/freeze_splits.py` — run for real against `dataset/processed/{msrs,flir}`,
       committed as `splits/msrs.json` (1163 train / 361 val) and `splits/flir.json` (4129
-      train / 1013 val), matching each adapter's own real-run counts exactly. **The custom
-      ~850-pair dataset's split is still open** — it lives only on the server (PLAN.md §2)
-      and has no `data.yaml` on this machine; freeze it there with the same script once it
-      exists, and see [[dataset-rehost-deferred]]-style follow-up: LLVIP/M3FD/TTPLA get
-      frozen the same way once actually fetched.
+      train / 1013 val), matching each adapter's own real-run counts exactly. LLVIP/M3FD/TTPLA
+      get frozen the same way once actually fetched.
+- [x] **The custom paired dataset is frozen on the server** (`yolo_rgbt_29_jul`), run during
+      E3's campaign. `combined_hash 7ede3433adc9c0b8`; train **600** (`4e01a89877c6a943`),
+      val **153** (`6b06220c26a9adbc`). The val count independently matches M1.2 step 1's
+      reference judge (153 images / 423 instances), so the campaign and its judge are provably
+      on the same val images. **The record itself cannot reach git** — the server has no
+      outbound git access, so `splits/yolo_rgbt_29_jul.json` stays untracked there and the
+      hashes above are this repo's only copy of the split identity. Consequences, both real:
+      the stem list exists in exactly one place, and an untracked file inside a *tracked*
+      directory is precisely what `git clean -fd` removes — keep a copy outside the checkout.
+      `--check` against the on-disk record still works on the server and is the drift guard
+      before any future run on this dataset.
+- [ ] **600 + 153 = 753, not the ~850 this document has assumed since PLAN.md §2.** Unresolved:
+      either ~850 was always approximate, or ~100 pairs are being dropped by the pairing/label
+      stage. Does not invalidate E3 (both arms and the judge read the same frozen split), but
+      every "at 850 pairs" framing — E8's headline included — cites a number no artifact
+      supports. Reconcile against the adapter's own pair count before the paper claims either.
 
 **`data/splits.py` decisions:**
 
