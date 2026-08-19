@@ -2276,6 +2276,37 @@ uv run t2o aggregate --runs 'runs/e3b-*' --stage 3 \
 uv run python scripts/loss_share.py --runs 'runs/e3b-loop-*'
 ```
 
+**Split across two cards by seed, never by arm** — a pair must stay on one card or the paired
+difference absorbs whatever differs between the GPUs. Seeds 0–2 on `cuda:0`, 3–5 on `cuda:1`,
+two shells, ~36h wall clock instead of ~72h. PowerShell, since the server is native Windows:
+
+```powershell
+# shell A
+foreach ($s in 0,1,2) { foreach ($arm in 'control','loop') {
+  uv run t2o loop --config "experiments/e3_pix2pix_$arm.yaml" `
+    --data $DATA --in-loop-weights $OPTICAL --eval-init-weights $OPTICAL `
+    --seed $s --name "e3b-$arm-s$s" --group e3-pix2pix-g015 --wandb --device cuda:0
+} }
+
+# shell B -- identical but for the seed range and the card
+foreach ($s in 3,4,5) { foreach ($arm in 'control','loop') {
+  uv run t2o loop --config "experiments/e3_pix2pix_$arm.yaml" `
+    --data $DATA --in-loop-weights $OPTICAL --eval-init-weights $OPTICAL `
+    --seed $s --name "e3b-$arm-s$s" --group e3-pix2pix-g015 --wandb --device cuda:1
+} }
+```
+
+Concurrency is safe on disk: `run_loop` passes `project=stage_dir / "detector"`, so every
+ultralytics write is scoped to one run's own stage directory, and each stage's detector trains
+on that stage's own exported images — there is no shared label `.cache` for the two processes to
+race on. The one machine-global file in play is ultralytics' `settings.json` (see
+`detector_stage.py`'s note on it), so start shell B a minute after shell A and let any
+first-touch write land once.
+
+Both shells must carry **identical** `$DATA`/`$OPTICAL`, for step 5's reason: those flags are
+machine-specific paths rather than config, so a difference between the shells is a confound that
+`test_control_and_loop_configs_differ_only_by_design` cannot see.
+
 The `e3b-` prefix also keeps `'runs/e3-*'` unambiguous: that glob still selects the old campaign
 alone, and `pair_runs` would refuse a mixed glob anyway (two runs per `(arm, seed)` cell — the
 same guard that correctly refused the probe against E3 in step 8). The trailing `loss_share`
