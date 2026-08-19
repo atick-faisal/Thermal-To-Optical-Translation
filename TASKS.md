@@ -2031,7 +2031,71 @@ very different consequences. **Do not launch M2a's turbo arm until step 7 settle
 
 ### Step 7 — was λ_det ever large enough to matter?
 
-- [ ] Run the diagnostic on the finished campaign and record the share here
+- [x] **Answered: no. The detection term was 0.9 / 1.7 / 2.3% of the objective.** E3's null is
+      **dose-limited, not a mechanism result.**
+
+Pooled over epochs and over the six loop runs (`scripts/loss_share.py --runs 'runs/e3-loop-*'`):
+
+| stage | w | λ_eff | `loss_l2` | `loss_lpips` | `loss_gan` | `loss_det` | `loss_total` | w·det | share |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 | 0 | 0.0415 | 1.8062 | 1.5747 | — | 3.4223 | 0 | 0.0% |
+| 1 | 1 | 0.01 | 0.0361 | 1.5940 | 1.6886 | 0.0298 | 3.3485 | 0.0298 | **0.9%** |
+| 2 | 2 | 0.02 | 0.0336 | 1.5146 | 1.6508 | 0.0275 | 3.2540 | 0.0550 | **1.7%** |
+| 3 | 3 | 0.03 | 0.0323 | 1.4758 | 1.7490 | 0.0261 | 3.3354 | 0.0782 | **2.3%** |
+
+The decision rule fired on the ≲5% branch, and not marginally: at the *top* of the ramp the
+detection term was **1/43rd of the objective** and the smallest term in it by a factor of ~19.
+E3 did not test the coupling hypothesis at a dose capable of refuting it.
+
+**PLAN.md §8 predicted exactly this and the instruction was skipped.** Its second guardrail
+bullet reads: *"The `[0,1,2,3]` ramp is calibrated to SeAFusion's **segmentation** loss scale,
+not a detection loss — recalibrate empirically in Phase 0."* That recalibration was never done,
+and `grad_scale: 1.0e-2` (AlignProp's `loss_coeff`, for a different objective on a different
+task) went into E3 unexamined. The 72 GPU-hours were not wasted — they produced a validated
+null-control, a confirmed noise floor and a fidelity bound — but the headline they were spent on
+cannot be read as evidence about coupling.
+
+**The objective is GAN + LPIPS, and `l2` is 1% of it.** At stage 3: LPIPS 1.4758 (44%), GAN
+1.7490 (52%), l2 0.0323 (**1.0%**), detection 0.0782 (2.3%). `LossConfig`'s comment calling l2
+"Dominant, and the reason a translator with no other term produces a blurred conditional mean"
+is true of an l2-only translator and false of this configuration — corrected in the schema.
+Cross-check that the recorded losses mean what we think: `loss_lpips / 5.0` = 0.295 against the
+measured val `fidelity.lpips` of 0.2989. Also note the GAN term is the only one that *rises*
+across stages (1.575 → 1.749) while LPIPS falls (1.806 → 1.476): the discriminator is winning
+more as training goes on.
+
+**Finding 4 of step 6 is superseded.** "No dose-response in λ" spanned shares of 0.9% → 2.3% —
+a range too narrow to be informative about λ at all. It is not evidence against a dose-response;
+it is evidence that no dose was applied.
+
+**The candidate λ, from the numbers rather than from taste.** `loss_det` is recorded
+post-`grad_scale`, so the raw per-image detection loss is `loss_det / grad_scale` = **2.98 / 2.75
+/ 2.61** across stages — stable and slowly declining, which is what makes a linear extrapolation
+usable. With fidelity terms summing to F = 3.257 at stage 3 and a target share S, the required
+weight is `w·g = F·S/((1−S)·L_raw)`:
+
+| target share at stage 3 | required `w·g` | `grad_scale` at w=3 |
+| --- | --- | --- |
+| 20% | 0.312 | 0.104 |
+| 25% | 0.416 | 0.139 |
+| 30% | 0.535 | 0.178 |
+
+**`grad_scale: 0.15`** — 15× the E3 value — is the candidate, predicting a ramp of ≈12% / 21% /
+27% (λ_eff 0.15 / 0.30 / 0.45). Chosen at the upper half of the band deliberately: the
+extrapolation holds `L_raw` fixed, but a term 15× stronger will *drive the detection loss down*,
+which lowers its own share at equilibrium. The achieved share will land below the prediction.
+
+**Two honest limits on this number.** (1) Loss share is a proxy for gradient influence, not a
+measurement of it — `grad_scale` multiplies the detection gradient exactly linearly, so 15× more
+gradient is certain, but whether that is 15× more *influence on the update* depends on the other
+terms' gradient norms, which nothing here measured. (2) Raising `grad_scale` 15× removes most of
+§8's anti-reward-hacking downscale. The replacement guard is already in place and now
+quantified: LPIPS is reported per stage, and step 6 finding 5 bounds λ_det's current fidelity
+effect at ±0.016. `coupling.reward_target` stays `null` for the probe — with `L_raw` ≈ 2.6–3.0 a
+target near 1.5–2.0 would start biting, and that is the knob to reach for *if* fidelity degrades
+at the new dose. Fidelity degrading would itself be a finding, not a failure: it would mean the
+loop can trade fidelity for detection, which is precisely what §8 anticipated and what the
+guardrails exist to bound.
 
 Zero GPU cost: every loop run's `metrics.json` already holds `task_weight` per stage and
 `loss_det`/`loss_total` per epoch (`StageResult` → `asdict`). `loss_det` as recorded is already
@@ -2066,6 +2130,44 @@ n=1 mistake M1.2 exists to correct. A one-seed run at the candidate λ is a *sta
 (does LPIPS collapse, does the GAN diverge, does the detection term stay bounded), never a
 measurement. The measurement is another paired six-seed campaign, and it only earns its GPU time
 once the share says the dose is real.
+
+### Step 8 — recalibrate the dose, then re-run E3
+
+- [ ] Probe: one seed at the candidate `grad_scale`, share re-read, stability confirmed
+- [ ] Both E3 configs bumped to the calibrated value
+- [ ] The twelve-run campaign relaunched, and step 6's tables replaced with its result
+
+**The probe is a calibration, not a measurement.** With a per-seed sd of ≈0.053 (step 6 finding
+2) one run cannot resolve the +0.02 being chased, so nothing about mAP is to be concluded from
+it. It answers three narrower questions: does the achieved share land in the 20–30% band, does
+the run stay stable, and does fidelity survive. No new config is needed — both knobs are already
+CLI overrides (`cli.py::_OVERRIDES`), and `config_hash` covers `coupling`, so a probe run cannot
+be confused with a campaign run on resume.
+
+```bash
+uv run t2o loop --config experiments/e3_pix2pix_loop.yaml \
+  --data "$DATA" --in-loop-weights "$OPTICAL" --eval-init-weights "$OPTICAL" \
+  --grad-scale 0.15 --epochs 25 --seed 0 --name e3-probe-g015 --device cuda:0
+uv run python scripts/loss_share.py --runs 'runs/e3-probe-g015'
+```
+
+`--epochs 25` keeps all four stages (the ramp is what needs measuring) at ~1/4 the cost — the
+share is a loss-composition ratio and is legible within a few epochs. Read three things off it:
+
+1. **Share** per stage, from `loss_share.py`. In the 20–30% band → proceed. Still under ~10% →
+   raise `grad_scale` by the shortfall ratio and re-probe. Over ~40% → lower it; the detection
+   term should not dominate the objective it is meant to inform.
+2. **Fidelity**, from the run's own `stage*/fidelity/lpips`. Rising sharply against E3's ~0.30
+   is reward hacking becoming affordable — set `coupling.reward_target` (config-file-only) and
+   re-probe rather than pressing on.
+3. **Stability**: `loss_det` should fall rather than oscillate, and `loss_gan` should not
+   diverge. A one-step check that the dose is trainable at all.
+
+Then bump `coupling.grad_scale` in **both** `experiments/e3_pix2pix_{control,loop}.yaml` — the
+control's value is inert (no detector is built at weight 0) but must match, which
+`test_control_and_loop_configs_differ_only_by_design` enforces — and relaunch step 5's loop
+verbatim. ~72 GPU-hours. Step 6's tables stay in place as the record of the uncalibrated dose,
+with the new campaign's beside them.
 
 ---
 
@@ -2244,4 +2346,8 @@ risk row anticipated.
       per-stage claim can survive a multiplicity correction (Bonferroni would need 0.0042).
 - [ ] λ_det's effect is not monotone in λ, not only in the stage: E3's paired differences run
       0 → +0.024 → +0.024 → +0.007 as λ goes 0 → 1 → 2 → 3. Step 1's correction about
-      non-monotone stages needs this second half.
+      non-monotone stages needs this second half. **Withdrawn by step 7** — the span was
+      0.9%–2.3% of the objective, too narrow to be a dose-response test at all.
+- [ ] Report the objective's actual composition, not its nominal weights. At `l2: 1.0`,
+      `lpips: 5.0`, `gan: 1.0` the measured split is LPIPS 44% / GAN 52% / l2 1.0% /
+      detection 2.3% (M1.2 step 7). Any sentence calling the pixel term dominant is wrong.

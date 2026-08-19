@@ -120,8 +120,11 @@ class LossConfig(ConfigBase):
     :class:`CouplingConfig`.
     """
 
-    # (float) pixel L2 against the real visible frame. Dominant, and the reason a
-    # translator with no other term produces a blurred conditional mean.
+    # (float) pixel L2 against the real visible frame. The reason a translator with no
+    # other term produces a blurred conditional mean -- but *not* dominant at these
+    # weights: measured over E3's campaign it is 1.0% of the objective, against LPIPS at
+    # 44% and GAN at 52% (TASKS.md M1.2 step 7). Raising `lpips`/`gan` is what made it
+    # small; the scale of the raw MSE on [0,1] images (~0.03) is the other half.
     l2: float = 1.0
     # (float) LPIPS perceptual term -- what buys back the texture L2 blurs away. Also the
     # quantity the fidelity floor watches (PLAN.md §8), so zeroing it disables that
@@ -143,7 +146,11 @@ class CouplingConfig(ConfigBase):
     # (float) constant downscale on the detection gradient before it reaches the
     # translator. The reward-tuning literature runs this small: ReFL 1e-3, AlignProp 1e-2.
     # Too high and the detector's gradient overwhelms fidelity, producing adversarial
-    # texture that scores well and looks wrong.
+    # texture that scores well and looks wrong. Too low and the term does nothing at all,
+    # which is the failure that actually happened: this default put the detection term at
+    # 2.3% of the objective in E3, and the campaign's null was uninterpretable as a
+    # result. Calibrate it per backbone with `scripts/loss_share.py` -- the effective
+    # weight is `task_weights[stage] * grad_scale`, so this is not read alone.
     grad_scale: float = 1.0e-2
     # (float|null) saturating-reward target: once the detection loss falls below this the
     # sample stops being rewarded, which blunts reward hacking directly (ReFL's
