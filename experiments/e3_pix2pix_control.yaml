@@ -57,7 +57,10 @@ coupling:
   # single [0.0] stage -- that would reintroduce M1.1's budget confound, since the loop arm
   # trains 400 warm-started epochs across its four stages and this must match exactly.
   task_weights: [0.0, 0.0, 0.0, 0.0]
-  grad_scale: 1.0e-2
+  # Calibrated, not inherited: at AlignProp's 1.0e-2 the detection term was 2.3% of the
+  # objective and E3's null was uninterpretable (TASKS.md M1.2 steps 7-8). 0.15 puts the ramp
+  # at 11/17/23%. Re-measure with `scripts/loss_share.py` if any loss weight above changes.
+  grad_scale: 0.15
   reward_target: null
 
 detector:

@@ -2136,7 +2136,7 @@ once the share says the dose is real.
 - [x] Probe: one seed at the candidate `grad_scale`, share re-read, stability confirmed
 - [x] `scripts/loss_share.py --first-epochs N` and an `epochs` column on the report — the probe
       is a quarter the length of a campaign run and nothing on the row said so
-- [ ] Both E3 configs bumped to the calibrated value
+- [x] Both E3 configs bumped to the calibrated value — `grad_scale: 0.15`
 - [ ] The twelve-run campaign relaunched, and step 6's tables replaced with its result
 
 **The probe is a calibration, not a measurement.** With a per-seed sd of ≈0.053 (step 6 finding
@@ -2210,11 +2210,77 @@ epochs the translator is a quarter trained, so its 0.7451 → 0.8158 stage ramp 
 length as much as anything else. That confound is exactly what the control arm exists to
 subtract, and the probe has no control arm.
 
+#### Matched-epoch comparison — and the loss-space noise floor
+
+`--first-epochs 25` on `e3-loop-s0` puts both runs on equal terms (same seed, same arm, same
+length; `grad_scale` 0.01 vs 0.15). Stage 0 is λ-inert, so its residual *is* the run-to-run
+noise floor, now measured in loss space for the first time:
+
+| stage 0, λ inert | `loss_l2` | `loss_lpips` | `loss_gan` | fidelity total |
+| --- | --- | --- | --- | --- |
+| gap between two nominally identical runs | +3.4% | +3.6% | +11.8% | +7.1% |
+
+**This is expected and by design, not a determinism defect.** `seeding.py`'s docstring is
+explicit that `torch.use_deterministic_algorithms` and the cuDNN flags are deliberately absent,
+because "cuDNN non-determinism is precisely the variance E3 exists to quantify across seeds";
+`test_training_is_bit_identical_at_any_worker_count` is a CPU test of the data pipeline, not of
+kernels. Two GPU runs at one seed are not expected to reproduce. Step 6 finding 1 already priced
+this in mAP space (sd ≈0.053); the table above is its counterpart in loss space, and it is the
+resolution limit for every `loss_share.py` comparison from here on.
+
+Read against that floor:
+
+* **Raw detection loss does not detectably move.** `loss_det / grad_scale` goes 3.13 → 2.97,
+  2.86 → 2.97, 2.72 → 2.76 across stages 1–3 under **15× the weight** — i.e. −5.0 / +3.9 / +1.4%,
+  every one of them inside the floor. Not "λ_det fails to reduce its own loss"; the comparison
+  cannot resolve anything under ~10%. Worth restating that this is not the endpoint either: the
+  in-loop detector is the frozen yolo11n, and E3's claim rests on the independent yolo11s judge.
+* **Fidelity improvement is what the dose costs.** Within-run across stages 0→3, `loss_lpips`
+  falls 25.2% at `grad_scale` 0.01 but only 9.5% at 0.15 — a 15.7-point gap against a 3.6% floor,
+  the one comparison here that clears it by a wide margin. The fidelity total follows: −6.0%
+  versus +10.3%. `loss_gan` (+20.1% vs +35.2%) points the same way but sits close enough to its
+  own 11.8% floor to stay a watch item.
+
+So the dose is doing something measurable, and what it measurably does is trade fidelity
+improvement. Whether it buys detection is exactly what the campaign's control arm is for.
+
+**`reward_target` stays `null` for the relaunch.** Setting it now would change the dose and its
+guard together, and any fidelity result would then be unattributable. The campaign has a control
+arm at every stage and a per-stage LPIPS readout; if the trade turns out worse than E3's
+measured −0.002 ± 0.016 bound, that is a finding, and `reward_target` is the response to it
+rather than a precaution against it.
+
 Then bump `coupling.grad_scale` in **both** `experiments/e3_pix2pix_{control,loop}.yaml` — the
 control's value is inert (no detector is built at weight 0) but must match, which
 `test_control_and_loop_configs_differ_only_by_design` enforces — and relaunch step 5's loop
-verbatim. ~72 GPU-hours. Step 6's tables stay in place as the record of the uncalibrated dose,
-with the new campaign's beside them.
+verbatim **except for the run names** — see below. ~72 GPU-hours. Step 6's tables stay in place
+as the record of the uncalibrated dose, with the new campaign's beside them.
+
+**Relaunch under new names, or the uncalibrated campaign is destroyed.** There is no
+`config_hash` guard on a run directory: without `--resume`, `run_loop` starts from
+`results = []` and rewrites `metrics.json` stage by stage, so reusing `e3-<arm>-s<n>` overwrites
+seed-for-seed. Those twelve run dirs are the only copy of the 0.01 campaign — step 6's tables
+record its *results*, but the per-epoch loss curves behind step 7's shares and step 8's noise
+floor live nowhere else, and `runs/` is gitignored.
+
+```bash
+for s in 0 1 2 3 4 5; do
+  for arm in control loop; do
+    uv run t2o loop --config experiments/e3_pix2pix_$arm.yaml \
+      --data "$DATA" --in-loop-weights "$OPTICAL" --eval-init-weights "$OPTICAL" \
+      --seed $s --name e3b-$arm-s$s --group e3-pix2pix-g015 --wandb --device cuda:0
+  done
+done
+uv run t2o aggregate --runs 'runs/e3b-*' --stage 3 \
+  --metric zero_shot.map50 fidelity.lpips zero_shot.per_class_ap50.Switch
+uv run python scripts/loss_share.py --runs 'runs/e3b-loop-*'
+```
+
+The `e3b-` prefix also keeps `'runs/e3-*'` unambiguous: that glob still selects the old campaign
+alone, and `pair_runs` would refuse a mixed glob anyway (two runs per `(arm, seed)` cell — the
+same guard that correctly refused the probe against E3 in step 8). The trailing `loss_share`
+call confirms the achieved share at full length, since the 11/17/23% ramp was measured over 25
+epochs and the campaign runs 100.
 
 ---
 
