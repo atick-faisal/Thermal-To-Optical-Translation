@@ -1464,6 +1464,11 @@ PLAN.md §11 calls E3 "the most important experiment in the project"; §16 makes
 **causality** acceptance criterion. Scope here is the **pix2pix arm only** — the
 `pix2pix-turbo` cell waits on M2a and reuses every piece of tooling below.
 
+**Outcome (step 6): negative on the pre-registered endpoint** — stage-3 `zero_shot.map50`
+moved +0.0070 (p = 0.66) against a stage-0 null of −0.0063. §16's causality criterion is not
+satisfied. Whether that is a statement about coupling or about the *dose* is step 7's
+question: the effective λ_det was `task_weights × grad_scale` = 0.01/0.02/0.03, not 1/2/3.
+
 ### Design
 
 | arm | `coupling.task_weights` | translator epochs | in-loop detector |
@@ -1935,13 +1940,132 @@ change is result-neutral — but pulling mid-campaign would have left seeds 0–
 different trees, which is the same comparability rule step 2b's caveat states.
 `test_epoch_metrics_are_namespaced_and_never_carry_an_explicit_step` pins both halves.
 
-### Step 6 — record the outcome
+### Step 6 — record the outcome ✅
 
-- [ ] Results here; PLAN.md §11's E3 row and §16's causality criterion marked satisfied or not
+- [x] Results below. PLAN.md §11's E3 row records the pix2pix cell as negative; §16's
+      **causality criterion is not satisfied**.
 
-**A negative result is a real outcome.** If the paired stage-3 difference is not
-distinguishable from the stage-0 null, that is reportable, and it redirects the paper toward
-E8's low-annotation framing (PLAN.md §16's stated fallback) rather than C1's coupling claim.
+**E3's pix2pix arm is negative on its pre-registered endpoint.** Twelve runs, six paired seeds,
+400 warm-started epochs in both arms, judged by step 1's independent `yolo11s`. Per-arm
+mean ± sd:
+
+| metric | arm | stage 0 | stage 1 | stage 2 | stage 3 |
+| --- | --- | --- | --- | --- | --- |
+| `zero_shot.map50` | control | 0.7632 ± .0408 | 0.7679 ± .0560 | 0.7913 ± .0352 | 0.7987 ± .0309 |
+| `zero_shot.map50` | loop | 0.7568 ± .0438 | 0.7920 ± .0483 | 0.8151 ± .0390 | 0.8057 ± .0324 |
+| `fidelity.lpips` | control | 0.3104 ± .0098 | 0.2964 ± .0115 | 0.2893 ± .0124 | 0.3009 ± .0139 |
+| `fidelity.lpips` | loop | 0.3200 ± .0293 | 0.3021 ± .0211 | 0.2968 ± .0196 | 0.2989 ± .0099 |
+| Switch AP50 | control | 0.4131 ± .1091 | 0.4434 ± .1488 | 0.5064 ± .0710 | 0.5310 ± .0693 |
+| Switch AP50 | loop | 0.4561 ± .1076 | 0.5519 ± .0398 | 0.5733 ± .0539 | 0.5626 ± .0939 |
+
+Paired loop − control, exact two-sided sign-flip over 2⁶ assignments, with bootstrap CI:
+
+| metric | stage 0 (null) | stage 1 | stage 2 | **stage 3 (headline)** |
+| --- | --- | --- | --- | --- |
+| `zero_shot.map50` | −0.0063, p=.875, [−.045, +.040] | +0.0241, p=.281, [−.011, +.058] | +0.0238, p=.312, [−.014, +.055] | **+0.0070, p=.656, [−.020, +.032]** |
+| `fidelity.lpips` | +0.0096, p=.875, [−.011, +.040] | +0.0056, p=.344, [−.003, +.015] | +0.0075, p=.500, [−.003, +.023] | **−0.0019, p=.812, [−.016, +.011]** |
+| Switch AP50 | +0.0430, p=.406, [−.050, +.136] | +0.1085, p=.031, [+.016, +.214] | +0.0669, p=.094, [+.019, +.114] | **+0.0316, p=.562, [−.046, +.115]** |
+
+The Design section above fixed the decision rule before the campaign ran: *"If the stage-3
+effect is not clearly larger than the stage-0 difference, E3 is negative and gets reported that
+way."* Stage 3 is **+0.0070** against a null of **−0.0063** — the same magnitude — at p = 0.66.
+By its own rule, E3's pix2pix arm is negative.
+
+**1. The null control behaved as a null, so this is a measurement and not a broken campaign.**
+−0.0063 at p=0.875 with a CI straddling zero almost symmetrically. That is the single most
+important line in the table: step 2's RNG audit and step 2b's `workers` fix were exactly the
+work that makes the stage-0 contrast interpretable, and it came out where it had to.
+
+**2. Step 1's noise-floor estimate, taken at n=1, was right.** It measured 0.0591 from one
+paired λ=0 draw. Stage 0's CI half-width here (0.042 ≈ 1.96·SE) implies a per-seed sd of
+**≈0.053**. The number the whole six-seed budget was justified against holds.
+
+**3. What six paired seeds actually bought: ±0.026 resolution** — 2.3× tighter than a single
+paired draw. So the honest claim is *"no effect larger than about +3 mAP50 points"*, not "no
+effect": a true +0.02 sits inside the stage-3 CI. §16's causality criterion is still not
+satisfied — an unmeasurable effect cannot establish causality — but the writeup must state the
+bound rather than assert a zero.
+
+**4. There is no dose-response in λ.** The paired difference goes 0 → +0.024 → +0.024 → +0.007,
+peaking at the *smallest* nonzero λ and decaying as λ triples. Both arms converge over stages
+(control 0.7632 → 0.7987, loop 0.7568 → 0.8057), which is what a shared 400-epoch budget plus a
+per-stage detector fine-tune produces on its own. Extends step 1's finding 3: λ_det's effect is
+not monotone in the *stage*, and now not monotone in the *weight* either.
+
+**5. Fidelity-neutral, with a bound — M1.1's reward-hacking question is closed at n=6.** λ_det
+moves stage-3 LPIPS by −0.0019, CI [−0.016, +0.011]. The detection gradient at the `grad_scale`
+PLAN.md §8 prescribes neither degrades nor improves perceptual fidelity. That is worth reporting
+whatever happens to C1.
+
+**6. Switch — where step 1 said the gain lived — does not survive.** Its own stage-0 null is
+**+0.043, larger than its stage-3 effect of +0.032**; the loop arm is simply noisier on the
+rarest class. The one cell under 0.05 (stage 1, +0.1085) is 1 of 12 reported tests sitting
+*exactly* on the n=6 p-floor of 0.031, where Bonferroni would need 0.0042 — so **no per-class
+claim is attainable in this design at any effect size.** Logged as a hypothesis to pre-register
+for the turbo arm, not as a finding. (The one detail worth carrying: at stage 1 the loop arm's
+Switch sd is 0.0398 against the control's 0.1488. If λ_det does anything here it may be variance
+reduction on the hardest class rather than mean improvement — but it does not reappear at stages
+2 or 3, so it is an observation, not a result.)
+
+**7. E8 is not an escape route from this, and the earlier note here saying otherwise was
+wrong.** `data.annotation_fraction` gates only the batch's `cls`/`bboxes`
+(`data/dataset.py:188-191`) — that is, only the *loop* arm's own supervision, since the control
+never reads annotations at all. Lowering it makes the two arms **more** alike, not less, so a
+low-annotation E3 cannot recover a causality claim that failed at full annotation. E8 remains a
+valid and probably headline-worthy question about the *translator's* data efficiency (PLAN.md
+§11), but it answers a different question than C1's.
+
+**The one thing that blocks reading this as a claim about coupling: λ_det was never 1/2/3.**
+`translators/pix2pix.py:161-163` adds `task_weight * detection` to the total, while
+`coupling/detection_loss.py:103` has *already* multiplied by `grad_scale`. Both E3 configs set
+`grad_scale: 1.0e-2`, so the ramp the optimiser saw was **0.01 / 0.02 / 0.03**, against
+`l2: 1.0` + `lpips: 5.0` + `gan: 1.0`. That downscale is PLAN.md §8's anti-reward-hacking
+guardrail — and M1.1, then finding 5 above, established there was no hack to guard against. The
+guardrail set aggressively against a problem that did not materialise is now the prime suspect
+for the null.
+
+So the campaign **cannot yet distinguish "coupling does not help pix2pix at this data scale"
+from "λ_det was too small to move the optimiser"** — a mechanism result and a dose result, with
+very different consequences. **Do not launch M2a's turbo arm until step 7 settles it**: same
+`grad_scale`, same possible null, another ~72 GPU-hours.
+
+### Step 7 — was λ_det ever large enough to matter?
+
+- [ ] Run the diagnostic on the finished campaign and record the share here
+
+Zero GPU cost: every loop run's `metrics.json` already holds `task_weight` per stage and
+`loss_det`/`loss_total` per epoch (`StageResult` → `asdict`). `loss_det` as recorded is already
+post-`grad_scale`, so `task_weight * loss_det / loss_total` *is* the detection term's share of
+the objective, with no reconstruction of the weight chain needed.
+
+`scripts/loss_share.py` reports it, pooled over epochs and over the campaign's loop runs:
+
+```bash
+uv run python scripts/loss_share.py --runs 'runs/e3-loop-*'
+```
+
+It exists as a script rather than a `t2o aggregate --metric` path because
+`analysis/aggregate.py::metric_value` walks dicts and `epochs` is a list. W&B is no help either:
+the step bug fixed in `accfe56` dropped precisely the stages that have a detection term.
+Control runs are skipped rather than pooled in (they record no `loss_det` at all), and runs that
+disagree on `task_weight` or `grad_scale` are refused, so a mis-globbed `--runs` cannot quietly
+average two experiments.
+
+**The decision rule, written before the number is known:**
+
+- **share ≲ 5%** → the null is *dose-limited*. Re-calibrate λ before any further six-seed
+  campaign, in either backbone. The share also gives the candidate λ for free: `L_det`'s
+  magnitude is roughly stable across training, so scale `grad_scale` by the ratio needed to
+  bring the term to ~20–30% of the objective.
+- **share ≳ 20%** → the null is a *mechanism* result. E3's pix2pix arm is written up negative as
+  it stands, and the turbo arm becomes the test of whether a stronger prior changes that.
+
+**The trap to avoid: a λ sweep must not be read off mAP at one seed.** With a per-seed sd of
+≈0.053 (finding 2), a single run cannot resolve the +0.02 being chased — that is precisely the
+n=1 mistake M1.2 exists to correct. A one-seed run at the candidate λ is a *stability* check
+(does LPIPS collapse, does the GAN diverge, does the detection term stay bounded), never a
+measurement. The measurement is another paired six-seed campaign, and it only earns its GPU time
+once the share says the dose is real.
 
 ---
 
@@ -2112,3 +2236,12 @@ risk row anticipated.
       backprop detection loss into its generator, and that our bilevel arm fixes this.
 - [ ] Licensing: sd-turbo is Stability AI Non-Commercial; CUT bundles NVIDIA StyleGAN2
       (non-commercial); ultralytics is AGPL-3.0.
+- [ ] Report the effective λ_det as `coupling.task_weights × coupling.grad_scale`. The paper
+      must never say "λ_det = 3": `DetectionTaskLoss.forward` already applies `grad_scale`
+      before `fit` applies the stage weight, so E3 ran at 0.01/0.02/0.03 (M1.2 step 6).
+- [ ] Pre-register **one** endpoint. At n=6 the exact sign-flip test resolves ±0.026 mAP50 and
+      bottoms out at p = 0.031, so with 3 metrics × 4 stages reported no per-class or
+      per-stage claim can survive a multiplicity correction (Bonferroni would need 0.0042).
+- [ ] λ_det's effect is not monotone in λ, not only in the stage: E3's paired differences run
+      0 → +0.024 → +0.024 → +0.007 as λ goes 0 → 1 → 2 → 3. Step 1's correction about
+      non-monotone stages needs this second half.

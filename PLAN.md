@@ -542,7 +542,7 @@ E1–E10 from `RESEARCH_FINDINGS.md` §7 survive. Changes:
 | --- | --- |
 | E1 reference bracket | Unchanged. Detector on {raw thermal, real visible} × {detector trained on thermal, on visible}. The server's existing weights cover most of this. |
 | E2 backbone comparison | `{pix2pix, pix2pix-turbo, LBBDM-f4}` paired at λ_det=0; `{CUT}` unpaired. UNSB optional. |
-| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. |
+| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. **The pix2pix cell is done and it is NEGATIVE** (TASKS.md M1.2 step 6): six paired seeds, stage-3 zero-shot mAP50 +0.0070 (p = 0.66, CI [−0.020, +0.032]) against a stage-0 null of −0.0063, LPIPS unchanged (−0.002), and no dose-response in λ. §16's causality criterion is **not satisfied**. One caveat gates what that means: the effective λ_det is `task_weights × coupling.grad_scale` = 0.01/0.02/0.03, not 1/2/3, so the null may be dose- rather than mechanism-limited. **The pix2pix-turbo cell stays open but must not launch until M1.2 step 7's λ calibration reports** — same `grad_scale`, same possible null, another ~72 GPU-hours. |
 | **E4 coupling mechanism** | **Scope reduced.** Was `{cascaded, bilevel (TarDAL), meta-feature (MetaFusion)}`. Both comparison arms are unportable — see below. Becomes `{cascaded, bilevel-reimplemented}`, meta-feature deferred. |
 | **E5 gradient tractability** | **Reframed.** Was "which approximation makes backprop fit". Now: *exact* full-generator gradients through a one-step distilled model vs. *truncated* ReFL/K gradients through multi-step LBBDM. A cleaner and more publishable question. |
 | E6 schedule | Unchanged. Warmup vs none; joint vs alternating; λ_det sweep. |
@@ -686,6 +686,22 @@ Unchanged from `RESEARCH_FINDINGS.md` §10. Begin drafting when all five hold: m
 shows the loop drives the gain, seed-stable), stability (≥3 seeds, significance-tested, no
 collapse), and faithfulness (hallucination rates low and reported).
 
+**Status after M1.2 (2026-08-19): causality is NOT satisfied.** E3's pix2pix arm came back
+null — stage-3 zero-shot mAP50 +0.0070, p = 0.66, against a stage-0 null of −0.0063 (TASKS.md
+M1.2 step 6). *Stability*'s methodology was met in full (six seeds, exact sign-flip test, no
+collapse), and six paired seeds resolve ±0.026, so the claim is "no effect above ~+3 mAP50
+points" rather than a demonstrated zero. Margin is untouched by E3 — that criterion compares
+the method to baselines, not the ablation — but the implication is direct: whatever margin
+this method holds over baselines is contributed by the **translator**, not by the coupling.
+Two things must resolve before causality can be revisited: M1.2 step 7's λ calibration (the
+effective λ_det was 0.01–0.03, not 1–3), and then the pix2pix-turbo cell.
+
 **Fallback framing:** if the loop helps only in low-annotation regimes, that remains a
 strong honest Q1 story — pivot to data-efficiency and operator interpretability. Given 850
 pairs, treat this as the *likely* outcome rather than the fallback.
+
+**But the fallback is not a substitute for causality, and cannot be reached by lowering
+`annotation_fraction` in E3.** That knob gates only the batch's `cls`/`bboxes`, i.e. only the
+λ_det>0 arm's own supervision — the λ_det=0 control never reads annotations at all — so
+reducing it makes the two arms *more* alike, not less. E8 is a question about the translator's
+data efficiency; it answers something different from C1.
