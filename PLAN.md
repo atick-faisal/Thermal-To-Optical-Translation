@@ -337,8 +337,9 @@ Six things that bite, all already handled in the Clean-SeAFusion port:
   *segmentation* loss scale, not a detection loss — recalibrate empirically in Phase 0.
   **This recalibration was skipped, and E3 paid for it (TASKS.md M1.2 step 7).** At
   `grad_scale: 1.0e-2` the detection term was measured at 0.9 / 1.7 / **2.3%** of the
-  objective across the ramp — the smallest term in it by a factor of ~19, against LPIPS at
-  44% and GAN at 52%. A null measured at that dose says nothing about coupling. The
+  objective across the ramp — roughly 19× smaller than the LPIPS term it competed against,
+  which was itself 44% of the objective, with GAN at 52%. (Not the objective's *smallest*
+  term: `loss_l2` measured 1.0%.) A null measured at that dose says nothing about coupling. The
   calibrated candidate is `grad_scale: 0.15`, targeting a 20–30% share; the guardrail this
   downscale was providing transfers to `reward_target` plus the per-stage LPIPS readout,
   whose current bound is ±0.016.

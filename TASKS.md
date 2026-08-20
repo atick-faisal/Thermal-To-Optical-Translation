@@ -2044,7 +2044,9 @@ Pooled over epochs and over the six loop runs (`scripts/loss_share.py --runs 'ru
 | 3 | 3 | 0.03 | 0.0323 | 1.4758 | 1.7490 | 0.0261 | 3.3354 | 0.0782 | **2.3%** |
 
 The decision rule fired on the ≲5% branch, and not marginally: at the *top* of the ramp the
-detection term was **1/43rd of the objective** and the smallest term in it by a factor of ~19.
+detection term was **1/43rd of the objective**, roughly **19× smaller than the LPIPS term** it
+had to compete against for the optimiser's attention. (It was not the objective's *smallest*
+term — `loss_l2` at 1.0% is smaller still; see the composition paragraph below.)
 E3 did not test the coupling hypothesis at a dose capable of refuting it.
 
 **PLAN.md §8 predicted exactly this and the instruction was skipped.** Its second guardrail
