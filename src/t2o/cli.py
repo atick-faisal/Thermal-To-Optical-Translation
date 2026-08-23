@@ -502,6 +502,35 @@ def _run_aggregate(args: argparse.Namespace) -> int:
                 marker,
             )
 
+    # Printed unconditionally beside the paired block, for the same reason stage 0's null is
+    # (aggregate.py::aggregate): the finish-line contrast is only interpretable once you know
+    # whether the arms started level, and a wide stage-0 draw is exactly when reading one
+    # without the other goes wrong.
+    for metric in report.metrics:
+        rows = [r for r in report.trajectory if r.metric == metric]
+        if not rows:
+            continue
+        logger.info(
+            "trajectory (loop - control) of the gain over stage %d, %s -- sensitivity "
+            "analysis, not the pre-registered endpoint",
+            rows[0].baseline_stage,
+            metric,
+        )
+        for result in rows:
+            logger.info(
+                "  stage %d        n=%d  control %+.4f  loop %+.4f  diff %+.4f  p=%.4f  "
+                "95%% CI [%+.4f, %+.4f]%s",
+                result.stage,
+                result.n,
+                result.control_gain,
+                result.loop_gain,
+                result.mean_difference,
+                result.p_value,
+                result.ci_low,
+                result.ci_high,
+                " <-- headline" if result.stage == headline else "",
+            )
+
     if args.csv is not None:
         logger.info("wrote %s", write_csv(tidy_rows(report), args.csv))
     return 0

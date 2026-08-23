@@ -121,6 +121,47 @@ class PairedResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TrajectoryResult:
+    """Paired difference-of-differences: how much more one arm *gained* than the other.
+
+    The stage-N paired difference asks "how far apart are the arms at the finish line".
+    This asks "how much further did each arm travel", by subtracting each arm's own
+    baseline-stage value from its own stage-N value before pairing. The two answer the same
+    question only when the arms start level -- and stage 0 is a *measurement* of run-to-run
+    noise, not a guarantee of levelness, so when that draw comes out wide the finish-line
+    contrast inherits an offset this one is immune to by construction.
+
+    Not a new hypothesis: ``aggregate``'s own decision rule already directs stage N to be
+    read against stage 0 ("if the stage-3 effect is not clearly larger than the stage-0
+    difference, E3 is negative"). This is that rule's arithmetic, made exact instead of
+    eyeballed. It is a sensitivity analysis and must be reported as one -- the pre-registered
+    endpoint stays the paired stage-N difference (TASKS.md M1.2 step 4, step 8).
+
+    Algebraically ``differences[i]`` is the stage-N paired difference minus the baseline
+    paired difference for that seed, which is how it is computed -- so it is exactly the
+    contrast the rule names, not an approximation of it.
+    """
+
+    stage: int
+    baseline_stage: int
+    metric: str
+    seeds: tuple[int, ...]
+    differences: tuple[float, ...]  # (loop gain) - (control gain), in `seeds` order
+    mean_difference: float
+    p_value: float
+    ci_low: float
+    ci_high: float
+    # Each arm's own mean baseline -> stage-N movement. Printed beside the contrast because
+    # a difference of gains is unreadable without knowing whether both arms rose.
+    control_gain: float
+    loop_gain: float
+
+    @property
+    def n(self) -> int:
+        return len(self.differences)
+
+
+@dataclass(frozen=True, slots=True)
 class AggregateReport:
     """Everything one `t2o aggregate` invocation computed."""
 
@@ -129,6 +170,8 @@ class AggregateReport:
     metrics: tuple[str, ...]
     summaries: tuple[ArmSummary, ...]
     paired: tuple[PairedResult, ...]
+    # Empty when only one stage is common to every run: a gain needs two points.
+    trajectory: tuple[TrajectoryResult, ...] = ()
 
 
 def load_run(run_dir: Path | str) -> RunRecord:
@@ -301,6 +344,12 @@ def aggregate(
     control (both arms are lambda = 0 there) come out beside stage 3 for free rather than
     needing a flag of its own. If the stage-3 effect is not clearly larger than the stage-0
     difference, E3 is negative -- so the two are only useful side by side.
+
+    Every stage above the baseline also gets a :class:`TrajectoryResult`, which applies the
+    same test to each arm's own movement away from that baseline. When the stage-0 draw comes
+    out level the two contrasts agree; when it does not, the trajectory is the one that still
+    means what the rule intended. See that class for why it is a sensitivity analysis rather
+    than a second endpoint.
     """
     runs = tuple(load_run(run_dir) for run_dir in run_dirs)
     if not runs:
@@ -316,10 +365,17 @@ def aggregate(
 
     summaries: list[ArmSummary] = []
     paired: list[PairedResult] = []
+    trajectory: list[TrajectoryResult] = []
+    # The earliest stage every run shares, not a hardcoded 0: `stages=[1, 2, 3]` is a legal
+    # request, and a gain is only defined against a baseline that is actually present.
+    baseline_stage = stage_indices[0]
     for metric in metrics:
+        arm_means: dict[tuple[Arm, int], float] = {}
+        differences_by_stage: dict[int, tuple[float, ...]] = {}
         for stage in stage_indices:
             for arm in (Arm.CONTROL, Arm.LOOP):
                 values = tuple(_stage_metric(run, stage, metric) for run in runs if run.arm is arm)
+                arm_means[(arm, stage)] = float(np.mean(values))
                 summaries.append(
                     ArmSummary(
                         arm=arm,
@@ -337,6 +393,7 @@ def aggregate(
                 _stage_metric(loop, stage, metric) - _stage_metric(control, stage, metric)
                 for control, loop in pairs.values()
             )
+            differences_by_stage[stage] = differences
             low, high = bootstrap_ci(differences, resamples=resamples, seed=seed)
             paired.append(
                 PairedResult(
@@ -351,12 +408,43 @@ def aggregate(
                 )
             )
 
+        # Each seed's stage-N paired difference minus its own baseline paired difference --
+        # identically (loop gain) - (control gain), since the two control terms cancel.
+        # Computed this way rather than from four raw values so it cannot drift from the
+        # paired block above.
+        baseline_differences = differences_by_stage[baseline_stage]
+        for stage in stage_indices[1:]:
+            gains = tuple(
+                later - baseline
+                for later, baseline in zip(
+                    differences_by_stage[stage], baseline_differences, strict=True
+                )
+            )
+            low, high = bootstrap_ci(gains, resamples=resamples, seed=seed)
+            trajectory.append(
+                TrajectoryResult(
+                    stage=stage,
+                    baseline_stage=baseline_stage,
+                    metric=metric,
+                    seeds=tuple(pairs),
+                    differences=gains,
+                    mean_difference=float(np.mean(gains)),
+                    p_value=sign_flip_p_value(gains),
+                    ci_low=low,
+                    ci_high=high,
+                    control_gain=arm_means[(Arm.CONTROL, stage)]
+                    - arm_means[(Arm.CONTROL, baseline_stage)],
+                    loop_gain=arm_means[(Arm.LOOP, stage)] - arm_means[(Arm.LOOP, baseline_stage)],
+                )
+            )
+
     return AggregateReport(
         runs=runs,
         stages=stage_indices,
         metrics=tuple(metrics),
         summaries=tuple(summaries),
         paired=tuple(paired),
+        trajectory=tuple(trajectory),
     )
 
 

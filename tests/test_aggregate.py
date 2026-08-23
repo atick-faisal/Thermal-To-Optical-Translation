@@ -301,6 +301,123 @@ def test_aggregate_handles_several_metrics_in_one_pass(tmp_path: Path) -> None:
     assert all(result.mean_difference == pytest.approx(0.0) for result in lpips)
 
 
+def _campaign_with_a_stage_zero_offset(tmp_path: Path) -> Path:
+    """Six seeds whose arms start 0.04 apart and whose *gains* differ by exactly 0.0909.
+
+    Shaped after E3's calibrated campaign (TASKS.md M1.2 step 8), which is the case the
+    trajectory contrast exists for: a stage-0 null that drew wide (-0.0397) and a finish-line
+    effect (+0.0512) only 1.3x its magnitude. Per-seed level jitter is deliberately large and
+    identical in both arms, so it cancels out of the gain and survives in the finish line --
+    which is the property under test.
+    """
+    for seed in range(6):
+        level = 0.70 + 0.02 * seed
+        _write_run(
+            tmp_path,
+            f"e3b-control-s{seed}",
+            seed,
+            [0.0, 0.0, 0.0, 0.0],
+            [level, level + 0.01, level + 0.03, level + 0.0396],
+        )
+        _write_run(
+            tmp_path,
+            f"e3b-loop-s{seed}",
+            seed,
+            [0.0, 1.0, 2.0, 3.0],
+            [
+                level - 0.04,
+                level - 0.04 + 0.03,
+                level - 0.04 + 0.08,
+                level - 0.04 + 0.1305,
+            ],
+        )
+    return tmp_path
+
+
+def test_the_trajectory_is_immune_to_the_stage_zero_offset_the_finish_line_inherits(
+    tmp_path: Path,
+) -> None:
+    root = _campaign_with_a_stage_zero_offset(tmp_path)
+    report = aggregate(sorted(root.glob("e3b-*")), resamples=200)
+
+    at_stage_3 = next(r for r in report.paired if r.stage == 3)
+    null = next(r for r in report.paired if r.stage == 0)
+    # The finish-line contrast carries the offset: +0.0509 against a null of -0.04, the
+    # awkward 1.3x that motivated this whole comparison.
+    assert at_stage_3.mean_difference == pytest.approx(0.0509, abs=1e-9)
+    assert null.mean_difference == pytest.approx(-0.04, abs=1e-9)
+
+    gain = next(r for r in report.trajectory if r.stage == 3)
+    assert gain.baseline_stage == 0
+    # The offset is gone: every seed's gain difference is the same 0.0909, so the spread the
+    # level jitter created in the finish-line contrast is absent here entirely.
+    assert gain.mean_difference == pytest.approx(0.0909, abs=1e-9)
+    assert gain.differences == pytest.approx((0.0909,) * 6, abs=1e-9)
+    assert gain.control_gain == pytest.approx(0.0396, abs=1e-9)
+    assert gain.loop_gain == pytest.approx(0.1305, abs=1e-9)
+    assert gain.p_value == pytest.approx(2 / 64)
+
+
+def test_the_trajectory_is_the_stage_difference_of_the_paired_differences(
+    tmp_path: Path,
+) -> None:
+    """The identity TrajectoryResult's docstring claims, checked per seed rather than on means."""
+    root = _campaign_with_a_stage_zero_offset(tmp_path)
+    report = aggregate(sorted(root.glob("e3b-*")), resamples=200)
+
+    baseline = next(r for r in report.paired if r.stage == 0)
+    for gain in report.trajectory:
+        later = next(r for r in report.paired if r.stage == gain.stage)
+        assert gain.seeds == later.seeds == baseline.seeds
+        expected = [a - b for a, b in zip(later.differences, baseline.differences, strict=True)]
+        assert gain.differences == pytest.approx(expected, abs=1e-12)
+
+
+def test_arms_that_gain_equally_leave_no_trajectory_effect(tmp_path: Path) -> None:
+    """Both arms climb, by the same amount, from different levels -- the contrast sees nothing.
+
+    The finish-line difference here is a flat -0.04 at both stages and would read as a real
+    (if negative) effect; the gain contrast correctly reports that lambda_det changed nothing.
+    """
+    for seed in range(6):
+        level = 0.70 + 0.02 * seed
+        _write_run(tmp_path, f"e3b-control-s{seed}", seed, [0.0, 0.0], [level, level + 0.05])
+        _write_run(
+            tmp_path, f"e3b-loop-s{seed}", seed, [0.0, 1.0], [level - 0.04, level - 0.04 + 0.05]
+        )
+
+    report = aggregate(sorted(tmp_path.glob("e3b-*")), resamples=200)
+    gain = next(r for r in report.trajectory if r.stage == 1)
+    assert gain.mean_difference == pytest.approx(0.0, abs=1e-12)
+    assert gain.control_gain == pytest.approx(gain.loop_gain, abs=1e-12)
+    # All differences zero: every sign assignment reaches |mean| = 0, so p is 1.0 -- the
+    # uninformative end of the scale, not the 2/2**n floor.
+    assert gain.p_value == pytest.approx(1.0)
+
+
+def test_the_trajectory_baseline_is_the_first_requested_stage_not_a_hardcoded_zero(
+    tmp_path: Path,
+) -> None:
+    root = _campaign_with_a_stage_zero_offset(tmp_path)
+    report = aggregate(sorted(root.glob("e3b-*")), stages=[1, 2, 3], resamples=200)
+
+    assert {r.baseline_stage for r in report.trajectory} == {1}
+    assert {r.stage for r in report.trajectory} == {2, 3}
+
+
+def test_one_shared_stage_yields_no_trajectory_at_all(tmp_path: Path) -> None:
+    """A gain needs two points; a campaign stopped after stage 0 has one."""
+    # The loop run declares the full ramp and recorded only stage 0 -- still the loop arm,
+    # since the arm comes from config.yaml's task_weights and not from what finished.
+    _write_run(tmp_path, "e3b-control-s0", 0, [0.0, 0.0, 0.0, 0.0], [0.75])
+    _write_run(tmp_path, "e3b-loop-s0", 0, [0.0, 1.0, 2.0, 3.0], [0.71])
+
+    report = aggregate(sorted(tmp_path.glob("e3b-*")), resamples=200)
+
+    assert report.stages == (0,)
+    assert report.trajectory == ()
+
+
 def test_aggregate_refuses_runs_that_share_no_stage(tmp_path: Path) -> None:
     paths = [
         _write_run(tmp_path, "c", 0, [0.0, 0.0], [0.7, 0.7]),
