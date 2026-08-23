@@ -2556,8 +2556,9 @@ resolved: coupling was tested at 19.8% of the objective and moved the endpoint.
 - [x] Device fix — the first server run of the pass crashed on every image; see below
 - [x] `--write-back` — the rates land in `metrics.json`, so `t2o aggregate` answers C2 with
       the same paired test the +0.0512 rests on rather than by hand
-- [ ] `t2o faithfulness` over the twelve stage-3 exports — the evaluation-side half, and the
-      only remaining question about whether the +0.0512 is honest
+- [x] `t2o faithfulness` over the twelve stage-3 exports — **clean.** The coupled arm
+      invents no more objects, erases significantly fewer, and reproduces significantly more
+      of the detector's real-image behaviour. See "Campaign result: C2" below
 
 `metrics/faithfulness.py` has been complete since M0.5 and was wired to **nothing** — no engine,
 no analysis, no CLI. Finding 9 is what makes it load-bearing: an LPIPS cost that coincides with a
@@ -2593,6 +2594,53 @@ hallucination would have to be arriving through the detection term's own gradien
 outbidding LPIPS. That would make `reward_target` live and **hold the turbo campaign** — the
 same gate step 6 applied to the dose question, for the same reason. The prior after finding 9 is
 that it comes back clean.
+
+### Campaign result: C2 — reward hacking is ruled out
+
+Stage 3, `runs/e3b-*`, twelve exports scored with the reference `yolo11s`, n = 6 paired seeds.
+
+| metric | control | loop | loop − control | p |
+| --- | --- | --- | --- | --- |
+| false-object rate (lower better) | 0.1918 ± 0.0245 | 0.1629 ± 0.0169 | **−0.0289** | 0.156 |
+| missed-object rate (lower better) | 0.1962 ± 0.0226 | 0.1592 ± 0.0118 | **−0.0370** | **0.031** |
+| detection-consistency (higher better) | 0.7677 ± 0.0220 | 0.7968 ± 0.0091 | **+0.0291** | **0.031** |
+
+**12. The pre-registered discriminator is satisfied: false objects did not rise.** The read
+written above was "flat or falling closes the reward-hacking question outright". It fell,
+−0.0289 (−15.1% relative). That is the criterion, and it is met. Reward hacking predicts the
+opposite sign — a translator buying mAP50 with invented components — and every seed's mAP50
+went up by +0.0512 while this went down.
+
+**13. But false-object rate is the only one of the three that is independent of the gain, and
+it is the one that does not reach significance.** Missed-object rate and detection-consistency
+both sit exactly on the 2/2⁶ floor, so all six seeds agreed on both — but "the detector finds
+more of the real objects on the translated image" is close to a restatement of "+0.0512 mAP50"
+in different units. They corroborate the endpoint; they are not independent evidence about
+hallucination. The genuinely independent number is false objects, and its honest reading is
+**directionally favourable, not established** (CI [−0.0559, +0.0039] crosses zero, consistent
+with p = 0.156 — the two agree here, unlike finding 11's three cells).
+
+**14. No per-metric claim survives a multiplicity correction, and none is being made.** Three
+metrics at stage 3 gives Bonferroni α = 0.0167, below the sign-flip floor of 0.031 — so at n=6
+*nothing* can clear it, the same structural limit the per-class note records. This is why
+false-object rate is designated the primary and the other two are reported as corroboration:
+that split was written down before the numbers arrived (the "Read on the faithfulness pass"
+paragraph above), not chosen after seeing which ones cleared.
+
+**15. The loop arm is markedly less variable on all three rates** — sd ratios loop/control of
+0.69, 0.52, 0.41. Recorded as an observation only: no test was run on the variances, n=6 gives
+almost no power for one, and this is exactly the kind of pattern that invites a story after the
+fact. Worth a pre-registered variance comparison in the turbo campaign, where it can be a
+prediction rather than a retrofit.
+
+**Consequence for finding 9 / §16 caveat 2.** The +0.0097 LPIPS gap is now bounded from two
+sides: no cost in the training objective (finding 9) and *better* object-level faithfulness
+here. What is left is a perceptual-texture difference that does not reach the objects, which is
+a reportable property of the method rather than an open threat. LPIPS remains in the tables.
+
+**Consequence for the plan.** `coupling.reward_target` **stays null** — there is no measured
+problem for it to respond to, and step 8's reasoning about not changing the dose and its guard
+together still applies. The hold on the turbo campaign is **released**.
 
 **`--write-back` is what makes the twelve invocations answerable.** C2's question is not
 "what is s0's false-object rate" but the paired loop-minus-control contrast across six seeds
@@ -2665,10 +2713,13 @@ positive at `grad_scale: 0.15`. Two conditions carry forward in its place, both 
    pretrained, so its `loss_det` starts at a different magnitude and the same value can land
    back near 2%. A 25-epoch `loss_share.py` probe costs hours; skipping it cost 72 GPU-hours
    last time.
-2. **Resolve step 9's faithfulness pass first if it comes back badly.** The calibrated dose
-   costs +0.0097 LPIPS on pix2pix; turbo has far more capacity to find a genuine hack. If
-   false objects rise with λ on the finished pix2pix exports, `reward_target` and the step 3
-   fidelity floor land *before* the turbo campaign, not after.
+2. ~~**Resolve step 9's faithfulness pass first if it comes back badly.**~~ **Released** —
+   the pass came back clean (step 9, "Campaign result: C2"): false objects fell rather than
+   rose, so `reward_target` stays null and the step 3 fidelity floor is not needed as a
+   precondition. What carries forward instead is the *instrument*: turbo's campaign scores
+   C2 the same way (`t2o faithfulness --write-back` on every stage-3 export, then one
+   `t2o aggregate`), because turbo has far more capacity to find a genuine hack and the
+   pix2pix numbers are only a baseline for it, not a guarantee about it.
 
 ### M2a — pix2pix-turbo (primary)
 
