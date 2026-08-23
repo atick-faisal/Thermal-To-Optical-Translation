@@ -703,7 +703,7 @@ warned on a renamed run.
 | --- | --- | --- |
 | ~~Phase 1 fails — translation never beats raw thermal~~ | E1 vs E3 at λ_det=0 | **Retired.** Measured: 0.7751 vs 0.1887 zero-shot mAP50, all four classes improved (TASKS.md M1). |
 | 850 pairs too few even for LoRA fine-tuning | Turbo overfits during Phase 2a | FLIR-aligned pretrain is already in the plan (§10); escalate to heavier augmentation and lower LoRA rank. |
-| **Reward hacking — mAP rises, images degrade** | **Fired, at low amplitude.** E3's calibrated campaign moves stage-3 mAP50 +0.0512 *and* LPIPS +0.0097 (M1.2 step 8 finding 9) | LPIPS alone cannot separate a fidelity trade from hallucination — `t2o faithfulness` (M1.2 step 9) counts invented and erased objects on the finished exports and decides it. If false objects rise with λ, `reward_target` becomes live and the turbo campaign waits. |
+| **Reward hacking — mAP rises, images degrade** | **Largely cleared on pix2pix.** Stage-3 mAP50 +0.0512 with evaluation LPIPS +0.0097 (p = 0.125) but **no training-loss cost at all** — λ-attributable change to `loss_lpips` is −0.09 pp (M1.2 step 8 finding 9) | The objective shows no perceptual sacrifice, so `reward_target` is not indicated here. `t2o faithfulness` (M1.2 step 9) still counts invented and erased objects on the finished exports — the evaluation-side half. Turbo re-tests all of this at far higher capacity. |
 | **λ_det miscalibrated for a new backbone** | Detection share outside 20–30% on `scripts/loss_share.py` | §8's per-backbone probe, 25 epochs, before any campaign. Skipping it once already cost 72 GPU-hours and an uninterpretable null. |
 | Gradient conflict — training unstable | Loss oscillation, collapse | Escalate cascaded → bilevel (E4). Meta-feature only if both fail. |
 | VRAM tighter than expected | Phase 0 OOM | SDPA + gradient checkpointing + bf16; reduce batch, then resolution. |
@@ -742,12 +742,16 @@ the result and must be reported:
    Differencing two paired quantities adds their variances, and the stage-0 difference is the
    noisy one. That test was **added after seeing the data**; it is a sensitivity analysis and
    never the endpoint. This remains the result's softest edge.
-2. **Fidelity may cost up to about 0.02 LPIPS, and no more can be said at n=6.** +0.0097 at
-   stage 3 (p = 0.125, CI [+.002, +.017]) and +0.0129 within-arm (p = 0.562, CI [−.025, +.054]).
-   Both arms improve; the coupled arm improves less, consistently in sign and significantly in
-   neither test. Detection up with fidelity down is §8's reward-hacking signature, and
-   `t2o faithfulness` (TASKS.md M1.2 step 9) exists to say which it is. **Until that runs, C1's
-   gain is established and its cost is characterised only by an LPIPS bound.**
+2. **Fidelity costs nothing measurable in training loss, and at most ~0.02 LPIPS at
+   evaluation.** The evaluation gap is +0.0097 at stage 3 (p = 0.125) and +0.0129 within-arm
+   (p = 0.562) — consistent in sign, significant in neither. In *training* loss there is no gap
+   at all: `loss_lpips` falls 18.42% in the control and 18.50% in the loop arm, and the
+   λ-attributable change to the perceptual term is **−0.09 percentage points** against a
+   λ-inert stage-0 null (TASKS.md M1.2 step 8 finding 9). So the detection term is not
+   outbidding LPIPS for the optimiser's attention, which is the specific mechanism §8's
+   saturating-reward guardrail exists to prevent — **`reward_target` is not indicated; there is
+   nothing in the objective to saturate.** What remains is a small generalisation difference,
+   and `t2o faithfulness` (step 9) is what says whether any of it is hallucination.
 
 The superseded campaign at `grad_scale: 1.0e-2` (+0.0070, p = 0.66) stays in the record: step 7
 measured its dose at 2.3% of the objective, so it never tested coupling at a dose capable of

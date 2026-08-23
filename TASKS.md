@@ -2259,14 +2259,21 @@ Read against that floor:
   every one of them inside the floor. Not "λ_det fails to reduce its own loss"; the comparison
   cannot resolve anything under ~10%. Worth restating that this is not the endpoint either: the
   in-loop detector is the frozen yolo11n, and E3's claim rests on the independent yolo11s judge.
-* **Fidelity improvement is what the dose costs.** Within-run across stages 0→3, `loss_lpips`
+* ~~**Fidelity improvement is what the dose costs.** Within-run across stages 0→3, `loss_lpips`
   falls 25.2% at `grad_scale` 0.01 but only 9.5% at 0.15 — a 15.7-point gap against a 3.6% floor,
   the one comparison here that clears it by a wide margin. The fidelity total follows: −6.0%
   versus +10.3%. `loss_gan` (+20.1% vs +35.2%) points the same way but sits close enough to its
-  own 11.8% floor to stay a watch item.
+  own 11.8% floor to stay a watch item.~~ **Withdrawn — the campaign refutes it** (finding 9
+  below). At 100 epochs with six runs per arm, `loss_lpips` falls **18.42% in the control and
+  18.50% in the loop arm**: no trade at all. This bullet compared one 25-epoch probe against a
+  100-epoch run truncated to its first 25, at one seed and across two `grad_scale` values —
+  three confounds where the campaign has none, and it needed a control arm it did not have.
+  The epoch-length trap this very section documents caught it after all.
 
-So the dose is doing something measurable, and what it measurably does is trade fidelity
-improvement. Whether it buys detection is exactly what the campaign's control arm is for.
+~~So the dose is doing something measurable, and what it measurably does is trade fidelity
+improvement.~~ **What the dose measurably does is reduce its own detection loss (finding 3)
+while leaving the fidelity terms alone (finding 9).** Whether it buys detection is exactly what
+the campaign's control arm was for, and it did.
 
 **`reward_target` stays `null` for the relaunch.** Setting it now would change the dose and its
 guard together, and any fidelity result would then be unattributable. The campaign has a control
@@ -2461,13 +2468,60 @@ not significant at n=6* — report both, and do not lean on the CI alone; and de
 while fidelity falls **is** the reward-hacking signature (PLAN.md §8), which the independent
 judge argues against but does not measure. `t2o faithfulness` exists to settle it — see below.
 
-**The trajectory reading weakens this further, and is the one to quote.** Within-arm, the
-control's LPIPS improves −0.0399 and the loop's −0.0270, a difference of **+0.0129, p = 0.562,
-CI [−.025, +.054]** — straddling zero. So the fidelity cost is *directionally consistent across
-both contrasts and statistically established by neither*. The strongest defensible claim is a
-bound: **λ_det at this dose does not cost more than about 0.02 LPIPS**, and may cost nothing.
-Writing it as a demonstrated trade would be overclaiming in the one place a reviewer looking for
-reward hacking will read most carefully.
+**The trajectory reading weakens this further.** Within-arm, the control's LPIPS improves
+−0.0399 and the loop's −0.0270, a difference of **+0.0129, p = 0.562, CI [−.025, +.054]** —
+straddling zero. So the evaluation cost is *directionally consistent across both contrasts and
+statistically established by neither*.
+
+**And in training loss there is no cost at all.** `scripts/loss_share.py --terms-only` on the
+control arm supplies the half that was missing (6 runs, 100 epochs, pooled):
+
+| stage | arm | `loss_l2` | `loss_lpips` | `loss_gan` | fidelity total |
+| --- | --- | --- | --- | --- | --- |
+| 0 | control | 0.0423 | 1.8422 | 1.6799 | 3.5645 |
+| 0 | loop | 0.0419 | 1.8288 | 1.6460 | 3.5167 |
+| 3 | control | 0.0331 | 1.5028 | 1.8686 | 3.4045 |
+| 3 | loop | 0.0317 | 1.4905 | 1.8211 | 3.3433 |
+
+Stage 0 is λ-inert in both arms, so the loop−control gap there is the **loss-space null**, and
+the λ-attributable change is the stage-3 gap minus it:
+
+| term | stage-0 gap (null) | stage-3 gap | λ-attributable |
+| --- | --- | --- | --- |
+| `loss_l2` | −0.95% | −4.23% | −3.28 pp |
+| `loss_lpips` | −0.73% | −0.82% | **−0.09 pp** |
+| `loss_gan` | −2.02% | −2.54% | −0.52 pp |
+
+Within-arm over the full ramp, `loss_lpips` falls **18.42%** in the control and **18.50%** in the
+loop arm. The detection term is not competing with the perceptual one for the optimiser's
+attention at this dose — it is added on top, and every fidelity term ends up equal or marginally
+*better* in the coupled arm. The loop arm's stage-3 fidelity-only total is 3.3433 against the
+control's 3.4045.
+
+**This changes what finding 9 means.** Training fidelity is untouched; only *validation* LPIPS
+differs, and only by +0.0097 at p = 0.125. Identical training-loss improvement with slightly
+worse validation transfer is a **generalisation gap**, not the optimiser trading the perceptual
+term away — which is the specific mechanism PLAN.md §8's guardrails were written against and
+the specific thing `reward_target` would fix. `reward_target` is therefore **not** indicated:
+there is nothing in the objective to saturate.
+
+The strongest defensible claim is a bound: **λ_det at this dose costs nothing measurable in
+training fidelity and at most ~0.02 LPIPS at evaluation.** Writing it as a demonstrated trade
+would be overclaiming in the one place a reviewer looking for reward hacking will read most
+carefully — and the earlier probe-derived claim that it *was* a trade (step 8's matched-epoch
+bullet) is withdrawn above.
+
+**A better loss-space noise floor falls out of this, superseding step 8's.** That floor was
+measured from two single runs at one seed (+3.4% l2 / +3.6% lpips / +11.8% gan / +7.1% total).
+Pooled 6-vs-6 the stage-0 gap is **0.95% / 0.73% / 2.02% / 1.34%** — about what averaging six
+runs per side predicts from the single-pair figure (1/√6 ≈ 0.41). Use the pooled numbers for any
+campaign-scale comparison; the single-run floor still governs probe-vs-probe reads.
+
+**What is still open is the export path.** Training loss is computed on float tensors; the
+evaluation LPIPS is scored on uint8 PNGs written through `export.py`'s per-image `clamp`
+normalisation (PLAN.md §12). That is the one place a difference could appear between two arms
+whose training fidelity matches, and it is untested. Worth a look only if the faithfulness pass
+comes back clean and the +0.0097 still needs explaining.
 
 **10. Switch is still not claimable, and the trajectory removes any remaining doubt.**
 +0.1035 at stage 3 against its own stage-0 null of +0.0511 and p = 0.094. Under the trajectory
@@ -2493,8 +2547,14 @@ resolved: coupling was tested at 19.8% of the objective and moved the endpoint.
 
 ### Step 9 — the reward-hacking question the fidelity cost opens
 
-- [x] `TrajectoryResult` + `t2o faithfulness` built and tested locally (355 fast, 22 slow)
-- [ ] Both run over the finished `runs/e3b-*` on the server, and finding 9 resolved
+- [x] `TrajectoryResult` + `t2o faithfulness` built and tested locally
+- [x] `t2o aggregate` re-run with the trajectory block — finding 7 rewritten, findings 9/10
+      weakened, finding 11 added
+- [x] `loss_share.py --terms-only` on the control arm — **finding 9 resolved in training loss:
+      no cost.** `--terms-only` was added for this; asking the default path for a control
+      arm's share was an error in this step's first draft
+- [ ] `t2o faithfulness` over the twelve stage-3 exports — the evaluation-side half, and the
+      only remaining question about whether the +0.0512 is honest
 
 `metrics/faithfulness.py` has been complete since M0.5 and was wired to **nothing** — no engine,
 no analysis, no CLI. Finding 9 is what makes it load-bearing: an LPIPS cost that coincides with a
@@ -2519,11 +2579,14 @@ loss space. (`--terms-only` was added for this: the default path refuses a contr
 correctly, since a control run has no `loss_det` and so no share. Asking it for one was an error
 in this step's first draft.)
 
-**Read on the faithfulness pass:** false-object rate flat or falling while mAP50 is +0.0512 means
-the LPIPS cost is a fidelity trade, and C2 gets its first real number. False objects rising with
-λ means reward hacking, `coupling.reward_target` becomes live, and **the turbo campaign must not
-launch before it is understood** — the same gate step 6 applied to the dose question, for the
-same reason.
+**Read on the faithfulness pass**, now that finding 9's training-loss half is in: false-object
+rate flat or falling while mAP50 is +0.0512 closes the reward-hacking question outright, and C2
+gets its first real number. False objects rising with λ would be the one result that still
+contradicts the loss-space evidence — the objective shows no perceptual sacrifice, so
+hallucination would have to be arriving through the detection term's own gradient rather than by
+outbidding LPIPS. That would make `reward_target` live and **hold the turbo campaign** — the
+same gate step 6 applied to the dose question, for the same reason. The prior after finding 9 is
+that it comes back clean.
 
 **`--weights` is deliberately required and un-defaulted.** It must be the reference `yolo11s`.
 Scoring hallucination with the in-loop `yolo11n` measures how well the translator learned to
