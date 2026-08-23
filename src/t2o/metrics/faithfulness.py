@@ -31,11 +31,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import torch
 from torch import Tensor
 from torchvision.ops import box_iou
+
+from t2o.data.dataset import IMAGE_SUFFIXES
+from t2o.data.labels import load_yolo_labels
+from t2o.data.pairing import Pairing
 
 logger = logging.getLogger(__name__)
 
@@ -165,3 +170,105 @@ class FaithfulnessEvaluator:
         self._total_gt = 0
         self._consistent = 0
         self._total_visible = 0
+
+
+def evaluate_faithfulness(
+    translated_images: Path,
+    visible_images: Path,
+    weights: Path | str,
+    pairing: Pairing,
+    iou_threshold: float = 0.5,
+    conf_threshold: float = 0.25,
+    imgsz: int = 640,
+    device: str | None = None,
+) -> FaithfulnessMetrics:
+    """Score one translated export against the real visible frames it was translated from.
+
+    The C2 entry point, and the discriminator PLAN.md §8's reward-hacking guardrails are
+    written against: LPIPS falling while mAP rises is the *signature*, but only a count of
+    invented and erased objects says which it was. Runs post hoc over a finished export --
+    ``runs/<name>/stage<N>/translated`` -- so a campaign never has to be repeated to get it.
+
+    ``weights`` must be the **reference** detector (``detector.reference.weights``), never the
+    in-loop one. Counting hallucinations with the checkpoint that supplied the training
+    gradient measures how well the translator learned to please that checkpoint, which is the
+    confound E3's independent judge exists to remove (TASKS.md M1.2 step 1).
+
+    Ground truth is read from the *source* labels via ``pairing``, not from the export's
+    mirrored copy: ``export.py::_mirror_label`` copies them verbatim, so the two agree, and
+    reading the source keeps one source of truth for what the boxes are.
+    """
+    from ultralytics import YOLO
+
+    visible_paths = sorted(
+        p for p in Path(visible_images).iterdir() if p.suffix.lower() in IMAGE_SUFFIXES
+    )
+    if not visible_paths:
+        raise FileNotFoundError(f"no images to score in {visible_images}")
+
+    # Matched on stem, not filename: export.py writes every image as .png regardless of the
+    # source suffix, so a name-for-name lookup silently finds nothing on a .jpg dataset.
+    by_stem = {
+        p.stem: p for p in Path(translated_images).iterdir() if p.suffix.lower() in IMAGE_SUFFIXES
+    }
+    missing = [p.stem for p in visible_paths if p.stem not in by_stem]
+    if missing:
+        preview = ", ".join(missing[:5])
+        more = "" if len(missing) <= 5 else f", ... (+{len(missing) - 5} more)"
+        raise FileNotFoundError(
+            f"{len(missing)} of {len(visible_paths)} visible frames have no translated "
+            f"counterpart in {translated_images}: {preview}{more}"
+        )
+    translated_paths = [by_stem[p.stem] for p in visible_paths]
+
+    model = YOLO(str(weights))
+
+    def detect(paths: list[Path]) -> list[Detections]:
+        """One streamed pass, converted to `Detections` as it goes.
+
+        Converting inside the loop rather than collecting `Results` is what keeps this
+        bounded: a `Results` object retains the decoded source image, so materialising a
+        600-image split would hold hundreds of MB to read a handful of boxes out of each.
+
+        The two passes are also deliberately **sequential, not zipped**. `YOLO.predict`
+        reuses one `self.predictor` across calls, so starting a second stream while the
+        first is still being consumed resets state underneath it.
+        """
+        return [
+            detections_from_result(result, conf_threshold)
+            for result in model.predict(
+                paths,
+                imgsz=imgsz,
+                device=device,
+                verbose=False,
+                stream=True,
+                # Filtered here too, so ultralytics never pays NMS on boxes that
+                # `detections_from_result` is about to discard anyway.
+                conf=conf_threshold,
+            )
+        ]
+
+    translated_detections = detect(translated_paths)
+    visible_detections = detect(visible_paths)
+
+    evaluator = FaithfulnessEvaluator(iou_threshold=iou_threshold)
+    for visible_path, translated, visible in zip(
+        visible_paths, translated_detections, visible_detections, strict=True
+    ):
+        cls, bboxes = load_yolo_labels(pairing.label_path(visible_path))
+        evaluator.update(
+            translated=translated,
+            visible=visible,
+            gt=detections_from_labels(cls, bboxes),
+        )
+
+    metrics = evaluator.compute()
+    logger.info(
+        "faithfulness %s on %d pairs: false-object %.4f  missed-object %.4f  consistency %.4f",
+        Path(translated_images).parent.name,
+        len(visible_paths),
+        metrics.false_object_rate,
+        metrics.missed_object_rate,
+        metrics.detection_consistency,
+    )
+    return metrics

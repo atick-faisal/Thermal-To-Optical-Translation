@@ -307,6 +307,69 @@ def test_main_fidelity_scores_an_export_against_the_real_visible_split(
     assert exit_code == 0
 
 
+def test_faithfulness_accepts_an_export_root_or_an_images_dir(tmp_path: Path) -> None:
+    """Same two-shapes convention as `fidelity` above, and the same reason."""
+    parser = build_parser()
+    root = tmp_path / "translated"
+    (root / "val" / "images").mkdir(parents=True)
+
+    args = parser.parse_args(
+        ["faithfulness", "--translated", str(root), "--data", "d.yaml", "--weights", "w.pt"]
+    )
+    assert args.translated == root
+    assert args.split == "val"
+    assert (args.translated / args.split / "images").is_dir()
+
+
+@pytest.mark.slow
+def test_main_faithfulness_scores_an_export_against_the_real_visible_split(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """The seam the fast tests cannot reach: a real ultralytics `predict` over a real export.
+
+    The detector is conftest's randomly-initialised yolo11n, so the *rates* are arbitrary --
+    what this pins is that `evaluate_faithfulness` reads what `export_translated` actually
+    writes, through the genuine `Results` API rather than the stand-in the unit tests use.
+    """
+    from t2o.engine.export import export_translated
+
+    config = Config.load(
+        overrides={
+            "data": {"manifest": str(data_yaml)},
+            "translator": {"backbone": "stub", "hidden_channels": 4},
+            "runtime": {"device": "cpu"},
+        }
+    )
+    export_translated(build_translator(config), config, tmp_path / "translated")
+
+    exit_code = main(
+        [
+            "faithfulness",
+            "--translated",
+            str(tmp_path / "translated"),
+            "--data",
+            str(data_yaml),
+            "--weights",
+            str(detector_weights),
+            "--imgsz",
+            "64",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    assert exit_code == 0
+
+
+def test_faithfulness_takes_no_config(tmp_path: Path) -> None:
+    """Standalone like `fidelity`/`aggregate`: paths only, never a Config (M1.2 step 4)."""
+    parser = build_parser()
+    args = parser.parse_args(
+        ["faithfulness", "--translated", str(tmp_path), "--data", "d.yaml", "--weights", "w.pt"]
+    )
+    assert not hasattr(args, "config")
+
+
 def test_train_detector_splits_out_into_ultralytics_project_and_name(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

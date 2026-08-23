@@ -124,6 +124,32 @@ def build_parser() -> argparse.ArgumentParser:
     fidelity.add_argument("--batch", type=int, default=8)
     fidelity.add_argument("--device", help="null/auto, 'cpu', or 'cuda:0'")
 
+    faithfulness = subparsers.add_parser(
+        "faithfulness",
+        help="score an exported translated split for hallucinated/erased objects against the "
+        "real visible frames (C2): false-object rate, missed-object rate, detection-consistency",
+    )
+    faithfulness.add_argument(
+        "--translated",
+        type=Path,
+        required=True,
+        help="a translated export root (contains val/images) or the images dir itself",
+    )
+    faithfulness.add_argument(
+        "--data", type=Path, required=True, help="source data.yaml holding the real visible split"
+    )
+    # Deliberately not defaulted: this must be detector.reference.weights, the judge that
+    # never supplied a training gradient. Counting hallucinations with the in-loop checkpoint
+    # measures how well the translator learned to please it (TASKS.md M1.2 step 1).
+    faithfulness.add_argument(
+        "--weights", type=Path, required=True, help="reference detector checkpoint"
+    )
+    faithfulness.add_argument("--split", choices=("train", "val"), default="val")
+    faithfulness.add_argument("--iou-threshold", type=float, default=0.5)
+    faithfulness.add_argument("--conf-threshold", type=float, default=0.25)
+    faithfulness.add_argument("--imgsz", type=int, default=640)
+    faithfulness.add_argument("--device", help="null/auto, 'cpu', or 'cuda:0'")
+
     train_detector = subparsers.add_parser(
         "train-detector",
         help="train a detector on real data, e.g. E3's independent zero-shot judge",
@@ -261,6 +287,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_evaluate(args)
     if args.command == "fidelity":
         return _run_fidelity(args)
+    if args.command == "faithfulness":
+        return _run_faithfulness(args)
     if args.command == "train-detector":
         return _run_train_detector(args)
     if args.command == "aggregate":
@@ -408,6 +436,35 @@ def _run_fidelity(args: argparse.Namespace) -> int:
     logger.info("  LPIPS      %.4f  (LOWER better)", metrics.lpips)
     logger.info("  FID        %.4f  (LOWER better)", metrics.fid)
     logger.info("  KID        %.4f +- %.4f  (LOWER better)", metrics.kid_mean, metrics.kid_std)
+    return 0
+
+
+def _run_faithfulness(args: argparse.Namespace) -> int:
+    from t2o.data.manifest import DatasetManifest
+    from t2o.metrics.faithfulness import evaluate_faithfulness
+
+    manifest = DatasetManifest.load(args.data)
+    visible = manifest.train_images if args.split == "train" else manifest.val_images
+
+    # Same two-shapes-accepted convention as `t2o fidelity`: run_loop names the export root,
+    # the data.yaml inside it names the images dir.
+    translated = Path(args.translated)
+    if (translated / args.split / "images").is_dir():
+        translated = translated / args.split / "images"
+
+    metrics = evaluate_faithfulness(
+        translated,
+        visible,
+        args.weights,
+        pairing=manifest.pairing,
+        iou_threshold=args.iou_threshold,
+        conf_threshold=args.conf_threshold,
+        imgsz=args.imgsz,
+        device=args.device,
+    )
+    logger.info("  false-object rate       %.4f  (LOWER better)", metrics.false_object_rate)
+    logger.info("  missed-object rate      %.4f  (LOWER better)", metrics.missed_object_rate)
+    logger.info("  detection-consistency   %.4f  (higher better)", metrics.detection_consistency)
     return 0
 
 

@@ -7,15 +7,19 @@ so the correct match/no-match outcome is obvious by construction, per house styl
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 import yaml
+from PIL import Image
 
 from t2o.config import Config, ConfigError
+from t2o.data.pairing import Pairing
 from t2o.metrics.faithfulness import (
     Detections,
     FaithfulnessEvaluator,
@@ -23,6 +27,7 @@ from t2o.metrics.faithfulness import (
     _greedy_match,
     detections_from_labels,
     detections_from_result,
+    evaluate_faithfulness,
 )
 
 # --------------------------------------------------------------------------- conversions
@@ -247,3 +252,136 @@ def test_metrics_config_rejects_out_of_range_thresholds(tmp_path: Path) -> None:
 def test_metrics_config_thresholds_are_part_of_the_hash(override: dict[str, Any]) -> None:
     baseline = Config.load().config_hash()
     assert Config.load(overrides={"metrics": override}).config_hash() != baseline
+
+
+# --- evaluate_faithfulness: the post-hoc scoring pass over a finished export ---------------
+
+
+class _FakeBoxes:
+    """The three attributes `detections_from_result` reads off an ultralytics Boxes."""
+
+    def __init__(self, cls: list[int], xyxyn: list[list[float]], conf: list[float]) -> None:
+        self.cls = torch.tensor(cls, dtype=torch.float32)
+        self.xyxyn = torch.tensor(xyxyn, dtype=torch.float32).reshape(-1, 4)
+        self.conf = torch.tensor(conf, dtype=torch.float32)
+
+
+class _FakeResult:
+    def __init__(self, boxes: _FakeBoxes) -> None:
+        self.boxes = boxes
+
+
+def _fake_yolo(by_path: dict[str, _FakeBoxes]) -> type:
+    """A stand-in YOLO whose `predict` replays hand-written detections per image path.
+
+    Keyed on the file *stem* so one table serves both the .jpg source frames and the .png
+    export written from them.
+    """
+
+    class _FakeYOLO:
+        def __init__(self, weights: str) -> None:
+            self.weights = weights
+
+        def predict(self, paths: list[Path], **_: Any) -> Iterator[_FakeResult]:
+            for path in paths:
+                yield _FakeResult(by_path[Path(path).stem])
+
+    return _FakeYOLO
+
+
+@pytest.fixture
+def export_pair(tmp_path: Path) -> tuple[Path, Path, Pairing]:
+    """A two-frame visible split plus a translated export, in the real on-disk layout.
+
+    The export is written as `.png` from `.jpg` sources, reproducing `export.py`'s suffix
+    change -- the reason the lookup matches on stem rather than filename.
+    """
+    visible = tmp_path / "val" / "visible" / "images"
+    labels = tmp_path / "val" / "visible" / "labels"
+    translated = tmp_path / "translated" / "val" / "images"
+    for directory in (visible, labels, translated):
+        directory.mkdir(parents=True)
+
+    for stem in ("a", "b"):
+        Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)).save(visible / f"{stem}.jpg")
+        Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)).save(translated / f"{stem}.png")
+        # One ground-truth box per frame, centred, in normalised cxcywh.
+        (labels / f"{stem}.txt").write_text("0 0.5 0.5 0.4 0.4\n")
+
+    return translated, visible, Pairing()
+
+
+_CENTRE_BOX = [[0.3, 0.3, 0.7, 0.7]]  # the xyxy form of the label above
+_CORNER_BOX = [[0.0, 0.0, 0.1, 0.1]]  # overlaps nothing
+
+
+def test_evaluate_faithfulness_scores_a_perfect_translation(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    translated, visible, pairing = export_pair
+    boxes = _FakeBoxes([0], _CENTRE_BOX, [0.9])
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({"a": boxes, "b": boxes}))
+
+    metrics = evaluate_faithfulness(translated, visible, "w.pt", pairing=pairing)
+
+    assert metrics.false_object_rate == pytest.approx(0.0)
+    assert metrics.missed_object_rate == pytest.approx(0.0)
+    assert metrics.detection_consistency == pytest.approx(1.0)
+
+
+def test_a_translation_whose_every_detection_is_invented_reads_as_a_full_false_object_rate(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reward-hacking pathology: boxes appear where nothing is annotated.
+
+    Also the case no real export reliably contains, which is why it is constructed here
+    rather than hoped for (the reasoning conftest's synthetic dataset already applies).
+    """
+    translated, visible, pairing = export_pair
+    monkeypatch.setattr(
+        "ultralytics.YOLO", _fake_yolo({s: _FakeBoxes([0], _CORNER_BOX, [0.9]) for s in "ab"})
+    )
+
+    metrics = evaluate_faithfulness(translated, visible, "w.pt", pairing=pairing)
+
+    assert metrics.false_object_rate == pytest.approx(1.0)
+    # Every annotated object was also erased -- the detector found nothing where they are.
+    assert metrics.missed_object_rate == pytest.approx(1.0)
+
+
+def test_a_translation_the_detector_sees_nothing_in_reads_as_a_full_missed_object_rate(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    translated, visible, pairing = export_pair
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({s: _FakeBoxes([], [], []) for s in "ab"}))
+
+    metrics = evaluate_faithfulness(translated, visible, "w.pt", pairing=pairing)
+
+    assert metrics.missed_object_rate == pytest.approx(1.0)
+    # No predictions at all, so nothing invented -- the empty-denominator best case.
+    assert metrics.false_object_rate == pytest.approx(0.0)
+    # Nothing on the real photo either (the same stub answers both passes), so vacuous.
+    assert metrics.detection_consistency == pytest.approx(1.0)
+
+
+def test_evaluate_faithfulness_names_frames_with_no_translated_counterpart(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A half-finished export must fail loudly, not silently score the frames that landed."""
+    translated, visible, pairing = export_pair
+    (translated / "b.png").unlink()
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({}))
+
+    with pytest.raises(FileNotFoundError, match=r"1 of 2 visible frames.*\bb\b"):
+        evaluate_faithfulness(translated, visible, "w.pt", pairing=pairing)
+
+
+def test_evaluate_faithfulness_refuses_an_empty_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "images").mkdir()
+    (tmp_path / "translated").mkdir()
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({}))
+
+    with pytest.raises(FileNotFoundError, match="no images to score"):
+        evaluate_faithfulness(tmp_path / "translated", tmp_path / "images", "w.pt", Pairing())
