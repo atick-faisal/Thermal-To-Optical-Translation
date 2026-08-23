@@ -10,11 +10,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from t2o.cli import build_parser, config_from_args, main, overrides_from_args
+from t2o.cli import (
+    _export_run_and_stage,
+    build_parser,
+    config_from_args,
+    main,
+    overrides_from_args,
+)
 from t2o.config import Config
+from t2o.metrics.faithfulness import FaithfulnessMetrics
 from t2o.translators import StubTranslator, build_translator
 
 
@@ -359,6 +367,90 @@ def test_main_faithfulness_scores_an_export_against_the_real_visible_split(
     )
 
     assert exit_code == 0
+
+
+# --- --write-back: locating the run and stage an export belongs to -------------------------
+
+
+def _finished_run(tmp_path: Path, stages: list[int]) -> Path:
+    """A run directory with a metrics.json and one export tree per stage."""
+    run_dir = tmp_path / "runs" / "e3b-loop-s0"
+    for stage in stages:
+        (run_dir / f"stage{stage}" / "translated" / "val" / "images").mkdir(parents=True)
+    (run_dir / "metrics.json").write_text(
+        json.dumps([{"stage": stage, "task_weight": float(stage)} for stage in stages])
+    )
+    return run_dir
+
+
+@pytest.mark.parametrize("suffix", ["", "val/images"])
+def test_write_back_finds_the_run_and_stage_from_the_export_path(
+    tmp_path: Path, suffix: str
+) -> None:
+    """Both shapes `--translated` accepts resolve to the same run and stage."""
+    run_dir = _finished_run(tmp_path, [0, 3])
+    translated = run_dir / "stage3" / "translated"
+
+    found_dir, found_stage = _export_run_and_stage(translated / suffix if suffix else translated)
+
+    assert found_dir == run_dir.resolve()
+    assert found_stage == 3
+
+
+def test_write_back_refuses_an_export_outside_a_run(tmp_path: Path) -> None:
+    """A `stage3/` that is not under a run directory must not be guessed at: a rate written
+    into the wrong stage record is silent here and wrong in the paper.
+    """
+    stray = tmp_path / "stage3" / "translated"
+    stray.mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError, match="cannot tell which run and stage"):
+        _export_run_and_stage(stray)
+
+
+def test_write_back_records_the_rates_into_metrics_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end through `main`, with the scoring pass itself stubbed out.
+
+    What this pins is the wiring -- that the rates reach the right stage entry of the right
+    run -- not the rates, which `tests/test_faithfulness.py` already covers.
+    """
+    run_dir = _finished_run(tmp_path, [0, 3])
+    monkeypatch.setattr(
+        "t2o.data.manifest.DatasetManifest.load",
+        classmethod(lambda cls, path: SimpleNamespace(val_images=tmp_path, pairing=None)),
+    )
+    monkeypatch.setattr(
+        "t2o.metrics.faithfulness.evaluate_faithfulness",
+        lambda *args, **kwargs: FaithfulnessMetrics(0.125, 0.25, 0.75),
+    )
+
+    exit_code = main(
+        [
+            "faithfulness",
+            "--translated",
+            str(run_dir / "stage3" / "translated"),
+            "--data",
+            "d.yaml",
+            "--weights",
+            "w.pt",
+            "--write-back",
+        ]
+    )
+
+    assert exit_code == 0
+    entries = json.loads((run_dir / "metrics.json").read_text())
+    assert "faithfulness" not in entries[0]
+    assert entries[1]["faithfulness"]["false_object_rate"] == pytest.approx(0.125)
+
+
+def test_faithfulness_write_back_is_off_by_default(tmp_path: Path) -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        ["faithfulness", "--translated", str(tmp_path), "--data", "d.yaml", "--weights", "w.pt"]
+    )
+    assert args.write_back is False
 
 
 def test_faithfulness_takes_no_config(tmp_path: Path) -> None:

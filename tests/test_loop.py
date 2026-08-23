@@ -23,7 +23,8 @@ import pytest
 import torch
 
 from t2o.config import Config
-from t2o.engine.loop import _resolve_reference_weights, run_loop
+from t2o.engine.loop import _resolve_reference_weights, record_faithfulness, run_loop
+from t2o.metrics.faithfulness import FaithfulnessMetrics
 from t2o.translators import StubTranslator, build_translator
 
 
@@ -306,3 +307,86 @@ def test_resume_continues_through_a_completed_detector_stage(
 
     metrics = json.loads((tmp_path / "run" / "metrics.json").read_text())
     assert len(metrics) == 2
+
+
+# --- record_faithfulness: the post-hoc C2 write-back ----------------------------------------
+
+
+def _metrics_json(run_dir: Path) -> list[dict[str, object]]:
+    return json.loads((run_dir / "metrics.json").read_text())
+
+
+def _stub_rates() -> FaithfulnessMetrics:
+    return FaithfulnessMetrics(
+        false_object_rate=0.125, missed_object_rate=0.25, detection_consistency=0.75
+    )
+
+
+def test_record_faithfulness_writes_only_the_addressed_stage(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    run_dir = tmp_path / "run"
+    run_loop(
+        _config(data_yaml, detector_weights),
+        build_translator(_config(data_yaml, detector_weights)),
+        run_dir=run_dir,
+        train_detector_stages=False,
+    )
+
+    record_faithfulness(run_dir, 1, _stub_rates())
+
+    entries = _metrics_json(run_dir)
+    assert "faithfulness" not in entries[0]
+    assert entries[1]["faithfulness"] == {
+        "false_object_rate": 0.125,
+        "missed_object_rate": 0.25,
+        "detection_consistency": 0.75,
+    }
+
+
+def test_record_faithfulness_refuses_a_stage_the_run_never_trained(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """A rate filed under a stage that is not there would be invisible in the file and wrong
+    in the table, so it must not be appended as a new entry.
+    """
+    run_dir = tmp_path / "run"
+    config = _config(data_yaml, detector_weights, task_weights=(0.0,))
+    run_loop(config, build_translator(config), run_dir=run_dir, train_detector_stages=False)
+
+    with pytest.raises(ValueError, match="records no stage 3"):
+        record_faithfulness(run_dir, 3, _stub_rates())
+
+
+def test_record_faithfulness_refuses_a_directory_that_is_not_a_run(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="not a finished run"):
+        record_faithfulness(tmp_path, 0, _stub_rates())
+
+
+def test_recorded_faithfulness_survives_a_resume(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """The hazard the `StageResult.faithfulness` field exists for.
+
+    `resume` rebuilds every completed StageResult from disk and writes them all back, so a
+    key with no field to land in would be silently dropped by the next stage -- losing a
+    scoring pass that took a GPU and cannot be noticed from the file afterwards.
+    """
+    run_dir = tmp_path / "run"
+    full_config = _config(data_yaml, detector_weights)
+    stage0_only_config = _config(data_yaml, detector_weights, task_weights=(0.0,))
+    translator = build_translator(full_config)
+
+    run_loop(
+        stage0_only_config, translator, run_dir=run_dir, train_detector_stages=False
+    )  # simulated crash point
+    record_faithfulness(run_dir, 0, _stub_rates())
+    run_loop(full_config, translator, run_dir=run_dir, train_detector_stages=False, resume=True)
+
+    entries = _metrics_json(run_dir)
+    assert len(entries) == 2
+    assert entries[0]["faithfulness"] == {
+        "false_object_rate": 0.125,
+        "missed_object_rate": 0.25,
+        "detection_consistency": 0.75,
+    }

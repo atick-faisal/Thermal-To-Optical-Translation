@@ -44,6 +44,7 @@ def _write_run(
     task_weights: list[float],
     map50_per_stage: list[float],
     lpips_per_stage: list[float] | None = None,
+    false_object_per_stage: dict[int, float] | None = None,
 ) -> Path:
     """Write a minimal but real-shaped run directory: metrics.json + config.yaml."""
     run_dir = root / name
@@ -82,6 +83,15 @@ def _write_run(
                 },
             }
         )
+        # Keyed by stage and sparse on purpose: `t2o faithfulness --write-back` scores one
+        # export at a time, so a partly-scored campaign is the normal state of this file,
+        # not a corrupt one.
+        if false_object_per_stage is not None and index in false_object_per_stage:
+            stages[-1]["faithfulness"] = {
+                "false_object_rate": false_object_per_stage[index],
+                "missed_object_rate": 0.1,
+                "detection_consistency": 0.9,
+            }
     (run_dir / "metrics.json").write_text(json.dumps(stages))
 
     # Deliberately not written via Config.snapshot: this mirrors what a snapshot looks like
@@ -492,3 +502,119 @@ def test_aggregate_reads_what_run_loop_actually_writes(
     assert len(report.paired) == 2
     assert all(math.isfinite(result.mean_difference) for result in report.paired)
     assert len(tidy_rows(report)) == 4  # 2 runs x 1 stage x 2 metrics
+
+
+# --- post-hoc metrics recorded at only some stages -----------------------------------------
+
+
+def _partly_scored_campaign(root: Path, scored_stage: int) -> list[Path]:
+    """Six paired seeds, two stages, faithfulness written at `scored_stage` only."""
+    paths: list[Path] = []
+    for seed in range(6):
+        paths.append(
+            _write_run(
+                root,
+                f"e3-control-s{seed}",
+                seed,
+                [0.0, 0.0],
+                [0.70, 0.72],
+                false_object_per_stage={scored_stage: 0.20},
+            )
+        )
+        paths.append(
+            _write_run(
+                root,
+                f"e3-loop-s{seed}",
+                seed,
+                [0.0, 1.0],
+                [0.70, 0.80],
+                false_object_per_stage={scored_stage: 0.15},
+            )
+        )
+    return paths
+
+
+def test_a_metric_recorded_at_one_stage_only_is_tested_there(tmp_path: Path) -> None:
+    """The `t2o faithfulness --write-back` shape: one scored export per run, not four.
+
+    `zero_shot.map50` exists at both stages and `faithfulness.*` at only stage 1, so the two
+    metrics are tested on different stage sets in the same report.
+    """
+    report = aggregate(
+        _partly_scored_campaign(tmp_path, scored_stage=1),
+        metrics=["zero_shot.map50", "faithfulness.false_object_rate"],
+    )
+
+    map_stages = {r.stage for r in report.paired if r.metric == "zero_shot.map50"}
+    fo_results = [r for r in report.paired if r.metric == "faithfulness.false_object_rate"]
+    assert map_stages == {0, 1}
+    assert [r.stage for r in fo_results] == [1]
+    assert fo_results[0].n == 6
+    assert fo_results[0].mean_difference == pytest.approx(-0.05)
+
+
+def test_a_metric_at_one_stage_only_gets_no_trajectory(tmp_path: Path) -> None:
+    """A gain needs a baseline. One scored stage is a level, not a movement."""
+    report = aggregate(
+        _partly_scored_campaign(tmp_path, scored_stage=1),
+        metrics=["zero_shot.map50", "faithfulness.false_object_rate"],
+    )
+
+    assert [r.metric for r in report.trajectory] == ["zero_shot.map50"]
+
+
+def test_a_stage_only_some_runs_scored_is_dropped_rather_than_half_tested(tmp_path: Path) -> None:
+    """A half-finished scoring pass must not silently halve n.
+
+    This is the state the twelve-invocation server loop is in after any interruption, so it
+    is the failure most likely to actually occur.
+    """
+    paths = _partly_scored_campaign(tmp_path, scored_stage=1)
+    stripped = json.loads((paths[0] / "metrics.json").read_text())
+    del stripped[1]["faithfulness"]
+    (paths[0] / "metrics.json").write_text(json.dumps(stripped))
+
+    with pytest.raises(AggregationError, match=r"no stage in .* records .* in every run"):
+        aggregate(paths, metrics=["faithfulness.false_object_rate"])
+
+
+def test_a_metric_no_run_records_names_the_write_back_pass(tmp_path: Path) -> None:
+    with pytest.raises(AggregationError, match=r"faithfulness --write-back"):
+        aggregate(
+            _campaign(tmp_path, [0, 1], [0.8, 0.8]), metrics=["faithfulness.missed_object_rate"]
+        )
+
+
+def test_an_explicitly_null_metric_still_raises_rather_than_dropping_its_stage(
+    tmp_path: Path,
+) -> None:
+    """Absent and null are different, and only the first is a reason to skip a stage.
+
+    `--no-detector` writes an explicit null; dropping that stage would answer the paired
+    question while quietly omitting a run that computed nothing, which is exactly what
+    `metric_value` refuses to do.
+    """
+    paths = _campaign(tmp_path, [0, 1], [0.8, 0.8])
+    for path in paths:
+        stages = json.loads((path / "metrics.json").read_text())
+        stages[1]["zero_shot"] = None
+        (path / "metrics.json").write_text(json.dumps(stages))
+
+    with pytest.raises(AggregationError, match="'zero_shot' is null"):
+        aggregate(paths, metrics=["zero_shot.map50"])
+
+
+def test_tidy_rows_omit_cells_a_metric_was_never_recorded_in(tmp_path: Path) -> None:
+    """`--csv` must survive a metric that exists at one stage only, and say where it is."""
+    report = aggregate(
+        _partly_scored_campaign(tmp_path, scored_stage=1),
+        metrics=["zero_shot.map50", "faithfulness.false_object_rate"],
+    )
+    rows = tidy_rows(report)
+
+    by_metric: dict[str, set[int]] = {}
+    for row in rows:
+        by_metric.setdefault(str(row["metric"]), set()).add(int(row["stage"]))
+    assert by_metric["zero_shot.map50"] == {0, 1}
+    assert by_metric["faithfulness.false_object_rate"] == {1}
+    assert len([r for r in rows if r["metric"] == "faithfulness.false_object_rate"]) == 12

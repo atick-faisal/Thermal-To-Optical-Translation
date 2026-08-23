@@ -625,7 +625,12 @@ questions and must never be conflated:
   configuration. It cannot separate methods on this dataset.
 
 **Faithfulness (C2):** false-object rate, missed-object rate, detection-consistency between
-translated and real-visible, and an adapted Hallucination Index.
+translated and real-visible, and an adapted Hallucination Index. **Measured through the same
+paired test as the task metric**, not read run by run: `t2o faithfulness --write-back` records
+the three rates into the scored run's `metrics.json`, so `t2o aggregate --metric
+faithfulness.false_object_rate` gives C2 the sign-flip p-value below rather than a table of
+twelve numbers to eyeball. Scored post hoc over a finished export, so no campaign is ever
+repeated to obtain it — and always with the **reference** detector, never the in-loop one.
 
 **Rigor:** ≥3 seeds, mean ± std, and an exact paired significance test on mAP.
 

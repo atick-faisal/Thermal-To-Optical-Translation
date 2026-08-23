@@ -2554,6 +2554,8 @@ resolved: coupling was tested at 19.8% of the objective and moved the endpoint.
       no cost.** `--terms-only` was added for this; asking the default path for a control
       arm's share was an error in this step's first draft
 - [x] Device fix — the first server run of the pass crashed on every image; see below
+- [x] `--write-back` — the rates land in `metrics.json`, so `t2o aggregate` answers C2 with
+      the same paired test the +0.0512 rests on rather than by hand
 - [ ] `t2o faithfulness` over the twelve stage-3 exports — the evaluation-side half, and the
       only remaining question about whether the +0.0512 is honest
 
@@ -2569,8 +2571,11 @@ uv run t2o aggregate --runs 'runs/e3b-*' --stage 3 `
 uv run python scripts/loss_share.py --runs 'runs/e3b-control-*' --terms-only
 foreach ($arm in 'control','loop') { foreach ($s in 0,1,2,3,4,5) {
   uv run t2o faithfulness --translated "runs/e3b-$arm-s$s/stage3/translated" `
-    --data $DATA --weights runs/reference-yolo11s/weights/best.pt --device cuda:0
+    --data $DATA --weights runs/reference-yolo11s/weights/best.pt --device cuda:0 --write-back
 } }
+uv run t2o aggregate --runs 'runs/e3b-*' --stage 3 `
+  --metric faithfulness.false_object_rate faithfulness.missed_object_rate `
+           faithfulness.detection_consistency
 ```
 
 The `--csv` also answers finding 6 directly: whether the wide stage-0 draw is one outlier seed or
@@ -2588,6 +2593,35 @@ hallucination would have to be arriving through the detection term's own gradien
 outbidding LPIPS. That would make `reward_target` live and **hold the turbo campaign** — the
 same gate step 6 applied to the dose question, for the same reason. The prior after finding 9 is
 that it comes back clean.
+
+**`--write-back` is what makes the twelve invocations answerable.** C2's question is not
+"what is s0's false-object rate" but the paired loop-minus-control contrast across six seeds
+— the same instrument the +0.0512 rests on, and `t2o aggregate` is where it lives. So the
+pass folds its three rates into the scored run's `metrics.json` (`engine/loop.py`'s
+`record_faithfulness`), and they are then reachable as
+`--metric faithfulness.false_object_rate` with **no aggregator change at all**: `RunRecord`
+keeps stage entries as raw JSON and pulls dotted leaf floats out of them. The run directory
+and stage come from `--translated` rather than a second flag, since `run_loop` already
+encodes both in the export path; an export not sitting in place is refused rather than
+guessed at.
+
+Three consequences worth recording, none of them obvious before building it:
+
+1. **A post-hoc metric exists at one stage, not four.** `aggregate` now picks each metric's
+   stages independently — every stage where *all* runs record it — instead of demanding one
+   stage set for the whole report. So `zero_shot.map50` still gets its four-stage table and
+   its trajectory while `faithfulness.*` gets a single stage-3 row and, correctly, no
+   trajectory: a gain needs a baseline, and one scored stage is a level, not a movement.
+2. **Absent and null had to be separated.** `metric_value` deliberately raises on an explicit
+   `null` — that is what `--no-detector` writes, and averaging around a stage that computed
+   nothing is the hole it refuses to paper over. "Not scored yet" is a different fact, so
+   `metric_is_recorded` keys on the key's *presence*, and `_stage_result_to_json` omits
+   `faithfulness` entirely when empty rather than writing `null`. Without that split, every
+   run written after this change would have looked like twelve holes.
+3. **`StageResult` needed the field, or a resume would eat the result.** `resume` rebuilds
+   every completed stage from disk and writes them all back, so a key with no field to land
+   in is silently dropped by the next stage — losing a scoring pass that cost GPU time, with
+   nothing in the file to show it ever happened.
 
 **`--weights` is deliberately required and un-defaulted.** It must be the reference `yolo11s`.
 Scoring hallucination with the in-loop `yolo11n` measures how well the translator learned to

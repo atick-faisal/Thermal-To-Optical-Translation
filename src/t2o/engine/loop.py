@@ -84,6 +84,7 @@ from t2o.data.manifest import DatasetManifest
 from t2o.engine.detector_stage import DetectorResult, train_detector
 from t2o.engine.export import export_translated
 from t2o.engine.trainer import LAST_CHECKPOINT, EpochStats, Trainer
+from t2o.metrics.faithfulness import FaithfulnessMetrics
 from t2o.metrics.fidelity import FidelityMetrics, evaluate_fidelity
 from t2o.metrics.task import TaskMetrics, evaluate_detector
 from t2o.seeding import seed_everything
@@ -110,6 +111,13 @@ class StageResult:
     # *together* with zero_shot: a detection metric rising while these fall is the signature
     # of reward hacking, and neither number diagnoses it alone (PLAN.md §8).
     fidelity: FidelityMetrics | None = None
+    # C2's three rates. Never filled by `run_loop` -- scoring hallucination needs the
+    # *reference* detector and a second pass over the export, so it is a post-hoc pass
+    # (`t2o faithfulness --write-back`, which calls `record_faithfulness` below). The field
+    # exists so that pass's numbers survive a resume: `_load_existing_results` rebuilds every
+    # StageResult from disk and `_write_metrics` writes them all back, so a key with no field
+    # to land in would be silently dropped by the next resumed stage.
+    faithfulness: FaithfulnessMetrics | None = None
 
 
 def run_loop(
@@ -307,6 +315,15 @@ def _stage_result_to_json(result: StageResult) -> dict[str, Any]:
     data = asdict(result)
     if data["detector"] is not None:
         data["detector"]["weights"] = str(data["detector"]["weights"])
+    # Omitted rather than written as null, unlike `detector`/`zero_shot`/`fidelity`. For
+    # those, null is a fact the stage established -- "computed nothing", what --no-detector
+    # produces -- and `analysis/aggregate.py` refuses to average around it. Faithfulness is
+    # never computed by this loop at all, so a null here would mean only "not scored yet",
+    # and writing one would make every unscored stage look like a hole in the data instead of
+    # a pass that has not been run (aggregate.py::metric_is_recorded turns on exactly that
+    # distinction).
+    if data["faithfulness"] is None:
+        del data["faithfulness"]
     return data
 
 
@@ -324,6 +341,7 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
     # still resume rather than raising KeyError halfway through a long server run.
     zero_shot = data.get("zero_shot")
     fidelity = data.get("fidelity")
+    faithfulness = data.get("faithfulness")
     return StageResult(
         stage=data["stage"],
         task_weight=data["task_weight"],
@@ -333,4 +351,36 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
         else None,
         zero_shot=TaskMetrics(**zero_shot) if zero_shot is not None else None,
         fidelity=FidelityMetrics(**fidelity) if fidelity is not None else None,
+        faithfulness=FaithfulnessMetrics(**faithfulness) if faithfulness is not None else None,
     )
+
+
+def record_faithfulness(run_dir: Path, stage: int, metrics: FaithfulnessMetrics) -> None:
+    """Fold C2's three rates into one stage entry of a finished run's ``metrics.json``.
+
+    The point of writing them here rather than only logging them: E3's C2 question is not
+    "what is this run's false-object rate" but the paired loop-minus-control contrast across
+    six seeds, and ``t2o aggregate`` is the instrument for that. It reads ``metrics.json``, so
+    a rate that lands here is reachable as ``--metric faithfulness.false_object_rate`` with no
+    aggregator change at all (``analysis/aggregate.py`` pulls dotted leaf floats out of these
+    entries as raw JSON).
+
+    Only the addressed stage's entry is touched, and an absent stage raises rather than being
+    appended: a rate filed under a stage the run never trained would be invisible in the file
+    and wrong in the table.
+    """
+    path = run_dir / METRICS_FILENAME
+    if not path.is_file():
+        raise FileNotFoundError(f"{run_dir} has no {METRICS_FILENAME}; it is not a finished run")
+
+    entries = json.loads(path.read_text())
+    for entry in entries:
+        if int(entry["stage"]) == stage:
+            entry["faithfulness"] = asdict(metrics)
+            break
+    else:
+        recorded = ", ".join(str(entry["stage"]) for entry in entries) or "none"
+        raise ValueError(f"{path} records no stage {stage} (has: {recorded})")
+
+    path.write_text(json.dumps(entries, indent=2))
+    logger.info("recorded faithfulness into %s stage %d", path, stage)

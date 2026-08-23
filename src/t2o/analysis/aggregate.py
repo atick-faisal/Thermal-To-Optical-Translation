@@ -236,6 +236,31 @@ def metric_value(stage: dict[str, Any], metric: str) -> float:
     return float(node)
 
 
+def metric_is_recorded(stage: dict[str, Any], metric: str) -> bool:
+    """Whether this stage record has an entry for ``metric`` at all.
+
+    Exists because not every metric is written at every stage. ``faithfulness.*`` is recorded
+    post hoc by ``t2o faithfulness --write-back``, for the one stage whose export was scored,
+    while ``zero_shot.*`` and ``fidelity.*`` are written by every stage of every run. A metric
+    absent at some stages is normal there, not a broken run, so ``aggregate`` tests each
+    metric on the stages that actually have it.
+
+    **An explicit ``null`` counts as recorded**, and so still reaches ``metric_value`` and
+    still raises. The two are not the same thing: absent means "this pass has not been run
+    here", while null means "this stage computed nothing" -- what ``--no-detector`` writes.
+    Silently dropping the second would answer a paired question using only the seeds that
+    happened to have a number, which is the hole ``metric_value`` refuses to paper over.
+    """
+    node: Any = stage
+    for key in metric.split("."):
+        if node is None:
+            return True  # a null on the way down: recorded, and metric_value will say so
+        if not isinstance(node, dict) or key not in node:
+            return False
+        node = node[key]
+    return True
+
+
 def pair_runs(runs: Sequence[RunRecord]) -> dict[int, tuple[RunRecord, RunRecord]]:
     """Match each seed's control run to its loop run, refusing anything unpaired.
 
@@ -366,13 +391,15 @@ def aggregate(
     summaries: list[ArmSummary] = []
     paired: list[PairedResult] = []
     trajectory: list[TrajectoryResult] = []
-    # The earliest stage every run shares, not a hardcoded 0: `stages=[1, 2, 3]` is a legal
-    # request, and a gain is only defined against a baseline that is actually present.
-    baseline_stage = stage_indices[0]
     for metric in metrics:
+        metric_stages = _stages_with_metric(runs, stage_indices, metric)
+        # The earliest stage this metric is present at, not a hardcoded 0: `stages=[1, 2, 3]`
+        # is a legal request, a post-hoc metric may exist at only some stages, and a gain is
+        # only defined against a baseline that is actually there.
+        baseline_stage = metric_stages[0]
         arm_means: dict[tuple[Arm, int], float] = {}
         differences_by_stage: dict[int, tuple[float, ...]] = {}
-        for stage in stage_indices:
+        for stage in metric_stages:
             for arm in (Arm.CONTROL, Arm.LOOP):
                 values = tuple(_stage_metric(run, stage, metric) for run in runs if run.arm is arm)
                 arm_means[(arm, stage)] = float(np.mean(values))
@@ -413,7 +440,7 @@ def aggregate(
         # Computed this way rather than from four raw values so it cannot drift from the
         # paired block above.
         baseline_differences = differences_by_stage[baseline_stage]
-        for stage in stage_indices[1:]:
+        for stage in metric_stages[1:]:
             gains = tuple(
                 later - baseline
                 for later, baseline in zip(
@@ -448,15 +475,50 @@ def aggregate(
     )
 
 
-def _stage_metric(run: RunRecord, stage: int, metric: str) -> float:
+def _stages_with_metric(
+    runs: Sequence[RunRecord], stage_indices: Sequence[int], metric: str
+) -> tuple[int, ...]:
+    """The requested stages where *every* run records ``metric``.
+
+    A stage where only some runs have the metric is dropped rather than tested on the runs
+    that have it: a paired comparison over a subset of the campaign is not the comparison
+    anyone asked for, and it would silently change n between one metric's row and the next.
+    """
+    present = tuple(
+        stage
+        for stage in stage_indices
+        if all(metric_is_recorded(_stage_record(run, stage), metric) for run in runs)
+    )
+    if not present:
+        sample = _stage_record(runs[0], stage_indices[0])
+        raise AggregationError(
+            f"no stage in {list(stage_indices)} records '{metric}' in every run "
+            f"({runs[0].path} stage {stage_indices[0]} has top-level keys: "
+            f"{', '.join(sorted(sample))}). Post-hoc metrics are written per stage -- "
+            "`t2o faithfulness --write-back` records faithfulness.* only for the export it "
+            "scored, so every run needs that same stage scored before it can be aggregated."
+        )
+    return present
+
+
+def _stage_record(run: RunRecord, stage: int) -> dict[str, Any]:
     for record in run.stages:
         if int(record["stage"]) == stage:
-            return metric_value(record, metric)
+            return record
     raise AggregationError(f"{run.path} has no stage {stage}")
 
 
+def _stage_metric(run: RunRecord, stage: int, metric: str) -> float:
+    return metric_value(_stage_record(run, stage), metric)
+
+
 def tidy_rows(report: AggregateReport) -> list[dict[str, Any]]:
-    """One row per (run, seed, arm, stage, metric, value) -- the long format for re-analysis."""
+    """One row per (run, seed, arm, stage, metric, value) -- the long format for re-analysis.
+
+    Cells where the metric was never recorded are omitted rather than filled with a blank:
+    ``faithfulness.*`` exists only at the stage whose export was scored, so a report covering
+    it alongside ``zero_shot.*`` has a different number of stages per metric.
+    """
     return [
         {
             "run": run.name,
@@ -471,6 +533,7 @@ def tidy_rows(report: AggregateReport) -> list[dict[str, Any]]:
         for run in report.runs
         for stage in report.stages
         for metric in report.metrics
+        if metric_is_recorded(_stage_record(run, stage), metric)
     ]
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -149,6 +150,14 @@ def build_parser() -> argparse.ArgumentParser:
     faithfulness.add_argument("--conf-threshold", type=float, default=0.25)
     faithfulness.add_argument("--imgsz", type=int, default=640)
     faithfulness.add_argument("--device", help="null/auto, 'cpu', or 'cuda:0'")
+    faithfulness.add_argument(
+        "--write-back",
+        action="store_true",
+        help="also record the three rates into the scored run's metrics.json, making them "
+        "reachable as `t2o aggregate --metric faithfulness.false_object_rate`. The run "
+        "directory and stage are read off --translated, which must therefore be the export "
+        "in place under <run_dir>/stage<N>/",
+    )
 
     train_detector = subparsers.add_parser(
         "train-detector",
@@ -465,7 +474,38 @@ def _run_faithfulness(args: argparse.Namespace) -> int:
     logger.info("  false-object rate       %.4f  (LOWER better)", metrics.false_object_rate)
     logger.info("  missed-object rate      %.4f  (LOWER better)", metrics.missed_object_rate)
     logger.info("  detection-consistency   %.4f  (higher better)", metrics.detection_consistency)
+
+    if args.write_back:
+        from t2o.engine.loop import record_faithfulness
+
+        run_dir, stage = _export_run_and_stage(Path(args.translated))
+        record_faithfulness(run_dir, stage, metrics)
     return 0
+
+
+def _export_run_and_stage(translated: Path) -> tuple[Path, int]:
+    """Recover the run directory and stage index a translated export sits in.
+
+    `run_loop` writes exports at `<run_dir>/stage<N>/translated`, so both are already encoded
+    in the path the user had to type anyway -- no second flag that could disagree with the
+    first. The `metrics.json` check is what makes the match unambiguous rather than a guess at
+    a directory that merely happens to be named `stage3`.
+
+    Refused rather than defaulted when it cannot be found: writing a rate into the wrong
+    stage record would be silent here and wrong in the paper.
+    """
+    from t2o.engine.loop import METRICS_FILENAME
+
+    resolved = translated.resolve()
+    for parent in (resolved, *resolved.parents):
+        match = re.fullmatch(r"stage(\d+)", parent.name)
+        if match and (parent.parent / METRICS_FILENAME).is_file():
+            return parent.parent, int(match.group(1))
+    raise FileNotFoundError(
+        f"--write-back cannot tell which run and stage {translated} belongs to: no "
+        f"'stage<N>' directory above it whose parent holds {METRICS_FILENAME}. It expects "
+        "the export in place, e.g. runs/e3b-loop-s0/stage3/translated."
+    )
 
 
 def _run_train_detector(args: argparse.Namespace) -> int:
