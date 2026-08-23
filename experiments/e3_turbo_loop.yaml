@@ -1,0 +1,122 @@
+# E3's coupled arm on the turbo backbone -- the real lambda_det ramp [0,1,2,3] (TASKS.md M2a).
+#
+# Identical to the sibling experiments/e3_turbo_control.yaml except `coupling.task_weights` and
+# `runtime.name`. See that file's header for what this pair is, what carries over from the
+# pix2pix pair, and why the campaign must not launch before `grad_scale` is measured for this
+# backbone. The differ-only-by-design invariant is pinned by
+# tests/test_e3_experiments.py::test_control_and_loop_configs_differ_only_by_design.
+#
+# Read `detector.in_loop.weights` with care in this file, unlike in the control: stages 1-3 have
+# lambda_det > 0, so that checkpoint's gradient trains the translator here. It is deliberately
+# NOT `detector.reference.weights` below, which is what makes E3's numbers separable from
+# reward hacking (engine/loop.py warns at run start if they ever resolve to the same file).
+#
+# The stakes are higher than on pix2pix: this backbone back-props the detection loss through
+# the *entire* one-step generator exactly, with far more capacity to find a hack. C2 came back
+# clean on pix2pix; that is a baseline for this campaign, not a guarantee about it.
+
+data:
+  manifest: dataset/yolo_rgbt/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+
+train:
+  # Matched to the pix2pix pair: the two backbones are compared at equal budget, and within
+  # this pair both arms are 400 warm-started epochs whatever this value is.
+  epochs_per_stage: 100
+  # **VRAM-determined -- confirm on the server before the campaign** (TASKS.md M2a step 4).
+  # 2 is upstream's documented recipe for the *paired* model (PLAN.md §10 Phase 2a), which is
+  # the conservative starting point on a 40GB A100, not a measured ceiling. Raising it is pure
+  # throughput and does not move lambda_det: the detection loss is divided by batch size
+  # (PLAN.md §8), which is exactly what stops a batch-size change from rescaling the coupling.
+  batch_size: 2
+  # 1.0e-4, not the pix2pix pair's 2.0e-4. This trains LoRA adapters on a pretrained model
+  # rather than a generator from scratch, and 1.0e-4 is what `Pix2PixTurboTranslator.__init__`
+  # itself defaults to. Watch the first probe's loss curve before committing 72 GPU-hours.
+  lr: 1.0e-4
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  hflip: 0.5
+  # Full frames, same as the pix2pix pair, so the backbone is the only thing that changes
+  # between the two campaigns. The wrapper reflect-pads 640x480 to 640x512 for the f8 VAE and
+  # slices back after decode, so no crop is needed to make the geometry work -- only VRAM would
+  # force one. The documented fallback is a stride-32 `[512, 512]`, which is also upstream's
+  # own recipe; take it only if the measurement says batch 2 at full frame does not fit.
+  crop: null
+  seed: 0
+
+# Identical to the pix2pix pair on purpose. PLAN.md §8's objective is the same four knobs for
+# every backbone, so a backbone comparison changes the backbone and nothing else -- and it is
+# what makes the two campaigns' `scripts/loss_share.py` numbers directly comparable.
+loss:
+  l2: 1.0
+  lpips: 5.0
+  gan: 1.0
+
+coupling:
+  task_weights: [0.0, 1.0, 2.0, 3.0]
+  # **NOT calibrated for this backbone.** 0.15 is pix2pix's measured value and is here as the
+  # only informed starting candidate -- same loss weights, so the same order of magnitude is
+  # the sane place to begin the search, nothing more. sd-turbo starts pretrained, so its
+  # `loss_det` sits at a different magnitude from epoch 0 and this value can easily land back
+  # near the 2.3% that made E3's first campaign uninterpretable (TASKS.md M1.2 steps 7-8).
+  #
+  # Run the 25-epoch `scripts/loss_share.py` probe with `--grad-scale <candidate>` and target
+  # 20-30% before the campaign. Skipping that probe once already cost 72 GPU-hours.
+  grad_scale: 0.15
+  # Stays null, as on pix2pix. C2 came back clean there -- the coupled arm invents *fewer*
+  # objects, not more (TASKS.md M1.2 step 9) -- so there is no measured problem for a
+  # saturating reward to respond to, and changing the dose and its guard in the same campaign
+  # would make any fidelity result unattributable. Turbo has more capacity to find a genuine
+  # hack, which is an argument for scoring C2 again, not for pre-emptively guarding it.
+  reward_target: null
+
+# Identical to the pix2pix pair, including the judge: E3's turbo cell is only comparable to its
+# pix2pix cell if both are scored by the same reference detector.
+detector:
+  in_loop:
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    weights: runs/reference-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: pix2pix_turbo
+  pretrained: stabilityai/sd-turbo
+  prompt: a photo of overhead power line components in daylight
+  # Upstream's defaults. `lora_rank_unet` is PLAN.md §4's primary anti-reward-hacking lever --
+  # less capacity to distort the image in whatever direction the detector rewards -- so it is
+  # left at the documented value here and lowered only if C2 says it needs to be.
+  lora_rank_unet: 8
+  lora_rank_vae: 4
+  # M1's already-vendored PatchGAN, not upstream's `vision_aided_loss` CLIP discriminator, for
+  # the same reason the loss weights above are shared (translators/pix2pix_turbo.py, note 6).
+  net_d: basic
+  ndf: 64
+  gan_mode: vanilla
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  workers: 16
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: e3-turbo
+  run_dir: runs
+  name: e3-turbo-loop

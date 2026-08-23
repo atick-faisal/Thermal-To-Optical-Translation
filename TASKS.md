@@ -2835,9 +2835,46 @@ risk row anticipated.
 
 #### Step 4 — the turbo experiment configs
 
-- [ ] `experiments/e3_turbo_{control,loop}.yaml`, mirroring the pix2pix pair and pinned by the
-      same differ-only-by-design test. Batch size and `train.crop` need a VRAM measurement on
-      the server first — a 1.3B model at 640×512 is not the same budget as `resnet_9blocks`
+- [x] `experiments/e3_turbo_{control,loop}.yaml`, mirroring the pix2pix pair and pinned by the
+      same differ-only-by-design test — which is now **parametrised over both pairs**. Covering
+      only pix2pix would have left the arm PLAN.md §11 calls the strong one unguarded, which is
+      backwards. Adding a backbone to E3 is now one row in `_PAIRS`
+- [ ] **Confirm `train.batch_size` on the server** — written as 2, upstream's documented recipe
+      for the *paired* model, which is a conservative starting point on a 40GB A100 and not a
+      measured ceiling
+- [ ] **Calibrate `coupling.grad_scale`** — written as 0.15 and **not valid for this backbone**
+
+**Two fields are deliberately unvalidated, and the files say so loudly.**
+
+`train.batch_size: 2` and `train.crop: null` are the VRAM-determined pair. Full frames keep the
+backbone as the only difference from the pix2pix campaign; the wrapper reflect-pads 640×480 to
+640×512 for the f8 VAE and slices back after decode, so geometry never forces a crop — only
+memory would. The documented fallback is a stride-32 `[512, 512]`, which is also upstream's own
+recipe. Measure with one stage and no detector:
+
+```powershell
+uv run t2o train --config experiments/e3_turbo_loop.yaml --data $DATA `
+  --in-loop-weights $OPTICAL --stage 3 --epochs 1 --name vram-probe --device cuda:0
+```
+
+`t2o train` is the right seam, not `t2o loop`: one stage, no export, no evaluation detector, and
+`--stage 3` selects the top of the ramp so the `FrozenDetector` is resident alongside the
+generator — the actual peak. Note `--epochs` maps to `train.epochs_per_stage` only; the detector
+fine-tune reads `detector.evaluation.epochs` and is untouched by it, which is why `t2o loop
+--epochs 1` still runs a full 50-epoch ultralytics job per stage. (`t2o loop --no-detector` is
+the equivalent if the loop path is wanted for some other reason.) The detector fine-tune's
+memory is ultralytics' own and unchanged by the translator backbone, so it needs no re-measuring.
+
+`coupling.grad_scale: 0.15` is **pix2pix's** value, present only as the one informed starting
+candidate — same loss weights, so the same order of magnitude is where the search begins. The
+trap is that it looks validated. sd-turbo starts pretrained, so its `loss_det` sits at a
+different magnitude from epoch 0 and 0.15 could land back near the 2.3% that made E3's first
+campaign uninterpretable. **Probe before the campaign** (step 4b below), and remember the
+epoch-length trap when reading it: 25-epoch means sit above 100-epoch means in every term.
+
+`train.lr: 1.0e-4`, not the pix2pix pair's 2.0e-4 — this trains LoRA adapters on a pretrained
+model rather than a generator from scratch, and it is what `Pix2PixTurboTranslator.__init__`
+defaults to. The 25-epoch probe is also where a bad LR would show, before 72 GPU-hours ride on it.
 
 #### Step 5 — the turbo campaign (server)
 
