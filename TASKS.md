@@ -2553,6 +2553,7 @@ resolved: coupling was tested at 19.8% of the objective and moved the endpoint.
 - [x] `loss_share.py --terms-only` on the control arm — **finding 9 resolved in training loss:
       no cost.** `--terms-only` was added for this; asking the default path for a control
       arm's share was an error in this step's first draft
+- [x] Device fix — the first server run of the pass crashed on every image; see below
 - [ ] `t2o faithfulness` over the twelve stage-3 exports — the evaluation-side half, and the
       only remaining question about whether the +0.0512 is honest
 
@@ -2591,6 +2592,23 @@ that it comes back clean.
 **`--weights` is deliberately required and un-defaulted.** It must be the reference `yolo11s`.
 Scoring hallucination with the in-loop `yolo11n` measures how well the translator learned to
 please the checkpoint that trained it, which is the confound step 1's judge exists to remove.
+
+**The first server run of this pass crashed on the first image**, in `_greedy_match`:
+`RuntimeError: Expected all tensors to be on the same device ... cuda:0 and cpu`. The detector
+returns predictions on `--device`, ground truth is read off disk by `load_yolo_labels` on CPU,
+and `box_iou` will not mix them. `detections_from_result` now moves predictions to CPU — the
+one place device-resident tensors enter the module — and the matcher's masks are allocated on
+their inputs' device rather than the default one. CPU is also the right side to match on: the
+loop is Python-level over a handful of boxes, so every `.tolist()`/`int()`/`bool()` in it would
+otherwise be a device sync.
+
+**Why the test suite did not catch it.** All of M0.5's faithfulness tests build tensors with a
+bare `torch.tensor(...)`, so the whole module had only ever been exercised on one device — the
+cross-device condition was unreachable from the tests, not merely untested. The fix adds three
+tests parametrised over `cuda`/`mps`, skipping whichever is absent. `mps` is present on the dev
+machine, so the case that only appeared on the server now runs locally on every commit;
+reverting the fix reproduces the server's error verbatim (`mps:0 and cpu`). A mismatch also
+raises a named `ValueError` at our boundary now instead of surfacing from inside torchvision.
 
 ---
 

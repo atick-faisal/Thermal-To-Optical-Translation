@@ -71,12 +71,77 @@ def test_detections_from_result_applies_confidence_threshold() -> None:
     assert detections.conf is not None and detections.conf.tolist() == pytest.approx([0.9])
 
 
+def _det(
+    cls: list[int],
+    boxes: list[list[float]],
+    conf: list[float] | None = None,
+    device: str = "cpu",
+) -> Detections:
+    conf_t = torch.tensor(conf, device=device) if conf is not None else None
+    return Detections(
+        cls=torch.tensor(cls, device=device),
+        bboxes=torch.tensor(boxes, device=device),
+        conf=conf_t,
+    )
+
+
+# --------------------------------------------------------------------------- devices
+
+# The bug this section exists for: on the server the detector returns CUDA tensors while
+# ground truth is read off disk onto CPU, so the first `box_iou(translated, gt)` raised
+# "Expected all tensors to be on the same device". Every test above runs CPU-only and could
+# not see it. `mps` on Apple silicon reproduces the same cross-device condition locally.
+_ACCELERATORS = [
+    pytest.param(
+        name,
+        marks=pytest.mark.skipif(not available(), reason=f"no {name} device on this machine"),
+    )
+    for name, available in (
+        ("cuda", torch.cuda.is_available),
+        ("mps", torch.backends.mps.is_available),
+    )
+]
+
+
+@pytest.mark.parametrize("device", _ACCELERATORS)
+def test_detections_from_result_lands_on_cpu_whatever_the_detector_ran_on(device: str) -> None:
+    """Predictions must arrive CPU-side, since ground truth is only ever read there."""
+    result = SimpleNamespace(
+        boxes=SimpleNamespace(
+            conf=torch.tensor([0.9], device=device),
+            cls=torch.tensor([0.0], device=device),
+            xyxyn=torch.tensor([[0.1, 0.1, 0.3, 0.3]], device=device),
+        )
+    )
+    detections = detections_from_result(result, conf_threshold=0.25)
+
+    assert detections.cls.device.type == "cpu"
+    assert detections.bboxes.device.type == "cpu"
+    assert detections.conf is not None and detections.conf.device.type == "cpu"
+
+
+@pytest.mark.parametrize("device", _ACCELERATORS)
+def test_matching_off_cpu_works_when_both_sides_agree(device: str) -> None:
+    box = [[0.1, 0.1, 0.3, 0.3]]
+    pred = _det([0], box, conf=[0.9], device=device)
+    ref = _det([0], box, device=device)
+
+    pred_matched, ref_matched = _greedy_match(pred, ref, iou_threshold=0.5)
+    assert pred_matched.tolist() == [True]
+    assert ref_matched.tolist() == [True]
+
+
+@pytest.mark.parametrize("device", _ACCELERATORS)
+def test_mixed_devices_are_named_rather_than_raised_from_inside_torchvision(device: str) -> None:
+    box = [[0.1, 0.1, 0.3, 0.3]]
+    pred = _det([0], box, conf=[0.9], device=device)
+    ref = _det([0], box)  # ground truth, CPU-side as `load_yolo_labels` returns it
+
+    with pytest.raises(ValueError, match="must share a device"):
+        _greedy_match(pred, ref, iou_threshold=0.5)
+
+
 # --------------------------------------------------------------------------- matching
-
-
-def _det(cls: list[int], boxes: list[list[float]], conf: list[float] | None = None) -> Detections:
-    conf_t = torch.tensor(conf) if conf is not None else None
-    return Detections(cls=torch.tensor(cls), bboxes=torch.tensor(boxes), conf=conf_t)
 
 
 def test_identical_box_and_class_matches() -> None:

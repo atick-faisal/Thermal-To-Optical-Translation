@@ -51,6 +51,10 @@ class Detections:
 
     ``conf=None`` marks ground truth: every entry counts as certain, and the confidence
     threshold used to filter predictions does not apply to it.
+
+    Tensors are expected on **CPU**. Ground truth is read there by ``load_yolo_labels`` and
+    predictions are moved there by ``detections_from_result``, so the matcher never has to
+    reconcile two devices; ``_greedy_match`` says so out loud if a caller mixes them.
     """
 
     cls: Tensor  # (N,) int64
@@ -86,7 +90,16 @@ def detections_from_result(result: Any, conf_threshold: float) -> Detections:
     """
     boxes = result.boxes
     keep = boxes.conf >= conf_threshold
-    return Detections(cls=boxes.cls[keep].long(), bboxes=boxes.xyxyn[keep], conf=boxes.conf[keep])
+    # Pulled to CPU here, at the one place device-resident tensors enter this module. Ground
+    # truth arrives from `load_yolo_labels` on CPU, so leaving predictions on the accelerator
+    # makes the very first `box_iou(translated, gt)` a cross-device call and raises. Matching
+    # is a Python-level loop over a handful of boxes -- every `.tolist()`/`int()`/`bool()` in
+    # `_greedy_match` would be a device sync -- so CPU is both the correct and the faster side.
+    return Detections(
+        cls=boxes.cls[keep].long().cpu(),
+        bboxes=boxes.xyxyn[keep].cpu(),
+        conf=boxes.conf[keep].cpu(),
+    )
 
 
 def _greedy_match(pred: Detections, ref: Detections, iou_threshold: float) -> tuple[Tensor, Tensor]:
@@ -94,9 +107,17 @@ def _greedy_match(pred: Detections, ref: Detections, iou_threshold: float) -> tu
 
     Returns ``(pred_matched, ref_matched)`` boolean masks, aligned to each input's order.
     """
+    if pred.bboxes.device != ref.bboxes.device:
+        raise ValueError(
+            f"predictions are on {pred.bboxes.device} but references are on "
+            f"{ref.bboxes.device}; both sides of a match must share a device"
+        )
+
     n_pred, n_ref = pred.cls.shape[0], ref.cls.shape[0]
-    pred_matched = torch.zeros(n_pred, dtype=torch.bool)
-    ref_matched = torch.zeros(n_ref, dtype=torch.bool)
+    # On the inputs' device, not the default one: the masks are combined with `ref.cls` and
+    # `iou` below, and a CPU mask against accelerator tensors raises.
+    pred_matched = torch.zeros(n_pred, dtype=torch.bool, device=pred.cls.device)
+    ref_matched = torch.zeros(n_ref, dtype=torch.bool, device=ref.cls.device)
     if n_pred == 0 or n_ref == 0:
         return pred_matched, ref_matched
 
