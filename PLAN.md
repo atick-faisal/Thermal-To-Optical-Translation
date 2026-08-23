@@ -567,7 +567,7 @@ E1–E10 from `RESEARCH_FINDINGS.md` §7 survive. Changes:
 | --- | --- |
 | E1 reference bracket | Unchanged. Detector on {raw thermal, real visible} × {detector trained on thermal, on visible}. The server's existing weights cover most of this. |
 | E2 backbone comparison | `{pix2pix, pix2pix-turbo, LBBDM-f4}` paired at λ_det=0; `{CUT}` unpaired. UNSB optional. |
-| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. **The pix2pix cell is done and it is POSITIVE** (TASKS.md M1.2 step 8): twelve runs at the calibrated `grad_scale: 0.15`, stage-3 zero-shot mAP50 **+0.0512, p = 0.031, CI [+0.025, +0.081]** — p exactly at the design's 2/2⁶ floor, so all six seeds agreed. Corroborated by a monotone dose-response (+0.028 → +0.036 → +0.051) that was absent at 1/15th the dose, and by raw detection loss falling ~30% where it previously did not move. §16's causality criterion is **satisfied for pix2pix**, with two caveats: the stage-0 null drew wide (−0.0397, resolved by the within-arm trajectory contrast of +0.0909 — a post-hoc sensitivity analysis, not the endpoint), and fidelity is no longer neutral (+0.0097 LPIPS, CI excluding zero at p = 0.125). The earlier campaign at `grad_scale: 1.0e-2` came back null (+0.0070, p = 0.66) and is reported beside this one: it was **dose-limited** at 2.3% of the objective (step 7), and the pair of campaigns is itself the dose argument. |
+| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. **The pix2pix cell is done and it is POSITIVE** (TASKS.md M1.2 step 8): twelve runs at the calibrated `grad_scale: 0.15`, stage-3 zero-shot mAP50 **+0.0512, p = 0.031, CI [+0.025, +0.081]** — p exactly at the design's 2/2⁶ floor, so all six seeds agreed. Corroborated by a monotone dose-response (+0.028 → +0.036 → +0.051) that was absent at 1/15th the dose, and by raw detection loss falling ~30% where it previously did not move. §16's causality criterion is **satisfied for pix2pix**, with two caveats: the stage-0 null drew wide (−0.0397, and the within-arm trajectory contrast corroborates rather than closes it — +0.0909 but p = 0.094, a post-hoc sensitivity analysis and never the endpoint), and fidelity may cost up to ~0.02 LPIPS (+0.0097 at the finish line, p = 0.125; +0.0129 within-arm, p = 0.562 — directionally consistent, established by neither). The earlier campaign at `grad_scale: 1.0e-2` came back null (+0.0070, p = 0.66) and is reported beside this one: it was **dose-limited** at 2.3% of the objective (step 7), and the pair of campaigns is itself the dose argument. |
 | **E4 coupling mechanism** | **Scope reduced.** Was `{cascaded, bilevel (TarDAL), meta-feature (MetaFusion)}`. Both comparison arms are unportable — see below. Becomes `{cascaded, bilevel-reimplemented}`, meta-feature deferred. |
 | **E5 gradient tractability** | **Reframed.** Was "which approximation makes backprop fit". Now: *exact* full-generator gradients through a one-step distilled model vs. *truncated* ReFL/K gradients through multi-step LBBDM. A cleaner and more publishable question. |
 | E6 schedule | Unchanged. Warmup vs none; joint vs alternating; λ_det sweep. |
@@ -627,7 +627,15 @@ questions and must never be conflated:
 **Faithfulness (C2):** false-object rate, missed-object rate, detection-consistency between
 translated and real-visible, and an adapted Hallucination Index.
 
-**Rigor:** ≥3 seeds, mean ± std, paired t-test or bootstrap CIs on mAP.
+**Rigor:** ≥3 seeds, mean ± std, and an exact paired significance test on mAP.
+
+**The test is the exact sign-flip permutation p, not the bootstrap CI.** The original wording
+here allowed "paired t-test *or* bootstrap CIs", and at n=6 the two disagree — E3 produced three
+cells where the percentile CI excludes zero while p does not clear 0.05 (TASKS.md M1.2 step 8
+finding 11). The sign-flip test is exact but coarse (2⁶ = 64 assignments, so p ∈ {0.031, 0.062,
+0.094, …}); the percentile bootstrap resamples six numbers and is anti-conservative at that
+size. CIs stay in the tables as descriptive spread. **No claim rests on a bootstrap interval
+excluding zero.**
 
 ---
 
@@ -726,15 +734,20 @@ the result and must be reported:
 
 1. **The stage-0 null drew wide** — −0.0397, against a stage-3 effect of +0.0512, i.e. 1.3× by
    magnitude where the pre-registered rule asks for "clearly larger". Stage 0 is provably
-   λ-inert in both arms, so this is an unlucky draw rather than a confound. It is resolved by
-   the within-arm trajectory — control gains +0.0396 over the 400-epoch budget, loop gains
-   +0.1305, a difference-of-differences of **+0.0909** — which the stage-0 offset cannot touch.
-   That test was **added after seeing the data** and is a sensitivity analysis, not the endpoint.
-2. **Fidelity is no longer neutral**: +0.0097 LPIPS at stage 3 (CI [+.002, +.017], sign-flip
-   p = 0.125). Both arms improve; the coupled arm improves about a third less. Detection up
-   with fidelity down is §8's reward-hacking signature, and `t2o faithfulness` (TASKS.md M1.2
-   step 9) exists to say which it is. **Until that runs, C1's gain is established and its cost
-   is characterised only by LPIPS.**
+   λ-inert in both arms, so this is an unlucky draw rather than a confound. The within-arm
+   trajectory — control +0.0396 over the 400-epoch budget against loop +0.1305 — puts the
+   difference-of-differences at **+0.0909, p = 0.094**: it *corroborates* the endpoint and shows
+   the effect is not the offset showing through (removing the offset makes the contrast grow,
+   monotonically in dose, rather than collapse), but it **does not itself clear significance**.
+   Differencing two paired quantities adds their variances, and the stage-0 difference is the
+   noisy one. That test was **added after seeing the data**; it is a sensitivity analysis and
+   never the endpoint. This remains the result's softest edge.
+2. **Fidelity may cost up to about 0.02 LPIPS, and no more can be said at n=6.** +0.0097 at
+   stage 3 (p = 0.125, CI [+.002, +.017]) and +0.0129 within-arm (p = 0.562, CI [−.025, +.054]).
+   Both arms improve; the coupled arm improves less, consistently in sign and significantly in
+   neither test. Detection up with fidelity down is §8's reward-hacking signature, and
+   `t2o faithfulness` (TASKS.md M1.2 step 9) exists to say which it is. **Until that runs, C1's
+   gain is established and its cost is characterised only by an LPIPS bound.**
 
 The superseded campaign at `grad_scale: 1.0e-2` (+0.0070, p = 0.66) stays in the record: step 7
 measured its dose at 2.3% of the objective, so it never tested coupling at a dose capable of

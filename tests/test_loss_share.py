@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from scripts.loss_share import _format_epochs, epoch_means, stage_shares
+from scripts.loss_share import _format_epochs, epoch_means, main, stage_shares
 
 from t2o.analysis.aggregate import load_run
 
@@ -141,3 +141,40 @@ def test_pooling_runs_of_unequal_length_reports_the_span(tmp_path: Path) -> None
     assert stage_shares([short, long])[1].n_epochs == (2, 4)
     assert _format_epochs((2, 4)) == "2-4"
     assert _format_epochs((25,)) == "25"
+
+
+def test_a_control_only_glob_is_refused_and_names_the_way_out(tmp_path: Path) -> None:
+    """The default refusal exists for the mis-glob, so it must survive --terms-only existing."""
+    _write_run(tmp_path, "control-s0", 0, [0.0, 0.0], [[], []])
+
+    with pytest.raises(SystemExit, match="--terms-only"):
+        main(["--runs", str(tmp_path / "control-s0")])
+
+
+def test_terms_only_reports_a_control_arms_composition_with_no_detection_term(
+    tmp_path: Path,
+) -> None:
+    """The control arm's fidelity trajectory, which nothing else in the repo can read.
+
+    Its `loss_det` key genuinely does not exist, so the detection column must come back
+    absent rather than as a zero that reads like a measured value.
+    """
+    runs = [load_run(_write_run(tmp_path, "control-s0", 0, [0.0, 0.0], [[], []]))]
+
+    shares = stage_shares(runs)
+
+    assert [s.stage for s in shares] == [0, 1]
+    assert all("loss_det" not in s.means for s in shares)
+    assert all(s.means["loss_lpips"] == pytest.approx(1.0) for s in shares)
+    # w * det is 0 * absent, and the share with it -- an honest 0% detection, not a nan.
+    assert all(s.detection_term == 0.0 and s.share == 0.0 for s in shares)
+
+
+def test_terms_only_accepts_a_mixed_glob_without_dropping_the_control_runs(
+    tmp_path: Path,
+) -> None:
+    """Unlike the default path, which skips control runs to keep the share undiluted."""
+    _write_run(tmp_path, "control-s0", 0, [0.0, 0.0], [[], []])
+    _write_run(tmp_path, "control-s1", 1, [0.0, 0.0], [[], []])
+
+    assert main(["--runs", str(tmp_path / "control-s*"), "--terms-only"]) == 0

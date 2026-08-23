@@ -2405,17 +2405,43 @@ the identical computation there and this is an unlucky draw, not a code path. Bu
 rule says the stage-3 effect must be *clearly larger* than the stage-0 difference, and 0.0512
 against 0.0397 is 1.3× by magnitude. **Not clearly larger on that reading alone.**
 
-**7. What resolves 6: the within-arm trajectory, which the offset cannot touch.** Over the same
-400-epoch budget the control gains **+0.0396** (0.7579 → 0.7975) and the loop gains **+0.1305**
-(0.7182 → 0.8487) — 3.3×, a paired difference-of-differences of **+0.0909**. A per-seed stage-0
-offset that were real bias would carry into stage 3 and *suppress* the finish-line effect, so
-+0.0512 is if anything conservative. Step 4 declined to build this test ("scope this does not
-ask for"); the wide draw is what changed that, and `TrajectoryResult` in `analysis/aggregate.py`
-now computes it at every stage, printed unconditionally beside the paired block.
-**Report it as a sensitivity analysis, never as the endpoint** — it was added after seeing the
-data. The mitigating argument, which the paper must state rather than imply: the decision rule
-already directs stage 3 to be read against stage 0, so this formalises the rule's own arithmetic
-instead of introducing a second hypothesis.
+**7. The within-arm trajectory corroborates 6 but does not confirm it.** Measured, not
+estimated (`TrajectoryResult`, `analysis/aggregate.py`):
+
+| stage | control gain | loop gain | difference | p | 95% CI |
+| --- | --- | --- | --- | --- | --- |
+| 1 | −0.0060 | +0.0617 | +0.0677 | .312 | [−.061, +.184] |
+| 2 | +0.0491 | +0.1245 | +0.0754 | .156 | [+.003, +.160] |
+| **3** | **+0.0396** | **+0.1305** | **+0.0909** | **.094** | **[+.019, +.181]** |
+
+Over the same 400-epoch budget the loop arm travels 3.3× further. Two readings, and the second
+is the one that must not be skipped:
+
+* **It says the effect is not an artifact of the stage-0 offset.** If the finish-line +0.0512
+  were the offset showing through, removing the offset would collapse the contrast toward zero.
+  It grows instead, and grows *monotonically in dose* (+0.068 → +0.075 → +0.091) — a second
+  dose-response, in a contrast the offset cannot touch, independent of finding 2's.
+* **It cannot rescue significance, and p = 0.094 is the honest number.** Differencing two paired
+  quantities adds their variances (`Var(A−B) = Var(A) + Var(B) − 2Cov`), and the stage-0
+  difference is precisely the noisy one, so subtracting it injects exactly the noise finding 6
+  is about. This is the ordinary bias–variance trade: the trajectory removes a possible bias at
+  the cost of a wider interval. **A larger point estimate at a worse p is not a stronger
+  result.**
+
+So the defensible sentence is *"the pre-registered endpoint is significant at p = 0.031, and a
+contrast immune to the stage-0 draw points the same way, larger, at p = 0.094"* — never
+"+0.0909, CI excludes zero", which invites the reader to take the sensitivity analysis as the
+finding. Step 4 declined to build this test ("scope this does not ask for"); the wide draw is
+what changed that. **It was added after seeing the data and is a sensitivity analysis, never the
+endpoint.** The one mitigating argument the paper may make: the decision rule already directs
+stage 3 to be read against stage 0, so this formalises the rule's own arithmetic rather than
+introducing a second hypothesis.
+
+**Finding 6 is therefore narrowed, not closed.** The stage-0 draw is still the result's softest
+edge. What can be said is that all three available readings agree in direction — the stage-0
+null's CI [−.127, +.037] contains zero comfortably, stage 3's [+.025, +.081] excludes it, and
+the trajectory grows monotonically in dose — and that findings 2 and 3 do not depend on stage 0
+at all.
 
 **8. Variance collapses in the loop arm as λ rises.** Its `zero_shot.map50` sd runs
 0.0907 → 0.0887 → 0.0215 → 0.0140 while the control stays in 0.024–0.037; by stage 3 the coupled
@@ -2435,9 +2461,31 @@ not significant at n=6* — report both, and do not lean on the CI alone; and de
 while fidelity falls **is** the reward-hacking signature (PLAN.md §8), which the independent
 judge argues against but does not measure. `t2o faithfulness` exists to settle it — see below.
 
-**10. Switch is still not claimable.** +0.1035 at stage 3 against its own stage-0 null of +0.0511
-and p = 0.094. Step 6 finding 6's arithmetic is unchanged: 3 metrics × 4 stages is 12 reported
-tests against an n=6 floor of 0.031, where Bonferroni needs 0.0042. Descriptive only.
+**The trajectory reading weakens this further, and is the one to quote.** Within-arm, the
+control's LPIPS improves −0.0399 and the loop's −0.0270, a difference of **+0.0129, p = 0.562,
+CI [−.025, +.054]** — straddling zero. So the fidelity cost is *directionally consistent across
+both contrasts and statistically established by neither*. The strongest defensible claim is a
+bound: **λ_det at this dose does not cost more than about 0.02 LPIPS**, and may cost nothing.
+Writing it as a demonstrated trade would be overclaiming in the one place a reviewer looking for
+reward hacking will read most carefully.
+
+**10. Switch is still not claimable, and the trajectory removes any remaining doubt.**
++0.1035 at stage 3 against its own stage-0 null of +0.0511 and p = 0.094. Under the trajectory
+contrast it dissolves outright: control +0.1270, loop +0.1794, difference **+0.0524, p = 0.781,
+CI [−.102, +.248]**. Nearly all of Switch's apparent gain is movement *both* arms make over the
+ramp. Step 6 finding 6's arithmetic is unchanged besides: 3 metrics × 4 stages is 12 reported
+tests against an n=6 floor of 0.031, where Bonferroni needs 0.0042. **Descriptive only**, and the
+per-class table in the paper carries no inferential claim at all.
+
+**11. Where the bootstrap CI and the sign-flip p disagree, believe the p.** It happens three
+times above (map50 trajectory at stage 3, LPIPS at stage 3, Switch at stage 2), always the same
+way: CI excludes zero, p does not clear 0.05. Both facts about n = 6. The sign-flip test is
+exact but **coarse** — 2⁶ = 64 assignments, so p can only take 0.031, 0.062, 0.094, … and there
+is no value between the floor and 0.062. The percentile bootstrap resamples 6 numbers with
+replacement and is known to be anti-conservative at that size, giving intervals narrower than
+their nominal coverage. The CIs stay in the tables as descriptive spread; **no claim in this
+project rests on a bootstrap interval excluding zero.** PLAN.md §12 permits either, which is
+what made this ambiguity available — that permission needs narrowing in the writeup.
 
 **Consequence for §16.** PLAN.md's causality criterion is **satisfied for the pix2pix backbone**,
 with findings 6/7 and 9 as its two stated caveats. The dose caveat that gated step 6's null is
@@ -2457,7 +2505,7 @@ erased objects separates them. Every stage's export is still on disk, so this ne
 uv run t2o aggregate --runs 'runs/e3b-*' --stage 3 `
   --metric zero_shot.map50 fidelity.lpips zero_shot.per_class_ap50.Switch `
   --csv runs/e3b-tidy.csv
-uv run python scripts/loss_share.py --runs 'runs/e3b-control-*'
+uv run python scripts/loss_share.py --runs 'runs/e3b-control-*' --terms-only
 foreach ($arm in 'control','loop') { foreach ($s in 0,1,2,3,4,5) {
   uv run t2o faithfulness --translated "runs/e3b-$arm-s$s/stage3/translated" `
     --data $DATA --weights runs/reference-yolo11s/weights/best.pt --device cuda:0
@@ -2465,9 +2513,11 @@ foreach ($arm in 'control','loop') { foreach ($s in 0,1,2,3,4,5) {
 ```
 
 The `--csv` also answers finding 6 directly: whether the wide stage-0 draw is one outlier seed or
-spread across all six. `loss_share.py` on the **control** arm is the missing half of finding 9 —
-the loop arm's loss trajectory is known and the control's is not, so the +0.0097 cannot yet be
-located in loss space.
+spread across all six. `loss_share.py --terms-only` on the **control** arm is the missing half of finding 9 — the loop
+arm's loss trajectory is known and the control's is not, so the +0.0097 cannot yet be located in
+loss space. (`--terms-only` was added for this: the default path refuses a control-only glob,
+correctly, since a control run has no `loss_det` and so no share. Asking it for one was an error
+in this step's first draft.)
 
 **Read on the faithfulness pass:** false-object rate flat or falling while mAP50 is +0.0512 means
 the LPIPS cost is a fidelity trade, and C2 gets its first real number. False objects rising with
@@ -2685,10 +2735,15 @@ risk row anticipated.
       LPIPS 35.7% / GAN 43.7% / l2 0.8%** (M1.2 step 8); the uncalibrated campaign's was
       LPIPS 44% / GAN 52% / l2 1.0% / detection 2.3% (step 7). Any sentence calling the pixel
       term dominant is wrong in both.
-- [ ] Report the fidelity cost, not just the detection gain. λ_det at the calibrated dose
-      moves stage-3 LPIPS by **+0.0097** (bootstrap CI [+.002, +.017], sign-flip p = 0.125):
-      both arms improve, the coupled arm improves about a third less. Report the p and the
-      CI together — they disagree, and leaning on the CI alone overstates it.
+- [ ] Report the fidelity cost as a **bound, not a measured trade**. λ_det at the calibrated
+      dose moves stage-3 LPIPS by +0.0097 (p = 0.125) and the within-arm gain by +0.0129
+      (p = 0.562): consistent in direction, significant in neither. The defensible sentence is
+      "does not cost more than about 0.02 LPIPS", and may cost nothing.
+- [ ] Report significance from the **exact sign-flip p, never a bootstrap CI excluding zero**.
+      At n=6 they disagree in three of E3's cells (M1.2 step 8 finding 11): the sign-flip test
+      is exact but coarse (p ∈ {0.031, 0.062, 0.094, …}), the percentile bootstrap over six
+      values is anti-conservative. PLAN.md §12 has been narrowed to say so; the tables keep the
+      CIs as descriptive spread only.
 - [ ] State that the difference-of-differences (M1.2 step 8 finding 7) was added **after**
       seeing the campaign, and that the pre-registered endpoint is the paired stage-3
       difference. Reporting it as if it had been planned would be the one genuinely

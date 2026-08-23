@@ -27,6 +27,13 @@ Control runs are skipped rather than pooled in: their `loss_det` does not exist 
 records the key when `task_weight > 0`), and averaging them into a loop campaign's share would
 dilute the number the decision rests on.
 
+`--terms-only` reports a control arm's own composition, with the detection and share columns
+empty. That is not a share question but a fidelity one: step 8's finding 9 measured a +0.0097
+stage-3 LPIPS cost at evaluation, and deciding whether the same gap exists in *training* loss
+needs the control arm's `loss_lpips`/`loss_gan` trajectory, which lives nowhere else. Behind a
+flag rather than allowed by default, because the failure it guards is a mis-glob: asking for
+`runs/*-control-*` when you meant `runs/*-*` would otherwise report a meaningless 0.0% share.
+
 Standalone script, not part of the `t2o` package -- it owns its own `logging.basicConfig` the
 way `t2o/cli.py` does for the package proper.
 """
@@ -195,6 +202,12 @@ def build_parser() -> argparse.ArgumentParser:
         "reaches this process unexpanded",
     )
     parser.add_argument(
+        "--terms-only",
+        action="store_true",
+        help="report per-term means for runs with no detection term at all (a control arm); "
+        "the detection and share columns come back empty",
+    )
+    parser.add_argument(
         "--first-epochs",
         type=int,
         default=None,
@@ -209,11 +222,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
     runs = [load_run(path) for path in _expand_run_globs(args.runs)]
+    if args.terms_only:
+        # Every matched run, whichever arm: the question is what the objective was made of,
+        # and a control arm answers it for the terms it does have.
+        logger.info("--terms-only: reporting %d run(s) with no detection share", len(runs))
+        report(stage_shares(runs, args.first_epochs))
+        return 0
+
     loop_runs = [run for run in runs if run.arm is Arm.LOOP]
     if not loop_runs:
         raise SystemExit(
             f"none of the {len(runs)} matched run(s) is a loop arm; a control run records no "
-            f"{DETECTION_KEY} at any stage, so there is no share to report"
+            f"{DETECTION_KEY} at any stage, so there is no share to report. Pass --terms-only "
+            "to report its fidelity terms instead."
         )
     if len(loop_runs) < len(runs):
         logger.info("skipped %d control run(s)", len(runs) - len(loop_runs))
