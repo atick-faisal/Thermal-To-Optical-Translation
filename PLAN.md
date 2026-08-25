@@ -347,12 +347,21 @@ Six things that bite, all already handled in the Clean-SeAFusion port:
   LPIPS readout — and the readout has since caught something: the calibrated dose costs
   +0.0097 stage-3 LPIPS, where at `1.0e-2` fidelity was neutral within ±0.016.
 
-  **The calibration is per backbone, not a global constant.** 0.15 is a property of *this*
-  objective's composition with *this* generator. sd-turbo starts pretrained, so its
-  `loss_det` sits at a different magnitude from epoch 0 and the same `grad_scale` can easily
-  land back near 2% — reproducing step 7's null for step 7's reason at another ~72
-  GPU-hours. Every new backbone re-runs the 25-epoch `scripts/loss_share.py` probe before its
-  campaign. This is the single most expensive mistake available in this project and it has
+  **Calibrated value for pix2pix-turbo: also `grad_scale: 0.15`**, achieving 16.6 / 22.9 /
+  24.5% over a 25-epoch probe, with a second probe at 0.75 bracketing it at 46.6 / 54.7 /
+  57.4% (TASKS.md M2a step 4). The two campaigns therefore run at the same dose and differ by
+  the backbone alone — the cleanest possible form of §11's backbone comparison.
+
+  **The calibration is per backbone, not a global constant, and turbo coinciding is not
+  evidence otherwise.** 0.15 is a property of *this* objective's composition with *this*
+  generator. sd-turbo does start pretrained and its `loss_det` does sit lower — raw 1.98 at
+  stage 3 against pix2pix's 2.76 — so the same `grad_scale` could easily have landed back near
+  2%, reproducing step 7's null for step 7's reason at another ~72 GPU-hours. It did not, only
+  because the fidelity terms fell by a similar factor and the *ratio* held. That is a fact the
+  probe established, not one that could have been predicted from it. Every new backbone re-runs
+  the 25-epoch `scripts/loss_share.py` probe before its campaign; the two turbo probes cost
+  hours and returned "change nothing", which is the cheapest possible outcome and still worth
+  paying for. This is the single most expensive mistake available in this project and it has
   already been made once.
 
 ### Worth stealing from DetFusion: object-aware content loss
@@ -507,7 +516,16 @@ pix2pix-turbo behind the translator interface. **FLIR-aligned pretrain → custo
 verified at 4129 train pairs, and FLIR-aligned is the same camera family as the custom 640×480
 data where LLVIP is 1024×1280 street scenes; LLVIP stays available for an E9 corpus ablation).
 Exact end-to-end detection-loss backprop, LoRA-scaled, λ_det warmed up from near-zero — at a
-`grad_scale` calibrated for *this* backbone, per §8.
+`grad_scale` calibrated for *this* backbone, per §8. **That calibration is done: 0.15**, the same
+value as pix2pix, re-probed rather than inherited (TASKS.md M2a step 4).
+
+**The E3 turbo campaign launches on the custom pairs alone, without the FLIR pretrain**, and the
+ordering matters. pix2pix's arm had no pretrain, so pretraining only the turbo arm would confound
+E3's backbone comparison with a corpus change — the one thing §11 says that cell must not do. The
+FLIR-aligned pretrain is a separate experiment on a "more data" axis, to be read against the
+campaign below rather than folded into it. It also needs a seam that does not exist yet: nothing
+in the config or `cli.py`'s overrides can initialise a translator from an external checkpoint, so
+stage 0 has no way to start from pretrained weights today.
 
 Data prep fits naturally: thermal → `train_A`, visible → `train_B`, plus a
 `train_prompts.json` with a constant caption. **Watch the normalisation asymmetry in
@@ -516,7 +534,10 @@ Data prep fits naturally: thermal → `train_A`, visible → `train_B`, plus a
 VRAM: the documented paired recipe is 512² at `train_batch_size=2`. The maintainer reports
 A6000/48GB for the *unpaired* CycleGAN-turbo variant (multiple generators + discriminators)
 and calls batch 8 "too high". Paired is far lighter, but this is exactly why Phase 0
-measures on the actual card first.
+measures on the actual card first. **Measured: 34.14 GB peak** at `batch_size: 2` on a 40GB
+A100 at full 640×512 frames, stage 3 with the `FrozenDetector` resident — so batch 2 is the
+effective ceiling, the stride-32 `[512, 512]` fallback stays unused, and full frames keep the
+backbone as the only difference from the pix2pix campaign.
 
 Guardrails against collapse and reward hacking: LoRA scaling, λ_det warmup from near-zero,
 fidelity floor on LPIPS, independent evaluation detector.
@@ -567,7 +588,7 @@ E1–E10 from `RESEARCH_FINDINGS.md` §7 survive. Changes:
 | --- | --- |
 | E1 reference bracket | Unchanged. Detector on {raw thermal, real visible} × {detector trained on thermal, on visible}. The server's existing weights cover most of this. |
 | E2 backbone comparison | `{pix2pix, pix2pix-turbo, LBBDM-f4}` paired at λ_det=0; `{CUT}` unpaired. UNSB optional. |
-| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. **The pix2pix cell is done and it is POSITIVE** (TASKS.md M1.2 step 8): twelve runs at the calibrated `grad_scale: 0.15`, stage-3 zero-shot mAP50 **+0.0512, p = 0.031, CI [+0.025, +0.081]** — p exactly at the design's 2/2⁶ floor, so all six seeds agreed. Corroborated by a monotone dose-response (+0.028 → +0.036 → +0.051) that was absent at 1/15th the dose, and by raw detection loss falling ~30% where it previously did not move. §16's causality criterion is **satisfied for pix2pix**, with two caveats: the stage-0 null drew wide (−0.0397, and the within-arm trajectory contrast corroborates rather than closes it — +0.0909 but p = 0.094, a post-hoc sensitivity analysis and never the endpoint), and fidelity may cost up to ~0.02 LPIPS (+0.0097 at the finish line, p = 0.125; +0.0129 within-arm, p = 0.562 — directionally consistent, established by neither), which C2 has since localised to texture rather than objects. **Reward hacking is ruled out**: at stage 3 the coupled arm invents fewer objects (false-object rate −0.0289, p = 0.156, the pre-registered criterion), erases fewer (−0.0370, p = 0.031) and is more consistent with the detector's real-image behaviour (+0.0291, p = 0.031). The earlier campaign at `grad_scale: 1.0e-2` came back null (+0.0070, p = 0.66) and is reported beside this one: it was **dose-limited** at 2.3% of the objective (step 7), and the pair of campaigns is itself the dose argument. |
+| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. **The pix2pix cell is done and it is POSITIVE** (TASKS.md M1.2 step 8): twelve runs at the calibrated `grad_scale: 0.15`, stage-3 zero-shot mAP50 **+0.0512, p = 0.031, CI [+0.025, +0.081]** — p exactly at the design's 2/2⁶ floor, so all six seeds agreed. Corroborated by a monotone dose-response (+0.028 → +0.036 → +0.051) that was absent at 1/15th the dose, and by raw detection loss falling ~30% where it previously did not move. §16's causality criterion is **satisfied for pix2pix**, with two caveats: the stage-0 null drew wide (−0.0397, and the within-arm trajectory contrast corroborates rather than closes it — +0.0909 but p = 0.094, a post-hoc sensitivity analysis and never the endpoint), and fidelity may cost up to ~0.02 LPIPS (+0.0097 at the finish line, p = 0.125; +0.0129 within-arm, p = 0.562 — directionally consistent, established by neither), which C2 has since localised to texture rather than objects. **Reward hacking is ruled out**: at stage 3 the coupled arm invents fewer objects (false-object rate −0.0289, p = 0.156, the pre-registered criterion), erases fewer (−0.0370, p = 0.031) and is more consistent with the detector's real-image behaviour (+0.0291, p = 0.031). The earlier campaign at `grad_scale: 1.0e-2` came back null (+0.0070, p = 0.66) and is reported beside this one: it was **dose-limited** at 2.3% of the objective (step 7), and the pair of campaigns is itself the dose argument. **The turbo cell is calibrated and ready to launch** (TASKS.md M2a step 4): 34.14 GB peak at `batch_size: 2` on a 40GB A100, and `grad_scale: 0.15` — pix2pix's value, re-probed for this backbone rather than inherited — putting the detection term at 16.6 / 22.9 / 24.5% of the objective. Both campaigns therefore run at the same dose, so the turbo-minus-pix2pix contrast is a backbone contrast and nothing else. |
 | **E4 coupling mechanism** | **Scope reduced.** Was `{cascaded, bilevel (TarDAL), meta-feature (MetaFusion)}`. Both comparison arms are unportable — see below. Becomes `{cascaded, bilevel-reimplemented}`, meta-feature deferred. |
 | **E5 gradient tractability** | **Reframed.** Was "which approximation makes backprop fit". Now: *exact* full-generator gradients through a one-step distilled model vs. *truncated* ReFL/K gradients through multi-step LBBDM. A cleaner and more publishable question. |
 | E6 schedule | Unchanged. Warmup vs none; joint vs alternating; λ_det sweep. |
@@ -709,7 +730,7 @@ warned on a renamed run.
 | ~~Phase 1 fails — translation never beats raw thermal~~ | E1 vs E3 at λ_det=0 | **Retired.** Measured: 0.7751 vs 0.1887 zero-shot mAP50, all four classes improved (TASKS.md M1). |
 | 850 pairs too few even for LoRA fine-tuning | Turbo overfits during Phase 2a | FLIR-aligned pretrain is already in the plan (§10); escalate to heavier augmentation and lower LoRA rank. |
 | **Reward hacking — mAP rises, images degrade** | **Cleared on pix2pix, from both sides.** Training loss shows no perceptual sacrifice (λ-attributable `loss_lpips` change −0.09 pp, step 8 finding 9); object counts on the finished exports show no hallucination (false-object rate −0.0289, missed −0.0370 at p = 0.031, consistency +0.0291 at p = 0.031 — step 9). Evaluation LPIPS is +0.0097 (p = 0.125) and is texture, not objects | `reward_target` **stays null**: there is no measured problem for it to respond to, and changing the dose and its guard together would make any fidelity result unattributable. C2 is now measured through the same paired sign-flip test as the task metric (`t2o faithfulness --write-back`), so turbo re-tests all of it at far higher capacity on the same instrument. |
-| **λ_det miscalibrated for a new backbone** | Detection share outside 20–30% on `scripts/loss_share.py` | §8's per-backbone probe, 25 epochs, before any campaign. Skipping it once already cost 72 GPU-hours and an uninterpretable null. |
+| **λ_det miscalibrated for a new backbone** | Detection share outside 20–30% on `scripts/loss_share.py` | §8's per-backbone probe, 25 epochs, before any campaign. Skipping it once already cost 72 GPU-hours and an uninterpretable null. **Fired as designed on turbo** (TASKS.md M2a step 4): two probes, hours of GPU, verdict "0.15 is in band at 24.5% — change nothing". A probe that returns no change is the control working, not the control being unnecessary. |
 | Gradient conflict — training unstable | Loss oscillation, collapse | Escalate cascaded → bilevel (E4). Meta-feature only if both fail. |
 | VRAM tighter than expected | Phase 0 OOM | SDPA + gradient checkpointing + bf16; reduce batch, then resolution. |
 | DataLoader hangs on Windows spawn | Phase 0, silent stalls | Module-level dataset classes, guarded entry points, low `num_workers` until stable. |

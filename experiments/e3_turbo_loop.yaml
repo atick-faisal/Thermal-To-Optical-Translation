@@ -2,8 +2,8 @@
 #
 # Identical to the sibling experiments/e3_turbo_control.yaml except `coupling.task_weights` and
 # `runtime.name`. See that file's header for what this pair is, what carries over from the
-# pix2pix pair, and why the campaign must not launch before `grad_scale` is measured for this
-# backbone. The differ-only-by-design invariant is pinned by
+# pix2pix pair, and where the VRAM and dose measurements that unblocked the campaign are
+# recorded. The differ-only-by-design invariant is pinned by
 # tests/test_e3_experiments.py::test_control_and_loop_configs_differ_only_by_design.
 #
 # Read `detector.in_loop.weights` with care in this file, unlike in the control: stages 1-3 have
@@ -24,15 +24,17 @@ train:
   # Matched to the pix2pix pair: the two backbones are compared at equal budget, and within
   # this pair both arms are 400 warm-started epochs whatever this value is.
   epochs_per_stage: 100
-  # **VRAM-determined -- confirm on the server before the campaign** (TASKS.md M2a step 4).
-  # 2 is upstream's documented recipe for the *paired* model (PLAN.md §10 Phase 2a), which is
-  # the conservative starting point on a 40GB A100, not a measured ceiling. Raising it is pure
-  # throughput and does not move lambda_det: the detection loss is divided by batch size
-  # (PLAN.md §8), which is exactly what stops a batch-size change from rescaling the coupling.
+  # **VRAM-measured: 34.14 GB peak** on a 40GB A100 at this batch size, full frames, stage 3
+  # with the `FrozenDetector` resident (TASKS.md M2a step 4). That leaves ~5.8 GB, so 2 is the
+  # effective ceiling here and not merely upstream's documented recipe for the *paired* model
+  # (PLAN.md §10 Phase 2a). Raising it would in any case be pure throughput and would not move
+  # lambda_det: the detection loss is divided by batch size (PLAN.md §8), which is exactly what
+  # stops a batch-size change from rescaling the coupling.
   batch_size: 2
   # 1.0e-4, not the pix2pix pair's 2.0e-4. This trains LoRA adapters on a pretrained model
   # rather than a generator from scratch, and 1.0e-4 is what `Pix2PixTurboTranslator.__init__`
-  # itself defaults to. Watch the first probe's loss curve before committing 72 GPU-hours.
+  # itself defaults to. The 25-epoch probe says it trains: over stage 0 -> 1 `loss_lpips` falls
+  # 1.2561 -> 0.8148 and `loss_l2` 0.0278 -> 0.0169.
   lr: 1.0e-4
   lr_gamma: 0.95
   amp: true
@@ -42,7 +44,7 @@ train:
   # between the two campaigns. The wrapper reflect-pads 640x480 to 640x512 for the f8 VAE and
   # slices back after decode, so no crop is needed to make the geometry work -- only VRAM would
   # force one. The documented fallback is a stride-32 `[512, 512]`, which is also upstream's
-  # own recipe; take it only if the measurement says batch 2 at full frame does not fit.
+  # own recipe. It stays unused: the measurement above says batch 2 at full frame fits.
   crop: null
   seed: 0
 
@@ -56,14 +58,18 @@ loss:
 
 coupling:
   task_weights: [0.0, 1.0, 2.0, 3.0]
-  # **NOT calibrated for this backbone.** 0.15 is pix2pix's measured value and is here as the
-  # only informed starting candidate -- same loss weights, so the same order of magnitude is
-  # the sane place to begin the search, nothing more. sd-turbo starts pretrained, so its
-  # `loss_det` sits at a different magnitude from epoch 0 and this value can easily land back
-  # near the 2.3% that made E3's first campaign uninterpretable (TASKS.md M1.2 steps 7-8).
+  # **Calibrated for this backbone** (TASKS.md M2a step 4): a 25-epoch `scripts/loss_share.py`
+  # probe puts the detection term at 16.6 / 22.9 / 24.5% of the objective across the ramp,
+  # against the 20-30% target band. A second probe at 0.75 brackets it and shows how steep the
+  # band is in this parameter -- 46.6 / 54.7 / 57.4%, well past the top.
   #
-  # Run the 25-epoch `scripts/loss_share.py` probe with `--grad-scale <candidate>` and target
-  # 20-30% before the campaign. Skipping that probe once already cost 72 GPU-hours.
+  # This is also pix2pix's value. It was the starting candidate and the probe said to leave it
+  # alone, which is the best case available: the two campaigns now differ by the backbone and
+  # nothing else. **That coincidence is not a licence to inherit it next time.** sd-turbo does
+  # start pretrained and its `loss_det` does sit lower (raw 1.98 at stage 3 against pix2pix's
+  # 2.76); the share held only because the fidelity terms fell by a similar factor. Every new
+  # backbone re-runs the probe (PLAN.md §8) -- skipping it once already cost 72 GPU-hours and
+  # the 2.3% dose that made E3's first campaign uninterpretable (TASKS.md M1.2 steps 7-8).
   grad_scale: 0.15
   # Stays null, as on pix2pix. C2 came back clean there -- the coupled arm invents *fewer*
   # objects, not more (TASKS.md M1.2 step 9) -- so there is no measured problem for a

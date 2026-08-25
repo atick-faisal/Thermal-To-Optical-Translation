@@ -2826,6 +2826,18 @@ risk row anticipated.
       street scenes. LLVIP stays available on the server as a later corpus ablation (E9), not
       on this path.
 
+**Deliberately *after* the E3 turbo campaign, not before it.** The campaign in step 5 launches on
+the custom pairs alone. pix2pix's arm had no pretrain, so pretraining only the turbo arm would
+confound E3's backbone comparison with a corpus change — exactly what PLAN.md §11 says that cell
+must not do. The pretrain is a separate experiment on a "more data" axis, read *against* the
+campaign rather than folded into it.
+
+It is also not launch-ready, which is worth recording before someone plans around it: **nothing
+can initialise a translator from an external checkpoint today.** `cli.py`'s `_OVERRIDES` has
+`eval_init_weights` for the detector and no counterpart for the translator, and `run_loop` builds
+the translator fresh and warm-starts stage *n* only from stage *n−1*'s own checkpoint. A pretrain
+needs a config field plus a flag to seed stage 0 with, and that is build work, not a server run.
+
 #### Step 3 — the fidelity floor
 
 - [ ] Early-stop / clamp when LPIPS rises past a threshold while λ_det > 0. The LPIPS network
@@ -2839,18 +2851,20 @@ risk row anticipated.
       same differ-only-by-design test — which is now **parametrised over both pairs**. Covering
       only pix2pix would have left the arm PLAN.md §11 calls the strong one unguarded, which is
       backwards. Adding a backbone to E3 is now one row in `_PAIRS`
-- [ ] **Confirm `train.batch_size` on the server** — written as 2, upstream's documented recipe
-      for the *paired* model, which is a conservative starting point on a 40GB A100 and not a
-      measured ceiling
-- [ ] **Calibrate `coupling.grad_scale`** — written as 0.15 and **not valid for this backbone**
+- [x] **`train.batch_size` confirmed on the server** — 2 measured at **34.14 GB peak** on a 40GB
+      A100, full frames, stage 3 with the `FrozenDetector` resident. ~5.8 GB of headroom, so it
+      is a real ceiling now and not just upstream's conservative recipe for the *paired* model
+- [x] **`coupling.grad_scale` calibrated** — 0.15 puts the detection term at 16.6 / 22.9 / 24.5%
+      of the objective, inside the 20–30% band. **Kept, not re-tuned**; see below
 
-**Two fields are deliberately unvalidated, and the files say so loudly.**
+**Two fields were deliberately unvalidated, and the files said so loudly.** Both are now measured
+and both config headers have been rewritten to carry the numbers instead of the warnings.
 
 `train.batch_size: 2` and `train.crop: null` are the VRAM-determined pair. Full frames keep the
 backbone as the only difference from the pix2pix campaign; the wrapper reflect-pads 640×480 to
 640×512 for the f8 VAE and slices back after decode, so geometry never forces a crop — only
 memory would. The documented fallback is a stride-32 `[512, 512]`, which is also upstream's own
-recipe. Measure with one stage and no detector:
+recipe. Measured with one stage and no detector — **34.14 GB peak, no OOM**:
 
 ```powershell
 uv run t2o train --config experiments/e3_turbo_loop.yaml --data $DATA `
@@ -2865,21 +2879,189 @@ fine-tune reads `detector.evaluation.epochs` and is untouched by it, which is wh
 the equivalent if the loop path is wanted for some other reason.) The detector fine-tune's
 memory is ultralytics' own and unchanged by the translator backbone, so it needs no re-measuring.
 
-`coupling.grad_scale: 0.15` is **pix2pix's** value, present only as the one informed starting
+`coupling.grad_scale: 0.15` was **pix2pix's** value, present only as the one informed starting
 candidate — same loss weights, so the same order of magnitude is where the search begins. The
-trap is that it looks validated. sd-turbo starts pretrained, so its `loss_det` sits at a
-different magnitude from epoch 0 and 0.15 could land back near the 2.3% that made E3's first
-campaign uninterpretable. **Probe before the campaign** (step 4b below), and remember the
-epoch-length trap when reading it: 25-epoch means sit above 100-epoch means in every term.
+trap was that it looked validated. sd-turbo starts pretrained, so its `loss_det` sits at a
+different magnitude from epoch 0 and 0.15 could have landed back near the 2.3% that made E3's
+first campaign uninterpretable. Two 25-epoch probes settled it — see "Calibration result" below,
+and note the epoch-length trap when reading them: 25-epoch means sit above 100-epoch means in
+every term.
 
 `train.lr: 1.0e-4`, not the pix2pix pair's 2.0e-4 — this trains LoRA adapters on a pretrained
 model rather than a generator from scratch, and it is what `Pix2PixTurboTranslator.__init__`
-defaults to. The 25-epoch probe is also where a bad LR would show, before 72 GPU-hours ride on it.
+defaults to. The probe was also where a bad LR would have shown, and it did not: over stage
+0 → 1 `loss_lpips` falls 1.2561 → 0.8148 and `loss_l2` 0.0278 → 0.0169.
+
+**Calibration result — 0.15 was already right, and the probe is what turned that from a guess
+into a fact.** Two runs, both seed 0, both `--epochs 25 --no-detector` off
+`experiments/e3_turbo_loop.yaml`, one per card, differing only in `--grad-scale`.
+
+`runs/turbo-probe-g015` — **`grad_scale: 0.15`**, the candidate:
+
+```
+stage runs  epochs     w lambda_eff     loss_l2  loss_lpips    loss_gan    loss_det  loss_total     w*det   share
+    0    1      25   0.0     0.0000      0.0278      1.2561      0.8444          --      2.1283    0.0000    0.0%
+    1    1      25   1.0     0.1500      0.0173      0.8148      0.8002      0.3249      1.9572    0.3249   16.6%
+    2    1      25   2.0     0.3000      0.0159      0.7874      1.1686      0.2931      2.5583    0.5863   22.9%
+    3    1      25   3.0     0.4500      0.0169      0.8770      1.8513      0.2963      3.6343    0.8890   24.5%
+```
+
+`runs/turbo-probe-g075` — **`grad_scale: 0.75`**, 5× the dose, as the bracket:
+
+```
+stage runs  epochs     w lambda_eff     loss_l2  loss_lpips    loss_gan    loss_det  loss_total     w*det   share
+    0    1      25   0.0     0.0000      0.0279      1.2527      0.8449          --      2.1255    0.0000    0.0%
+    1    1      25   1.0     0.7500      0.0186      0.8712      0.8739      1.5408      3.3046    1.5408   46.6%
+    2    1      25   2.0     1.5000      0.0179      0.8737      1.3142      1.3343      4.8745    2.6686   54.7%
+    3    1      25   3.0     2.2500      0.0183      0.9097      1.9392      1.2876      6.7299    3.8627   57.4%
+```
+
+**The probe pair is its own control.** Stage 0 is λ-inert in both runs and its totals agree to
+**0.13%** (2.1283 vs 2.1255). The two runs differ by dose and by nothing else, which is what
+licenses reading every stage-1-to-3 difference below as an effect of the dose.
+
+**1. In band at the first candidate, and better placed than pix2pix's accepted value.**
+
+| stage | turbo @0.15, 25 ep | pix2pix @0.15, 25 ep | pix2pix @0.15, 100 ep |
+| --- | --- | --- | --- |
+| 1 | 16.6% | 10.9% | 10.0% |
+| 2 | 22.9% | 16.6% | 16.1% |
+| 3 | **24.5%** | 22.5% | 19.8% |
+
+Applying pix2pix's own measured 25→100 epoch decay (22.5 → 19.8, ×0.88) projects turbo to **~21.6%
+at 100 epochs** — inside the band, where pix2pix's campaign ran just *below* it at 19.8% and was
+recorded rather than re-tuned. Interpolating between the two probes, the band at stage 3 spans
+roughly `grad_scale ∈ [0.11, 0.21]`, so 0.15 sits near its centre. The share is steep in this
+parameter — `w·det` scales close to linearly while the fidelity total barely moves — which is why
+0.75 overshot to 57.4% rather than to something intermediate.
+
+**0.15 kept, not re-tuned.** The alternative was ~0.20, to centre the band under the epoch decay.
+Rejected on four counts: the identical-knobs property across backbones is an explicit design
+commitment (PLAN.md §8, both config headers) and is worth more than 2pp of share; finding 3 below
+measures a higher dose costing fidelity; step 8 already ruled that the band is a calibration
+target and not something to chase after the fact; and 24.5% meets the criterion as it stands. The
+failure being guarded against — step 7's 2.3% — is an order of magnitude away.
+
+**2. The dose bites in loss space, at 25 epochs.** Raw `loss_det` (`loss_det / grad_scale`, since
+`DetectionTaskLoss.forward` applies `grad_scale` before `fit` applies the stage weight):
+
+| stage | @0.15 | @0.75 | Δ |
+| --- | --- | --- | --- |
+| 1 | 2.166 | 2.054 | −5.2% |
+| 2 | 1.954 | 1.779 | −9.0% |
+| 3 | 1.975 | 1.717 | −13.1% |
+
+Monotone in stage: the further up the ramp, the more the extra dose buys. This is the signature
+that was **absent** on pix2pix at `1.0e-2` (step 7) and that only appeared there at 0.15 over a
+full 100-epoch stage (step 8 finding 3). It is visible here in a 25-epoch probe.
+
+**3. The dose costs fidelity, which is the argument against raising it.** Weighted `loss_lpips` is
+worse at every coupled stage under 5× the dose: **+6.9% / +11.0% / +3.7%** (stages 1/2/3), against
+a stage-0 null that agrees to 0.3%. The pix2pix campaign's +0.0097 stage-3 LPIPS (step 8 finding
+6) reproduces here as a dose-response rather than a single point. There is no headroom argument
+for pushing `grad_scale` above the band's centre.
+
+**4. Turbo is better on every term of the objective — descriptive only.** Stage 3, both backbones
+at 25 epochs and `grad_scale: 0.15`:
+
+| term | pix2pix | turbo | Δ |
+| --- | --- | --- | --- |
+| `loss_l2` | 0.0431 | 0.0169 | −61% |
+| `loss_lpips` (weighted) | 1.9002 | 0.8770 | −54% |
+| `loss_gan` | 2.3294 | 1.8513 | −21% |
+| raw `loss_det` | 2.757 | 1.975 | −28% |
+| `loss_total` | 5.5136 | 3.6343 | −34% |
+
+Turbo's raw LPIPS at 25 epochs (0.175) already beats pix2pix's at 100 (0.298). This is also *why*
+the same `grad_scale` lands in the same place: numerator and denominator fell by similar factors.
+**No claim attaches to this** — it is training loss on the train split, one seed, 25 epochs, and
+not an evaluation metric. PLAN.md §11 calls turbo the strong arm; the campaign is what tests that.
+
+**5. The objective's composition differs from pix2pix's, and it is GAN-heavy.** At stage 3 the
+turbo split is **detection 24.5% / GAN 50.9% / LPIPS 24.1% / l2 0.5%**, against the pix2pix
+campaign's 19.8% / 43.7% / 35.7% / 0.8%. Turbo's LPIPS term is small because the pretrained
+backbone is good at it, so the GAN term takes the space. Folded into the paper-corrections list;
+25-epoch against 100-epoch, so the comparison is indicative rather than matched.
+
+**6. `loss_gan` climbs +119% across stages, and it is catch-up rather than divergence.** Turbo's
+stage-0 `loss_gan` is 0.8444 against pix2pix's 1.7234: a pretrained generator fools a fresh
+PatchGAN easily, and the discriminator closes the gap over four warm-started stages. It **ends
+below** pix2pix's (1.8513 vs 2.3294) — convergence toward a common equilibrium from a much lower
+base, not a runaway. The 0.75 arm climbs +130%, near-identically, so this is not the coupling.
+Precedent is on the benign side: pix2pix's probe showed +35% and its campaign +10.6% (step 8
+finding 5), the probe's figure being the short-horizon artifact it was suspected to be.
+**Watch it at stage 0→1 of the first campaign run anyway** — this is a bigger climb than pix2pix
+ever showed, and 100 epochs is where a 25-epoch artifact separates from a real one.
+
+**The one unmeasured risk, and its mitigation.** Both probes ran `--no-detector`; the campaign does
+not. `run_loop` builds the translator once before the stage loop and holds it for the whole run,
+so at each stage boundary ultralytics allocates at `detector.evaluation.batch: 16` while the
+translator, the reference yolo11s, the LPIPS/KID nets and the just-finished `Trainer`'s optimizer
+state are all still resident. 34.14 GB was a peak-*with-activations* measurement, so torch's
+caching allocator should absorb the detector's demand out of blocks the training step has already
+freed — but that is an argument, not a measurement, and fragmentation is real. **Watch stage 0→1
+of the first run.** If it OOMs, drop `detector.evaluation.batch` to 8: it changes only the adapted
+arm's fine-tune and never the zero-shot gate metric E3 is decided on.
 
 #### Step 5 — the turbo campaign (server)
 
 - [ ] Six seeds × two arms, aggregated with `t2o aggregate` exactly as M1.2 step 5 does. This
       is E3's strong arm; the pix2pix campaign is the control it is read against
+- [ ] Score C2 again on the twelve stage-3 exports, against the same reference judge
+
+Twelve runs at the calibrated dose, `e3t-` prefix so `runs/e3-*` and `runs/e3b-*` stay
+unambiguous (`pair_runs` refuses a mixed glob anyway). **Split across the two cards by seed,
+never by arm** — a pair must stay on one card or the paired difference absorbs whatever differs
+between the GPUs. Start shell B a minute after shell A, so ultralytics' machine-global
+`settings.json` first-touch write lands once (see `detector_stage.py`'s note on it). Both shells
+must carry **identical** `$DATA`/`$OPTICAL`: those are machine-specific paths rather than config,
+so a difference between the shells is a confound `test_control_and_loop_configs_differ_only_by_design`
+cannot see.
+
+```powershell
+# shell A -- seeds 0,1,2 on cuda:0
+foreach ($s in 0,1,2) { foreach ($arm in 'control','loop') {
+  uv run t2o loop --config "experiments/e3_turbo_$arm.yaml" `
+    --data $DATA --in-loop-weights $OPTICAL --eval-init-weights $OPTICAL `
+    --seed $s --name "e3t-$arm-s$s" --group e3-turbo-g015 --wandb --device cuda:0
+} }
+
+# shell B -- identical but for the seed range and the card
+foreach ($s in 3,4,5) { foreach ($arm in 'control','loop') {
+  uv run t2o loop --config "experiments/e3_turbo_$arm.yaml" `
+    --data $DATA --in-loop-weights $OPTICAL --eval-init-weights $OPTICAL `
+    --seed $s --name "e3t-$arm-s$s" --group e3-turbo-g015 --wandb --device cuda:1
+} }
+```
+
+Then the readout, mirroring M1.2 steps 8–9 so the two backbones' cells are directly comparable:
+
+```powershell
+uv run t2o aggregate --runs 'runs/e3t-*' --stage 3 `
+  --metric zero_shot.map50 fidelity.lpips --csv runs/e3t-tidy.csv
+uv run python scripts/loss_share.py --runs 'runs/e3t-loop-*'
+
+foreach ($arm in 'control','loop') { foreach ($s in 0,1,2,3,4,5) {
+  uv run t2o faithfulness --translated "runs/e3t-$arm-s$s/stage3/translated" `
+    --data $DATA --weights runs/reference-yolo11s/weights/best.pt --write-back --device cuda:0
+} }
+uv run t2o aggregate --runs 'runs/e3t-*' --stage 3 `
+  --metric faithfulness.false_object_rate faithfulness.missed_object_rate `
+           faithfulness.detection_consistency
+```
+
+**C2 must be scored with the reference yolo11s**, exactly as on pix2pix — it is what makes the
+turbo cell comparable to the pix2pix cell at all, and this backbone back-props through the entire
+one-step generator with far more capacity to find a genuine hack. pix2pix's clean C2 is a baseline
+for this campaign, not a guarantee about it.
+
+**Two pre-registered readings, written down before the numbers arrive.** The pre-registered
+endpoint is unchanged: the paired stage-3 zero-shot mAP50 difference, exact sign-flip test,
+n = 6. Beyond it, (a) the loop arm's sd ran 0.69 / 0.52 / 0.41× the control's on pix2pix's three
+faithfulness metrics and 2.4× tighter on stage-3 mAP50 — recorded there as an untested
+observation, and this campaign is where it becomes a real prediction (M1.2 step 8 finding 8);
+and (b) `grad_scale` is identical across the two campaigns, so the turbo-minus-pix2pix contrast
+is a backbone contrast and nothing else.
 
 ### M2b — LBBDM-f4 + ReFL (comparison arm, lower priority)
 
@@ -2937,7 +3119,15 @@ defaults to. The 25-epoch probe is also where a bad LR would show, before 72 GPU
       `lpips: 5.0`, `gan: 1.0` the reported campaign's stage-3 split is **detection 19.8% /
       LPIPS 35.7% / GAN 43.7% / l2 0.8%** (M1.2 step 8); the uncalibrated campaign's was
       LPIPS 44% / GAN 52% / l2 1.0% / detection 2.3% (step 7). Any sentence calling the pixel
-      term dominant is wrong in both.
+      term dominant is wrong in both. The composition is also **not the same across backbones**:
+      turbo's 25-epoch probe splits **detection 24.5% / GAN 50.9% / LPIPS 24.1% / l2 0.5%**
+      (M2a step 4), GAN-heavy because the pretrained backbone makes the LPIPS term small.
+- [ ] State that `grad_scale: 0.15` was calibrated **separately** for each backbone and happened
+      to coincide, rather than being carried over. It is the reason the two E3 cells differ by
+      the backbone alone, so the paper should say it explicitly — and say that turbo's raw
+      `loss_det` does sit lower (1.98 vs 2.76 at stage 3), the share holding only because the
+      fidelity terms fell with it (M2a step 4). Written as inheritance it would read as the
+      shortcut PLAN.md §8 forbids.
 - [ ] Report the fidelity cost as a **bound, not a measured trade**. λ_det at the calibrated
       dose moves stage-3 LPIPS by +0.0097 (p = 0.125) and the within-arm gain by +0.0129
       (p = 0.562): consistent in direction, significant in neither. The defensible sentence is
