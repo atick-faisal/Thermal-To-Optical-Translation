@@ -3034,6 +3034,73 @@ foreach ($s in 3,4,5) { foreach ($arm in 'control','loop') {
 } }
 ```
 
+**Throughput — measured, and the estimate that was 16× low.** The first attempt ran three weeks
+from 2026-08-25 and is what produced these numbers. Wall clock between consecutive
+`stage*/translator_last.pt` mtimes, across all 13 completed intervals of that attempt:
+
+| unit | measured |
+|---|---|
+| 100 translator epochs (batch 2, full 640×512, bf16 autocast) | ~20 h |
+| one stage boundary (export → zero-shot → fidelity → 50-epoch adapted fine-tune) | ~4 h |
+| **one stage** | **24.1 h** (spread 20–30 h) |
+| one complete 4-stage run | **~96 h = 4 days** |
+| twelve runs | **~1 150 GPU-h ≈ 24 days on two cards, crash-free** |
+
+The ~72-GPU-hour budget this campaign was launched against is **pix2pix's**, resting on "~6h per
+4-stage run" (line 1502). Turbo's run is ~96 h. The plan carried the figure over unchanged and was
+wrong by 16×, which is the whole reason the first attempt consumed three weeks and finished
+nothing. The lesson is narrow and worth stating: a backbone's throughput is not inherited with its
+`grad_scale`. **Time one stage of any new backbone before committing a campaign to it** — step 4's
+two 25-epoch probes had the answer in them and their wall clock was never read, exactly the
+pre-launch check the plan asked for and did not get.
+
+`train.amp` is `true` at `bfloat16` and honoured (`pix2pix_turbo.py:383`), so 24 h is the honest
+cost of this configuration, not a missing-mixed-precision bug.
+
+**Fragmentation, not capacity, killed the first attempt.** All twelve runs OOM'd inside
+`total.backward()` (`pix2pix_turbo.py:345`) and never at a stage boundary, with 32.05 GiB
+allocated, **6.92 GiB reserved-but-unallocated**, and a 320 MiB request failing on a 39.70 GiB
+card. The working set matches step 4's 34.14 GB measurement, so batch 2 is not too large. Two
+crash patterns, both cumulative rather than deterministic:
+
+- runs with one stage recorded died at **epoch 98–99 of stage 1**, fragmentation accruing over 100
+  epochs;
+- runs with two recorded died at **epoch 0 of stage 2**, immediately after the boundary's export,
+  zero-shot eval, LPIPS/Inception and 50-epoch ultralytics fine-tune had churned the heap.
+
+`e3t-control-s3` cleared three boundaries before failing, so no single stage is at fault.
+**Set `$env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"` in every shell before
+launching** — PyTorch's own recommendation for this signature. It changes allocation strategy only:
+no numerics, no RNG, no config, so runs before and after it belong to the same campaign.
+
+**The launcher above needs a failure check.** A crashed `uv run` returns and `foreach` moves to the
+next seed, so the first attempt *started* all twelve runs and completed none — 18 of 48 stages
+recorded, every run stranded at 1–3 stages. A relaunch must read `metrics.json` after each run and
+`break` on fewer than four stages, or a card spends days on runs that cannot finish.
+
+**Recovery is cheap, because `--resume` is stage- and epoch-granular.** Every stranded stage-1
+checkpoint sat at epoch 97–99, so resuming re-trains 1–2 epochs rather than 100. Remaining cost
+after the fix: **~24 h** for `e3t-control-s3` (3/4 recorded, stage 3 at epoch 0), **~48 h** for a
+run with two stages recorded, **~52 h** for one with one. Per seed-pair that is **76 h for seed 3
+and ~100 h for every other seed** — n = 6 costs ~580 GPU-h (~12 days on two cards), n = 3 costs
+~276 GPU-h (~6 days).
+
+**Open decision — n = 6 is pre-registered and the budget now argues for n = 3** (seeds 3, 0, 1:
+the cheapest pair plus two; see the endpoint pre-registration item in the writing checklist
+below). Reducing n costs statistical power and nothing else:
+`grad_scale`, `epochs_per_stage` and the reference judge are untouched, so turbo-minus-pix2pix
+stays a pure backbone contrast, and the reduction is budget-driven and decided **before** any
+stage-3 number was read. **Not taken yet** — it requires accepting the exact sign-flip test's
+resolution at n = 3, and the mismatch against pix2pix's n = 6 must then be stated in the paper.
+
+**Two resume artefacts for the readout.** (a) A resumed stage records only the epochs run after the
+resume, so stage 1's `epochs` list truncates to 1–2 entries on the stranded runs;
+`scripts/loss_share.py`'s `n_epochs` column surfaces that rather than averaging it silently, and
+the full curves remain in W&B. Stages 2–3 record all 100 and **stage 3 is the reported row**, so
+the share table's decision line is intact — `t2o aggregate` never reads `epochs` at all. (b)
+`wandb.init` passes no `id`/`resume` (`tracking.py:57`), so each resumed run appears twice in
+`e3-turbo-g015` under one name: two segments of one run, not two seeds.
+
 Then the readout, mirroring M1.2 steps 8–9 so the two backbones' cells are directly comparable:
 
 ```powershell
