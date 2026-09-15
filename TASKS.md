@@ -3069,9 +3069,35 @@ crash patterns, both cumulative rather than deterministic:
   zero-shot eval, LPIPS/Inception and 50-epoch ultralytics fine-tune had churned the heap.
 
 `e3t-control-s3` cleared three boundaries before failing, so no single stage is at fault.
-**Set `$env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"` in every shell before
+~~**Set `$env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"` in every shell before
 launching** — PyTorch's own recommendation for this signature. It changes allocation strategy only:
-no numerics, no RNG, no config, so runs before and after it belong to the same campaign.
+no numerics, no RNG, no config, so runs before and after it belong to the same campaign.~~
+
+**Withdrawn — `expandable_segments` is not supported on Windows and was never active.** On the
+server (torch 2.12.1, Windows) setting it prints `expandable_segments not supported on this
+platform`, and `torch.cuda.memory_snapshot()` reports `is_expandable` as `[False]`: PyTorch accepts
+the variable and silently keeps the native allocator. The crash-free 24 h after the relaunch was
+luck, not the fix. The crash came back on 2026-09-15: `e3t-loop-s0` OOM'd on cuda:1 during stage 3
+training, this time in the forward pass (`vae.decode`, `pix2pix_turbo.py:394`), with 32.44 GiB
+allocated, **6.63 GiB reserved-but-unallocated** and a 160 MiB request failing — the first
+attempt's fingerprint to within 0.3 GiB. The relaunch's failure check (below) did its job: the
+card stopped rather than starting `e3t-control-s1` behind a broken run.
+
+**Replacement: `$env:PYTORCH_CUDA_ALLOC_CONF = "max_split_size_mb:512"` — not yet shown to
+work.** It is the native allocator's own fragmentation control, and unlike `expandable_segments` it is
+not platform-gated: cached blocks above 512 MiB are never split, so the 160–320 MiB requests that
+fail here cannot carve them into unusable remainders. It is equally inert — allocation strategy only,
+no numerics, no RNG, no config — so the campaign stays one campaign. Card B's queue (`loop-s0` →
+`control-s1` → `loop-s1`) resumes on it. Card A was left running on the ineffective setting: killing it
+forces the same Adam-resetting resume a crash would, and prevents nothing; if it stops, it relaunches
+on the replacement. **If card B OOMs again under it, allocator settings are exhausted** and the next
+lever is a code change — `torch.cuda.empty_cache()` between epochs in `Trainer.train`
+(`trainer.py:177-204`), also numerically inert. Check any allocator setting on this server before
+crediting it; this is the one-liner that caught the withdrawn one:
+
+```powershell
+uv run python -c "import torch; torch.zeros(1, device='cuda:1'); print([s.get('is_expandable') for s in torch.cuda.memory_snapshot()])"
+```
 
 **The launcher above needs a failure check.** A crashed `uv run` returns and `foreach` moves to the
 next seed, so the first attempt *started* all twelve runs and completed none — 18 of 48 stages
@@ -3080,7 +3106,7 @@ recorded, every run stranded at 1–3 stages. A relaunch must read `metrics.json
 
 **Recovery is cheap, because `--resume` is stage- and epoch-granular.** Every stranded stage-1
 checkpoint sat at epoch 97–99, so resuming re-trains 1–2 epochs rather than 100. Remaining cost
-after the fix: **~24 h** for `e3t-control-s3` (3/4 recorded, stage 3 at epoch 0), **~48 h** for a
+at the relaunch: **~24 h** for `e3t-control-s3` (3/4 recorded, stage 3 at epoch 0), **~48 h** for a
 run with two stages recorded, **~52 h** for one with one. Per seed-pair that is **76 h for seed 3
 and ~100 h for every other seed** — n = 6 costs ~580 GPU-h (~12 days on two cards), n = 3 costs
 ~276 GPU-h (~6 days).
@@ -3100,6 +3126,49 @@ the full curves remain in W&B. Stages 2–3 record all 100 and **stage 3 is the 
 the share table's decision line is intact — `t2o aggregate` never reads `epochs` at all. (b)
 `wandb.init` passes no `id`/`resume` (`tracking.py:57`), so each resumed run appears twice in
 `e3-turbo-g015` under one name: two segments of one run, not two seeds.
+
+**First complete run — `e3t-control-s3` — and one prediction recorded before the rest land.**
+Finished 2026-09-14, the λ_det = 0 arm, 4/4 stages. Written down here with n = 1 and no second run
+to compare against, so that what follows reads as a prediction rather than a story fitted to three
+seeds after the fact.
+
+| stage | `zero_shot.map50` | `mAP50-95` | `fidelity.lpips` | `fidelity.fid` | recorded epochs |
+| --- | --- | --- | --- | --- | --- |
+| 0 | **0.8889** | 0.5974 | 0.2735 | 75.23 | 56 |
+| 1 | 0.8570 | 0.5871 | 0.2674 | 81.46 | 100 |
+| 2 | 0.8569 | 0.5938 | 0.2576 | 81.43 | 100 |
+| 3 | **0.8293** | 0.5615 | 0.2642 | 82.12 | 99 |
+
+**Observation A — turbo's control arm starts far above pix2pix's.** 0.8889 at stage 0 against the
+pix2pix campaign's control mean of 0.7579 ± .0372 (M1.2 step 8's table), a gap of +0.131 or ~3.5
+sd. A pretrained one-step generator produces detection-legible visible frames before any coupling
+is applied at all. Stage 3 keeps a smaller version of the same lead — 0.8293 against 0.7975 ±
+.0330, about 1 sd — and `fidelity.lpips` 0.2642 against 0.2905 ± .0054, roughly 5 sd better. The
+LPIPS gap is the sturdier of the two: pix2pix's control sd there was only ±.0054.
+
+**Observation B, recorded as a prediction — the control arm declines monotonically under
+warm-started training.** 0.8889 → 0.8570 → 0.8569 → 0.8293 across the 400 epochs, with
+`fidelity.fid` rising 75.23 → 82.12 while `fidelity.lpips` stays flat: more fidelity training
+drifts away from detection-legible structure without buying a matching perceptual gain. pix2pix's
+control did not do this — it dipped at stage 1 and then rose to stage 2 (0.7579 → 0.7519 →
+0.8071) before its own stage-3 dip, which turbo's stage 2 → 3 fall of −0.028 otherwise resembles.
+**The prediction: if this is real rather than one run's history, `e3t-control-s0` and
+`e3t-control-s1` show the same monotone decline.** Checkable ~2026-09-19; recorded 2026-09-14 so
+it cannot be fitted afterwards.
+
+**Both observations are weak evidence and must be read that way.** n = 1, control arm only, and
+`e3t-control-s3` is the **most-disturbed run in the campaign**: its recorded epoch counts (56 at
+stage 0, 99 at stage 3) are the fingerprints of two separate resumes, the stage-0 one at epoch 44
+during the first attempt's early crash. Within-run stage trends are firmer than the between-seed
+sd suggests, because the stages share a seed and a warm start — but this run's particular history
+is exactly what observation B has to be defended against, and the two truncated stages are the two
+that carry the trend's endpoints.
+
+**The endpoint does not move.** Stage 3 is pre-registered and stage 0 is turbo's best control
+number. Reporting stage 0 because observation B makes stage 3 look unflattering is the same move
+as re-tuning `grad_scale` after seeing a mAP result, which step 4 refused and PLAN.md §8 forbids.
+If observation B replicates, it is a finding about warm-started fidelity training on a pretrained
+backbone, reported **alongside** the stage-3 endpoint and never in place of it.
 
 Then the readout, mirroring M1.2 steps 8–9 so the two backbones' cells are directly comparable:
 
