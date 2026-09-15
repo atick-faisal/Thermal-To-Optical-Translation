@@ -209,6 +209,11 @@ def run_loop(
                 batch=config.detector.reference.batch,
                 device=config.runtime.device,
             )
+            # FID's eigvals creates a cuSOLVER handle, which allocates outside torch's caching
+            # allocator -- and torch only releases its cache for its own failed allocations.
+            # With the cache holding the card after export and the zero-shot pass, handle
+            # creation fails with CUSOLVER_STATUS_INTERNAL_ERROR (M2a step 5, e3t-loop-s0).
+            torch.cuda.empty_cache()
             fidelity = evaluate_fidelity(
                 data_yaml.parent / "val" / "images",
                 manifest.val_images,

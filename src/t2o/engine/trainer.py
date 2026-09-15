@@ -201,6 +201,11 @@ class Trainer:
                 self.tracker.log(metrics)
 
             self._checkpoint(epoch, val_loss)
+            # Windows has no `expandable_segments`, so a day of training leaves the caching
+            # allocator fragmented (OOMs with ~6.6 GB reserved-but-unallocated) and holding
+            # nearly the whole card. Releasing the cache once per epoch is numerically inert
+            # and costs seconds against a ~14-minute epoch; a no-op without CUDA.
+            torch.cuda.empty_cache()
         return history
 
     def _train_epoch(self) -> dict[str, float]:

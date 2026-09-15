@@ -3099,6 +3099,25 @@ crediting it; this is the one-liner that caught the withdrawn one:
 uv run python -c "import torch; torch.zeros(1, device='cuda:1'); print([s.get('is_expandable') for s in torch.cuda.memory_snapshot()])"
 ```
 
+**Card B failed again the same day under `max_split_size_mb:512`, in a new place, so the code change
+was made.** The resumed `e3t-loop-s0` finished stage 3's training, export and zero-shot pass, then
+died in FID (`loop.py:212` → torchmetrics `_compute_fid` → `torch.linalg.eigvals`) with
+`cusolver error: CUSOLVER_STATUS_INTERNAL_ERROR, when calling cusolverDnCreate(handle)`. The likely
+reading is memory, not numerics, though no authoritative source states it. cuSOLVER allocates its handle
+outside torch's caching allocator, and torch only releases its cache for its own failed allocations. A
+day of training leaves that cache holding the card. It likely surfaced only now because PyTorch keeps
+the handle for the whole process: an uninterrupted run creates it at stage 0's FID, but this process
+was resumed mid-stage 3, so its first `eigvals` came after a full day of cache growth. The error's own
+suggestion, `preferred_linalg_library`, was rejected because it changes how FID is computed mid-campaign. **Fix:
+`torch.cuda.empty_cache()` once per epoch in `Trainer.train` and once before `evaluate_fidelity` in
+`run_loop`.** It covers both failure types (fragmentation mid-training, the cache hogging the card at the
+boundary) and is numerically inert. Nothing was stopped to deploy it. Each queued run is a fresh `uv run` process,
+so card B picks it up from `e3t-control-s1` and card A from `e3t-control-s0`. The crashed stage cost
+no training: its checkpoint was at the final epoch, so the resume redoes only export, the zero-shot and fidelity evals, and the detector fine-tune.
+One side effect: a resume records only the epochs it trained itself, so `e3t-loop-s0`'s stage 3 has an
+incomplete `epochs` list in `metrics.json` and `loss_share.py` pools less than 100 epochs for it. W&B
+holds the full curves.
+
 **The launcher above needs a failure check.** A crashed `uv run` returns and `foreach` moves to the
 next seed, so the first attempt *started* all twelve runs and completed none — 18 of 48 stages
 recorded, every run stranded at 1–3 stages. A relaunch must read `metrics.json` after each run and
