@@ -151,6 +151,24 @@ section.block { padding-top: 56px; display: grid; gap: 22px; scroll-margin-top: 
 .pipeline svg { display: block; width: 100%; min-width: 640px; height: auto; }
 .pipeline text { font-family: var(--body); fill: var(--ink); }
 
+/* ---------- literature ---------- */
+.lit { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; }
+.lit-row { display: grid; grid-template-columns: 1.15fr 1fr 1.25fr 0.95fr; gap: 20px; padding: 16px 18px; border-top: 1px solid var(--rule-soft); align-items: start; }
+.lit-row:first-child { border-top: 0; }
+.lit-row p { font-size: 15px; color: var(--ink-2); }
+.lit-row p b { color: var(--ink); font-weight: 600; }
+.lit-head { padding-block: 10px; }
+.lit-head span { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.lit-area { display: grid; gap: 6px; }
+.lit-area b { font-family: var(--display); font-stretch: 87%; font-weight: 600; font-size: 17px; line-height: 1.25; }
+.refs { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.fills { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; font-size: 14.5px; color: var(--ink); }
+.c { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); padding: 1px 7px; border-radius: 5px; line-height: 1.5; align-self: start; }
+.contribs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.contribs div { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-content: start; padding-top: 12px; border-top: 2px solid var(--accent); }
+.contribs b { font-weight: 600; line-height: 1.3; }
+.contribs div > span:last-child { grid-column: 2; font-size: 14.5px; color: var(--muted); }
+
 /* ---------- board lanes ---------- */
 .lanes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
 .lane { display: grid; gap: 10px; }
@@ -264,6 +282,14 @@ footer h3 { font-size: 15px; margin-bottom: 4px; }
   .crit span.why { grid-column: 1 / -1; }
   footer { grid-template-columns: 1fr; }
   .method-list { grid-template-columns: 1fr; }
+  .lit-head { display: none; }
+  .lit-row { grid-template-columns: 1fr; gap: 8px; }
+  .lit-row > p:nth-of-type(1)::before { content: "What exists · "; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .lit-row > p:nth-of-type(2)::before { content: "What is missing · "; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .contribs { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 460px) {
+  .contribs { grid-template-columns: 1fr; }
 }
 @media (max-width: 460px) {
   body { font-size: 16px; padding-inline: 16px; }
@@ -316,12 +342,65 @@ footer h3 { font-size: 15px; margin-bottom: 4px; }
 
   <nav class="tabs" aria-label="Sections">
     <ul>
+      <li><a href="#literature">Literature &amp; gaps</a></li>
       <li><a href="#directions">Directions</a></li>
       <li><a href="#findings">Key findings</a></li>
       <li><a href="#now">Now &amp; next</a></li>
       <li><a href="#readiness">Paper readiness</a></li>
     </ul>
   </nav>
+
+  <!-- ================= LITERATURE ================= -->
+  <section class="block" id="literature">
+    <div class="section-head">
+      <span class="eyebrow">Literature review</span>
+      <h2>Five bodies of work meet here, and each leaves a gap</h2>
+      <p class="muted">No single line of prior work answers our question. The table shows what each area already does, what it leaves open, and which of our contributions fills the gap.</p>
+    </div>
+
+    <div class="lit">
+      <div class="lit-row lit-head" aria-hidden="true">
+        <span>Area</span><span>What exists</span><span>What is missing</span><span>We fill it with</span>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Detection-driven infrared–visible fusion</b><span class="refs">SeAFusion (Information Fusion) · DetFusion (ACM MM 2022) · TarDAL (CVPR 2022) · MetaFusion (CVPR 2023)</span></div>
+        <p>A detection or segmentation loss is fed back into the network that fuses a thermal and a visible image. This proves a task signal can shape image generation.</p>
+        <p>Every method needs <b>both cameras at inference time</b>, and all use GAN or CNN generators, not diffusion. TarDAL's released code does not actually pass the detection gradient to its generator, and MetaFusion releases no training code.</p>
+        <div class="fills"><span class="c">C1</span><span>Thermal-only input, with the loop around a diffusion translator</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Thermal-to-visible translation for detection</b><span class="refs">IR2VI / CycleGAN lineage · ModTr (ECCV 2024 workshops) · Meta-UDA · task-conditioned adaptation (ECCV 2020)</span></div>
+        <p>Thermal frames are translated or adapted so detectors built for visible images can be reused.</p>
+        <p>The translator is trained <b>open-loop</b>, with no detector feedback, and is judged by image-quality scores or by detectors fine-tuned on its own output. Those can rank methods in reverse order (our Finding 5).</p>
+        <div class="fills"><span class="c">C1</span><span>Closed detector loop, scored zero-shot by an independent judge</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Diffusion translation and reward fine-tuning</b><span class="refs">BBDM / LBBDM (CVPR 2023) · pix2pix-turbo · DRaFT (ICLR 2024) · ReFL · AlignProp</span></div>
+        <p>Diffusion models give sharper paired translation. Reward fine-tuning makes it possible to backpropagate a score through the sampler on one GPU.</p>
+        <p>Reward tuning targets <b>aesthetics and prompt alignment</b> in text-to-image models. It has not been applied to detection consistency in safety-critical translation, and its reward-hacking risk has not been measured there.</p>
+        <div class="fills"><span class="c">C1</span><span>Detection reward on a one-step model, plus exact vs truncated gradients</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Faithfulness of generated images</b><span class="refs">PSNR · SSIM · LPIPS · FID/KID · Hallucination Index (MICCAI 2024)</span></div>
+        <p>Pixel and perceptual scores are standard. A hallucination index exists in medical imaging.</p>
+        <p>These scores <b>cannot say whether a component was invented or erased</b>. FID relies on ImageNet features and is unreliable on small sets. Inspection needs an object-level measure.</p>
+        <div class="fills"><span class="c">C2</span><span>Invented / erased-object rates and detection agreement</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Power-line inspection datasets</b><span class="refs">InsPLAD · TTPLA · CPLID · Yetgin &amp; Gerek</span></div>
+        <p>Large visible-only (RGB) datasets for asset detection, plus one thermal/visible collection.</p>
+        <p><b>No public paired, registered, component-annotated thermal–visible dataset exists.</b> The only thermal/visible resource (Yetgin &amp; Gerek) is unpaired, 128×128, with presence labels only.</p>
+        <div class="fills"><span class="c">C3</span><span>853 registered pairs with shared component labels, and a benchmark protocol</span></div>
+      </div>
+    </div>
+
+    <div class="contribs">
+      <div><span class="c">C1</span><b>Closed-loop detection feedback for diffusion translation</b><span>The headline method.</span></div>
+      <div><span class="c">C2</span><b>Faithfulness metric for safety-critical translation</b><span>Were components invented or erased?</span></div>
+      <div><span class="c">C3</span><b>Paired thermal–visible power-component benchmark</b><span>Near-unique data and evaluation protocol.</span></div>
+      <div><span class="c">C4</span><b>When translation beats direct thermal detection</b><span>Defends the premise, especially when thermal labels are scarce.</span></div>
+    </div>
+  </section>
 
   <!-- ================= DIRECTIONS ================= -->
   <section class="block" id="directions">
