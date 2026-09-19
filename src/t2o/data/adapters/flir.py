@@ -37,6 +37,7 @@ from t2o.data.adapters.common import (
     VocBox,
     dest_already_populated,
     read_voc_box,
+    read_voc_size,
     voc_to_yolo_lines,
     write_image_pair_bytes,
     write_label_lines,
@@ -125,14 +126,7 @@ def _read_annotations(archive: zipfile.ZipFile) -> list[_Annotation]:
         if split is None:
             raise AdapterError(f"{name}: unrecognised <folder>{folder}</folder>")
 
-        size = root.find("size")
-        if size is None:
-            raise AdapterError(f"{name}: missing <size>")
-        width = int(size.findtext("width", "0"))
-        height = int(size.findtext("height", "0"))
-        if width <= 0 or height <= 0:
-            raise AdapterError(f"{name}: non-positive <size> {width}x{height}")
-
+        width, height = read_voc_size(name, root)
         boxes = tuple(read_voc_box(name, obj) for obj in root.findall("object"))
         annotations.append(_Annotation(stem, split, width, height, boxes))
 

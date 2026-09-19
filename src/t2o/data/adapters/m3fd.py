@@ -39,6 +39,7 @@ from t2o.data.adapters.common import (
     VocBox,
     dest_already_populated,
     read_voc_box,
+    read_voc_size,
     voc_to_yolo_lines,
     write_image_pair_bytes,
     write_label_lines,
@@ -133,15 +134,7 @@ def read_annotations(archive: zipfile.ZipFile) -> list[M3fdAnnotation]:
         if not name.startswith(f"{ANNOTATIONS_PREFIX}/") or not name.endswith(".xml"):
             continue
         root = ET.fromstring(archive.read(name))
-
-        size = root.find("size")
-        if size is None:
-            raise AdapterError(f"{name}: missing <size>")
-        width = int(size.findtext("width", "0"))
-        height = int(size.findtext("height", "0"))
-        if width <= 0 or height <= 0:
-            raise AdapterError(f"{name}: non-positive <size> {width}x{height}")
-
+        width, height = read_voc_size(name, root)
         boxes = tuple(read_voc_box(name, obj) for obj in root.findall("object"))
         annotations.append(M3fdAnnotation(Path(name).stem, width, height, boxes))
 

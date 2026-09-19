@@ -43,6 +43,18 @@ class VocBox:
     ymax: float
 
 
+def read_voc_size(xml_name: str, root: ET.Element) -> tuple[int, int]:
+    """Read a VOC-XML ``<size>`` as ``(width, height)``, rejecting a missing or empty one."""
+    size = root.find("size")
+    if size is None:
+        raise AdapterError(f"{xml_name}: missing <size>")
+    width = int(size.findtext("width", "0"))
+    height = int(size.findtext("height", "0"))
+    if width <= 0 or height <= 0:
+        raise AdapterError(f"{xml_name}: non-positive <size> {width}x{height}")
+    return width, height
+
+
 def read_voc_box(xml_name: str, obj: ET.Element) -> VocBox:
     box_name = obj.findtext("name")
     bndbox = obj.find("bndbox")

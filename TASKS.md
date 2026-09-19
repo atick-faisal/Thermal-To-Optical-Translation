@@ -688,6 +688,20 @@ bullet.
         **3369 train / 831 val**. Val is identical to DAMSDet's, and train is DAMSDet's plus `01300`.
         Frozen as `splits/m3fd.json`; `DatasetManifest.load` + `TranslationPairDataset` load
         every pair.
+  - [x] LLVIP — `data/adapters/llvip.py::adapt_llvip` (2026-09-19). Reads `LLVIP.zip` directly
+        like FLIR/M3FD. LLVIP ships an **official split** in its folders: `train` → `train`,
+        `test` → `val` (as MSRS). One class, `person`: 42,437 boxes, 5 zero-area ones dropped,
+        2 box-less annotations kept as negatives (no label file). Verified against the real
+        archive: **12,025 train / 3,463 val**, the published split. Frozen as
+        `splits/llvip.json`; `DatasetManifest.load` + `TranslationPairDataset` load every pair.
+        **The images were already there.** `../Thermal-Image-Registration`'s `cmreg ingest`
+        had written LLVIP's images (byte-for-byte, same split) into our
+        `dataset/processed/llvip`, with no labels and no `data.yaml`. The usual
+        `dest_already_populated` skip would have silently left it unlabelled, so this adapter
+        instead skips each image pair that already exists and always writes labels +
+        `data.yaml`. Verified the 30,976 images were untouched (same paths, sizes, mtimes), and
+        the sister's `cmreg ingest --list` still reports 12,025 / 3,463. The size-reading block
+        FLIR/M3FD each had is now `common.read_voc_size`, shared by all three.
   - **CPLID and HIT-UAV are out of scope, confirmed with the user.** Verified against the
         real local clones: CPLID is RGB-only (UAV insulator photos, VOC-XML, class
         `insulator`/`defect`), HIT-UAV is IR-only (thermal aerial shots, YOLO, 4 classes).
