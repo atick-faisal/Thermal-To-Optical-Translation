@@ -628,13 +628,14 @@ bullet.
 `pytest -m "not slow"` (192 passed, 4 new), `pytest -m slow` (10 passed, 1 new).
 **M0.8 is now fully closed.** M0.9 (dataset acquisition) is next.
 
-## M0.9 — Dataset acquisition
+## M0.9 — Dataset acquisition ✅
 
 - [x] `scripts/fetch_datasets.py` for the trivially-scriptable set: MSRS, CPLID, HIT-UAV,
       FLIR-aligned (HuggingFace mirror `UserNae3/FLIR_aligned` — avoids the Teledyne
       registration form)
-- [ ] Fetch LLVIP, M3FD, TTPLA once on the Mac via `gdown`, re-host, then make the server
-      path a plain `curl`
+- [x] Fetch LLVIP, M3FD, TTPLA via `gdown`. The planned "fetch once on the Mac, re-host,
+      then a plain `curl` on the server" hop was never needed: `fetch_datasets.py` runs directly
+      on either machine (see the re-host sub-item below).
   - [x] Script written: `scripts/fetch_datasets.py`'s `SOURCES` registry extended with
         `gdown_file_id`/`gdown_folder_id` (real ids read off each dataset's own README —
         `bupt-ai-cz/LLVIP`, `JinyuanLiu-CV/TarDAL`, `R3ab/ttpla_dataset` — not guessed) and
@@ -708,6 +709,21 @@ bullet.
         Neither has a counterpart modality, so neither fits the paired
         `{visible,infrared}` contract `data/pairing.py`/`data/dataset.py` assume for every
         sample. Revisit only if a single-modality detector-pretraining need arises (e.g. E9).
+  - **TTPLA is out of scope too, confirmed with the user (2026-09-19).** It is RGB-only
+        (1,100 aerial power-line images, instance-segmentation labels), so it has the same
+        problem as CPLID. Still in `fetch_datasets.py`'s registry; no adapter. Revisit with
+        CPLID/InsPLAD if E9 wants single-modality power-line detector data.
+  - **DroneVehicle: its images are here, its labels are not ("not now", confirmed with the
+        user).** Paired RGB-IR aerial vehicles with oriented boxes. `dataset/raw/dronevehicle`
+        and the images in `dataset/processed/dronevehicle` (17,951 train / 1,469 val) were
+        written by `../Thermal-Image-Registration`, not by this repo. There are no labels and no
+        `data.yaml`, so our code can't read it yet. If E9 needs it, a labels-only adapter in the
+        LLVIP style (skip existing images, write labels + `data.yaml`) is a small step.
+  - **`dataset/processed/` is shared with `../Thermal-Image-Registration`.** Its
+        `cmreg ingest` writes LLVIP/DroneVehicle into our tree, and its `sibling.py` reads our
+        MSRS/FLIR trees directly. So the `{split}/{visible,infrared}/images` layout is a
+        contract between two repos: never rename, move or re-encode images there without
+        checking the sister project (`cmreg ingest --list` is a read-only check).
 - [x] Verify: MSRS `detection/` folder — does it have box annotations usable for mAP?
       **Correction: yes.** The prior answer here was written from browsing GitHub without
       cloning. The real clone has `detection/{vi,ir,labels}` — 80 pairs, YOLO boxes, classes
@@ -744,7 +760,8 @@ bullet.
       `scripts/freeze_splits.py` — run for real against `dataset/processed/{msrs,flir}`,
       committed as `splits/msrs.json` (1163 train / 361 val) and `splits/flir.json` (4129
       train / 1013 val), matching each adapter's own real-run counts exactly. LLVIP/M3FD/TTPLA
-      get frozen the same way once actually fetched.
+      get frozen the same way once actually fetched. **Update (2026-09-19):** M3FD and LLVIP
+      are now frozen too (`splits/{m3fd,llvip}.json`); TTPLA is out of scope.
 - [x] **The custom paired dataset is frozen on the server** (`yolo_rgbt_29_jul`), run during
       E3's campaign. `combined_hash 7ede3433adc9c0b8`; train **600** (`4e01a89877c6a943`),
       val **153** (`6b06220c26a9adbc`). The val count independently matches M1.2 step 1's
@@ -812,7 +829,8 @@ ignore. Report every count as "753 train+val of 853" in the paper, not "850 pair
 `uv run python scripts/freeze_splits.py` (froze both), then `--check` (both matched,
 confirming the round trip is exact). **M0.9 is now fully closed** except the LLVIP/M3FD/TTPLA
 real fetch (deferred, disk space — see the gdown decisions below) and, by extension, freezing
-their splits once fetched.
+their splits once fetched. *(Update 2026-09-19: all done or out of scope; see the closing note
+at the end of this section.)*
 
 **`scripts/fetch_datasets.py` decisions:**
 
@@ -910,7 +928,8 @@ their splits once fetched.
 val pairs — matching the FLIR-aligned split reported in the literature exactly; classes
 `bicycle`/`car`/`dog`/`person`; `DatasetManifest.load` on the result loads cleanly.
 **M0.9's adapters item is now closed.** Remaining M0.9 work: LLVIP/M3FD/TTPLA (`gdown`),
-freezing and hashing the splits.
+freezing and hashing the splits. *(Update 2026-09-19: all done or out of scope; see the closing
+note at the end of this section.)*
 
 **`fetch_datasets.py` — gdown sources decisions:**
 
@@ -940,6 +959,13 @@ freezing and hashing the splits.
 `pytest -m "not slow"` (217 passed, 3 new). No `slow` test and no real network call —
 matching M0.9 step 1's own "not executed for real" precedent, this time by explicit
 disk-space decision rather than default caution.
+
+**M0.9 is now fully closed (2026-09-19).** Four paired public datasets are adapted and frozen:
+MSRS (1,163 / 361), FLIR-aligned (4,129 / 1,013), M3FD (3,369 / 831) and LLVIP
+(12,025 / 3,463), plus the custom dataset's split frozen on the server. Out of scope, all
+confirmed with the user: CPLID, HIT-UAV and TTPLA (single-modality), and DroneVehicle for
+now (images only, adapted by the sister project). InsPLAD's format is verified, but it has no
+fetch entry or adapter until E9 needs it.
 
 ## M0.10 — Server bring-up (cannot be verified locally) ✅
 

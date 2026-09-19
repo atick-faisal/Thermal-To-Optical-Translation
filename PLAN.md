@@ -467,8 +467,11 @@ re-hosting decision to make. The registry is the delivery mechanism on both mach
 unpaired it is unusable as translation data. Cite-as-motivation only (which the doc already
 concludes) but fix the numbers in the paper.
 
-Still unverified: whether MSRS's `detection/` folder has box annotations usable for mAP;
-InsPLAD's annotation format.
+~~Still unverified: whether MSRS's `detection/` folder has box annotations usable for mAP;
+InsPLAD's annotation format.~~ **Both verified (TASKS.md M0.9):** MSRS `detection/` has 80
+YOLO-labelled pairs; InsPLAD is MS-COCO detection JSON. **Adapted and frozen:** MSRS,
+FLIR-aligned, M3FD, LLVIP. CPLID, HIT-UAV and TTPLA are single-modality, so they are out of
+scope for translation pairs.
 
 ---
 
