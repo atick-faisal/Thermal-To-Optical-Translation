@@ -675,12 +675,19 @@ bullet.
         unlabelled pairs, a stem subset of Detection), `tno.zip` (37 unlabelled pairs, grayscale
         visible, so no colour target), `roadscene.zip` (42 unlabelled pairs, `meta/` splits
         inconsistent: train = val = pred).
-        **M3FD ships no train/val split** (the XML `<folder>`/`<path>` are annotator
-        directories), and its frames are video sequences in stem order. So the split is
-        **block-wise, confirmed with the user**: sorted stems in 50-frame blocks, 20% of blocks
-        to val via `random.Random(0)`, which keeps near-duplicate neighbours out of val.
-        Verified against the real archive: **3350 train / 850 val**, frozen as
-        `splits/m3fd.json`; `DatasetManifest.load` + `TranslationPairDataset` load every pair.
+        **M3FD ships no official train/val split** (the XML `<folder>`/`<path>` are annotator
+        directories, and TarDAL's README publishes none). Papers use at least four different
+        splits: DAMSDet 3368/831, EME "zxSceneSplit" 2905/1295, E2E-MFD 2940/1260, and an
+        Entropy 2023 paper 3400/800 (list not released). **We use DAMSDet's, confirmed with the user**:
+        it is the most reused (MM-DETR reports the same counts), and its val set is contiguous
+        scene runs, so near-duplicate neighbouring video frames stay out of val. Their
+        `val.txt` is vendored byte-for-byte as `adapters/m3fd_damsdet_val.txt` (Apache-2.0,
+        pinned to commit `b3b31ed`), and every other stem goes to train. That includes `01300`,
+        the one frame DAMSDet's lists omit. (An earlier home-grown 50-frame block split, 3350/850,
+        was replaced before anything used it.) Verified against the real archive:
+        **3369 train / 831 val**. Val is identical to DAMSDet's, and train is DAMSDet's plus `01300`.
+        Frozen as `splits/m3fd.json`; `DatasetManifest.load` + `TranslationPairDataset` load
+        every pair.
   - **CPLID and HIT-UAV are out of scope, confirmed with the user.** Verified against the
         real local clones: CPLID is RGB-only (UAV insulator photos, VOC-XML, class
         `insulator`/`defect`), HIT-UAV is IR-only (thermal aerial shots, YOLO, 4 classes).

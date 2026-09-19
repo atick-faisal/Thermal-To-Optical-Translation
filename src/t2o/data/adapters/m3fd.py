@@ -15,17 +15,20 @@ Verified against the real archive: stems match across all three folders, and the
 ``<size>`` matches the images. The six classes (``Bus``, ``Car``, ``Lamp``, ``Motorcycle``,
 ``People``, ``Truck``) are collected from the data and sorted alphabetically, as FLIR's are.
 
-M3FD ships **no train/val split** -- the XML ``<folder>``/``<path>`` fields record the
-annotators' working directories, not a split. The frames are video sequences in stem order, so
-neighbouring stems are near-duplicates and a per-frame shuffle would leak them into val.
-:func:`assign_splits` instead cuts the sorted stems into contiguous blocks and sends whole
-blocks to val. The result is frozen and hashed in ``splits/m3fd.json`` like every other split.
+M3FD ships **no official train/val split** -- the XML ``<folder>``/``<path>`` fields record the
+annotators' working directories, not a split, and papers use at least four different ones. We
+use DAMSDet's (3368 train / 831 val), the most-reused published list: its val set is contiguous
+scene runs, so near-duplicate neighbouring video frames don't leak across splits, and M3FD
+numbers stay comparable with DAMSDet/MM-DETR. ``m3fd_damsdet_val.txt`` is their ``val.txt``
+copied byte-for-byte (Apache-2.0) from
+https://github.com/gjj45/DAMSDet/blob/b3b31ed75a1f50187799816dcc33469e760f9177/dataset/coco_m3fd/val.txt
+Every stem not in it goes to train. That includes ``01300``, the one frame DAMSDet's lists omit.
+The result is frozen and hashed in ``splits/m3fd.json`` like every other split.
 """
 
 from __future__ import annotations
 
 import logging
-import random
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
@@ -49,12 +52,7 @@ VISIBLE_PREFIX = "Vis"
 INFRARED_PREFIX = "Ir"
 ANNOTATIONS_PREFIX = "Annotation"
 IMAGE_SUFFIX = ".png"
-
-# 50 frames per block gives 84 blocks from 4200 frames -- enough blocks for a stable 80/20
-# ratio, and long enough that a block boundary rarely cuts a sequence into both splits.
-SPLIT_BLOCK_SIZE = 50
-SPLIT_VAL_FRACTION = 0.2
-SPLIT_SEED = 0
+VAL_STEMS_FILE = Path(__file__).with_name("m3fd_damsdet_val.txt")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,9 +81,7 @@ def adapt_m3fd(raw_root: Path, dest_root: Path) -> Path:
         names = sorted({box.name for a in annotations for box in a.boxes})
         if not names:
             raise AdapterError(f"{archive_path}: no <object> boxes found in any annotation")
-        splits = assign_splits(
-            [a.stem for a in annotations], SPLIT_BLOCK_SIZE, SPLIT_VAL_FRACTION, SPLIT_SEED
-        )
+        splits = assign_splits([a.stem for a in annotations], read_val_stems(VAL_STEMS_FILE))
 
         dropped_boxes = 0
         for annotation in annotations:
@@ -114,22 +110,21 @@ def adapt_m3fd(raw_root: Path, dest_root: Path) -> Path:
     return write_manifest_yaml(dest_root, names)
 
 
-def assign_splits(
-    stems: list[str], block_size: int, val_fraction: float, seed: int
-) -> dict[str, str]:
-    """Map each stem to ``train`` or ``val``, keeping contiguous blocks of sorted stems together.
+def read_val_stems(path: Path) -> set[str]:
+    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
 
-    Deterministic for a given input and seed. At least one block always goes to val.
+
+def assign_splits(stems: list[str], val_stems: set[str]) -> dict[str, str]:
+    """Map each stem to ``val`` if it's in ``val_stems``, otherwise ``train``.
+
+    A val stem missing from the archive means the list and the data have drifted apart --
+    fail loudly rather than silently shrink val.
     """
-    ordered = sorted(stems)
-    blocks = [ordered[i : i + block_size] for i in range(0, len(ordered), block_size)]
-    val_count = max(1, round(len(blocks) * val_fraction))
-    val_blocks = set(random.Random(seed).sample(range(len(blocks)), val_count))
-    return {
-        stem: "val" if index in val_blocks else "train"
-        for index, block in enumerate(blocks)
-        for stem in block
-    }
+    unknown = val_stems - set(stems)
+    if unknown:
+        preview = ", ".join(sorted(unknown)[:5])
+        raise AdapterError(f"{len(unknown)} val stem(s) not in the archive: {preview}")
+    return {stem: "val" if stem in val_stems else "train" for stem in stems}
 
 
 def read_annotations(archive: zipfile.ZipFile) -> list[M3fdAnnotation]:

@@ -18,7 +18,7 @@ import pytest
 from PIL import Image
 
 from t2o.data.adapters import AdapterError, adapt_m3fd, m3fd
-from t2o.data.adapters.m3fd import assign_splits, read_annotations
+from t2o.data.adapters.m3fd import assign_splits, read_annotations, read_val_stems
 from t2o.data.manifest import DatasetManifest
 
 XML_TEMPLATE = """<annotation>
@@ -78,8 +78,10 @@ def _build_m3fd_zip(raw_root: Path) -> Path:
 
 @pytest.fixture
 def m3fd_raw_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # One-frame blocks, so three pairs make three blocks and both splits get pairs.
-    monkeypatch.setattr(m3fd, "SPLIT_BLOCK_SIZE", 1)
+    # A fixture-scale stand-in for the vendored DAMSDet val list.
+    val_stems_file = tmp_path / "val.txt"
+    val_stems_file.write_text("00001\n")
+    monkeypatch.setattr(m3fd, "VAL_STEMS_FILE", val_stems_file)
     raw_root = tmp_path / "raw"
     raw_root.mkdir()
     _build_m3fd_zip(raw_root)
@@ -102,9 +104,7 @@ def test_adapt_m3fd_writes_every_pair_once_with_matching_filenames(
     assert train_visible == _names(dest / "train" / "infrared" / "images")
     assert val_visible == _names(dest / "val" / "infrared" / "images")
     assert train_visible | val_visible == {f"{stem}.png" for stem in PAIRS}
-    assert not train_visible & val_visible
-    # Three blocks at a 0.2 val fraction round to one val block.
-    assert (len(train_visible), len(val_visible)) == (2, 1)
+    assert val_visible == {"00001.png"}
 
 
 def test_written_manifest_loads_with_alphabetically_sorted_classes(
@@ -124,8 +124,7 @@ def test_label_conversion_matches_hand_computed_normalised_boxes(
 
     adapt_m3fd(m3fd_raw_root, dest)
 
-    (label_path,) = dest.glob("*/visible/labels/00000.txt")
-    lines = label_path.read_text().splitlines()
+    lines = (dest / "train" / "visible" / "labels" / "00000.txt").read_text().splitlines()
     assert len(lines) == 2
     # People: xmin=5,ymin=5,xmax=25,ymax=25 on a 50x50 frame -> cx=cy=0.3, w=h=0.4, cls=2
     cls, cx, cy, w, h = lines[0].split()
@@ -154,32 +153,22 @@ def test_adapt_m3fd_is_idempotent_against_a_populated_dest(
     assert not (dest / "train").exists()
 
 
-STEMS = [f"{i:05d}" for i in range(1000)]
+def test_assign_splits_sends_listed_stems_to_val_and_the_rest_to_train() -> None:
+    splits = assign_splits(["00000", "00001", "00002"], {"00001"})
+
+    assert splits == {"00000": "train", "00001": "val", "00002": "train"}
 
 
-def test_assign_splits_is_deterministic_and_covers_every_stem_once() -> None:
-    splits = assign_splits(list(reversed(STEMS)), 50, 0.2, 0)
-
-    assert splits == assign_splits(STEMS, 50, 0.2, 0)
-    assert set(splits) == set(STEMS)
-    assert set(splits.values()) == {"train", "val"}
+def test_assign_splits_raises_on_a_val_stem_missing_from_the_archive() -> None:
+    with pytest.raises(AdapterError, match="not in the archive"):
+        assign_splits(["00000"], {"00000", "09999"})
 
 
-def test_assign_splits_keeps_contiguous_blocks_together() -> None:
-    splits = assign_splits(STEMS, 50, 0.2, 0)
+def test_vendored_damsdet_val_list_is_intact() -> None:
+    val_stems = read_val_stems(m3fd.VAL_STEMS_FILE)
 
-    for start in range(0, len(STEMS), 50):
-        assert len({splits[stem] for stem in STEMS[start : start + 50]}) == 1
-
-
-def test_assign_splits_sends_the_requested_fraction_of_blocks_to_val() -> None:
-    splits = assign_splits(STEMS, 50, 0.2, 0)
-
-    assert sum(1 for split in splits.values() if split == "val") == 200
-
-
-def test_assign_splits_changes_with_the_seed() -> None:
-    assert assign_splits(STEMS, 50, 0.2, 0) != assign_splits(STEMS, 50, 0.2, 1)
+    assert len(val_stems) == 831
+    assert val_stems <= {f"{i:05d}" for i in range(4200)}
 
 
 REAL_M3FD_ARCHIVE = Path("dataset/raw/m3fd/M3FD_Detection.zip")
@@ -201,10 +190,5 @@ def test_real_m3fd_annotations_parse_and_split() -> None:
         "People",
         "Truck",
     ]
-    splits = assign_splits(
-        [a.stem for a in annotations],
-        m3fd.SPLIT_BLOCK_SIZE,
-        m3fd.SPLIT_VAL_FRACTION,
-        m3fd.SPLIT_SEED,
-    )
-    assert sum(1 for split in splits.values() if split == "val") == 850
+    splits = assign_splits([a.stem for a in annotations], read_val_stems(m3fd.VAL_STEMS_FILE))
+    assert sum(1 for split in splits.values() if split == "val") == 831
