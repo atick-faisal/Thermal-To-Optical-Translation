@@ -1,18 +1,20 @@
 """Shared helpers for converting a public dataset's raw layout into the internal
 ``{split}/{visible,infrared}/{images,labels}`` contract (PLAN.md §9).
 
-One place to write the ``rgbt:``-block ``data.yaml`` and copy image/label pairs, so every
-per-dataset adapter (``msrs.py``, ``flir.py``) produces byte-identical shapes rather than each
-inventing its own. Images are always copied byte-for-byte, never re-encoded -- either straight
-off disk (``copy_image_pair``, MSRS's git-cloned tree) or straight out of an archive
-(``write_image_pair_bytes``, FLIR-aligned's zip) -- which is what keeps this step cheap on
-thousand-plus-image datasets.
+One place to write the ``rgbt:``-block ``data.yaml``, copy image/label pairs and convert
+VOC-XML boxes, so every per-dataset adapter (``msrs.py``, ``flir.py``, ``m3fd.py``) produces
+byte-identical shapes rather than each inventing its own. Images are always copied
+byte-for-byte, never re-encoded -- either straight off disk (``copy_image_pair``, MSRS's
+git-cloned tree) or straight out of an archive (``write_image_pair_bytes``, FLIR-aligned's and
+M3FD's zips) -- which is what keeps this step cheap on thousand-plus-image datasets.
 """
 
 from __future__ import annotations
 
 import logging
 import shutil
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -28,6 +30,57 @@ LABELS_SEGMENT = "labels"
 
 class AdapterError(ValueError):
     """Raised when a raw dataset's layout doesn't match what its adapter expects."""
+
+
+@dataclass(frozen=True, slots=True)
+class VocBox:
+    """One VOC-XML ``<object>``: class name plus absolute ``bndbox`` pixel coordinates."""
+
+    name: str
+    xmin: float
+    ymin: float
+    xmax: float
+    ymax: float
+
+
+def read_voc_box(xml_name: str, obj: ET.Element) -> VocBox:
+    box_name = obj.findtext("name")
+    bndbox = obj.find("bndbox")
+    if box_name is None or bndbox is None:
+        raise AdapterError(f"{xml_name}: <object> missing <name> or <bndbox>")
+    return VocBox(
+        name=box_name,
+        xmin=float(bndbox.findtext("xmin", "0")),
+        ymin=float(bndbox.findtext("ymin", "0")),
+        xmax=float(bndbox.findtext("xmax", "0")),
+        ymax=float(bndbox.findtext("ymax", "0")),
+    )
+
+
+def voc_to_yolo_lines(
+    boxes: tuple[VocBox, ...], width: int, height: int, names: list[str]
+) -> tuple[list[str], int]:
+    """Convert absolute VOC-XML boxes to normalised YOLO ``cls cx cy w h`` lines.
+
+    Coordinates are clamped to the image before normalising -- some datasets' boxes run
+    slightly past the edge, and a box that's zero-area after clamping is dropped rather than
+    written as a degenerate detection target. Returns the lines and the dropped-box count.
+    """
+    lines: list[str] = []
+    dropped = 0
+    for box in boxes:
+        xmin = max(0.0, min(box.xmin, width))
+        xmax = max(0.0, min(box.xmax, width))
+        ymin = max(0.0, min(box.ymin, height))
+        ymax = max(0.0, min(box.ymax, height))
+        w, h = xmax - xmin, ymax - ymin
+        if w <= 0 or h <= 0:
+            dropped += 1
+            continue
+        cx = (xmin + xmax) / 2 / width
+        cy = (ymin + ymax) / 2 / height
+        lines.append(f"{names.index(box.name)} {cx:.6f} {cy:.6f} {w / width:.6f} {h / height:.6f}")
+    return lines, dropped
 
 
 def _images_dir(split_root: Path, modality: str) -> Path:

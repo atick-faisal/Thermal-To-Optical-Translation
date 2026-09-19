@@ -7,7 +7,9 @@ layout, this is that step. Only datasets that are genuinely paired belong here; 
 (RGB-only) and HIT-UAV (IR-only) don't fit the paired contract and have no adapter.
 
 FLIR-aligned's adapter reads directly out of `aligned.zip` (never extracted to disk) and can
-take upwards of a minute on the real ~1.4GB archive -- expected, not a hang.
+take upwards of a minute on the real ~1.4GB archive -- expected, not a hang. M3FD's adapter
+does the same with the ~6GB `M3FD_Detection.zip`, and only reads that one of the four zips in
+`dataset/raw/m3fd/` (see `adapters/m3fd.py`).
 
 Standalone script, not part of the `t2o` package -- it owns its own `logging.basicConfig` the
 way `fetch_datasets.py` does for the same reason.
@@ -20,7 +22,7 @@ import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from t2o.data.adapters import adapt_flir, adapt_msrs
+from t2o.data.adapters import adapt_flir, adapt_m3fd, adapt_msrs
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ DEFAULT_DEST_ROOT = Path("dataset/processed")
 ADAPTERS: dict[str, Callable[[Path, Path], Path]] = {
     "msrs": adapt_msrs,
     "flir": adapt_flir,
+    "m3fd": adapt_m3fd,
 }
 
 

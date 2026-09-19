@@ -666,6 +666,21 @@ bullet.
         `<folder>` field. Scoped to the ~5142 annotated pairs (of 10284 total) — the other
         half has neither a split nor a label. Verified against the real local archive: 4129
         train / 1013 val, matching the literature's known FLIR-aligned split exactly.
+  - [x] M3FD — `data/adapters/m3fd.py::adapt_m3fd` (2026-09-19, fetched on the Mac). Of the
+        four zips in `dataset/raw/m3fd/`, only `M3FD_Detection.zip` is read (straight out of the
+        zip, like FLIR): 4200 pairs, `Vis/`/`Ir/`/`Annotation/` with matching stems, VOC-XML →
+        YOLO via the VOC helpers now shared with FLIR in `adapters/common.py`. 6 classes
+        (`Bus`, `Car`, `Lamp`, `Motorcycle`, `People`, `Truck`, alphabetical like FLIR), 34,407
+        boxes, none dropped. **Skipped, confirmed with the user:** `M3FD_Fusion.zip` (300
+        unlabelled pairs, a stem subset of Detection), `tno.zip` (37 unlabelled pairs, grayscale
+        visible, so no colour target), `roadscene.zip` (42 unlabelled pairs, `meta/` splits
+        inconsistent: train = val = pred).
+        **M3FD ships no train/val split** (the XML `<folder>`/`<path>` are annotator
+        directories), and its frames are video sequences in stem order. So the split is
+        **block-wise, confirmed with the user**: sorted stems in 50-frame blocks, 20% of blocks
+        to val via `random.Random(0)`, which keeps near-duplicate neighbours out of val.
+        Verified against the real archive: **3350 train / 850 val**, frozen as
+        `splits/m3fd.json`; `DatasetManifest.load` + `TranslationPairDataset` load every pair.
   - **CPLID and HIT-UAV are out of scope, confirmed with the user.** Verified against the
         real local clones: CPLID is RGB-only (UAV insulator photos, VOC-XML, class
         `insulator`/`defect`), HIT-UAV is IR-only (thermal aerial shots, YOLO, 4 classes).

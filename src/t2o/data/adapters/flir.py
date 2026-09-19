@@ -34,7 +34,10 @@ from pathlib import Path
 
 from t2o.data.adapters.common import (
     AdapterError,
+    VocBox,
     dest_already_populated,
+    read_voc_box,
+    voc_to_yolo_lines,
     write_image_pair_bytes,
     write_label_lines,
     write_manifest_yaml,
@@ -57,21 +60,12 @@ _SPLIT_BY_FOLDER = {"training": "train", "validation": "val"}
 
 
 @dataclass(frozen=True, slots=True)
-class _Box:
-    name: str
-    xmin: float
-    ymin: float
-    xmax: float
-    ymax: float
-
-
-@dataclass(frozen=True, slots=True)
 class _Annotation:
     stem: str
     split: str
     width: int
     height: int
-    boxes: tuple[_Box, ...]
+    boxes: tuple[VocBox, ...]
 
 
 def adapt_flir(raw_root: Path, dest_root: Path) -> Path:
@@ -101,7 +95,9 @@ def adapt_flir(raw_root: Path, dest_root: Path) -> Path:
             write_image_pair_bytes(
                 visible_data, infrared_data, annotation.stem, split_root, DEST_IMAGE_SUFFIX
             )
-            lines, box_dropped = _yolo_lines(annotation, names)
+            lines, box_dropped = voc_to_yolo_lines(
+                annotation.boxes, annotation.width, annotation.height, names
+            )
             dropped_boxes += box_dropped
             write_label_lines(split_root, annotation.stem, lines)
 
@@ -137,49 +133,9 @@ def _read_annotations(archive: zipfile.ZipFile) -> list[_Annotation]:
         if width <= 0 or height <= 0:
             raise AdapterError(f"{name}: non-positive <size> {width}x{height}")
 
-        boxes = tuple(_read_box(name, obj) for obj in root.findall("object"))
+        boxes = tuple(read_voc_box(name, obj) for obj in root.findall("object"))
         annotations.append(_Annotation(stem, split, width, height, boxes))
 
     if not annotations:
         raise AdapterError("no annotation XML files found in the archive")
     return annotations
-
-
-def _read_box(xml_name: str, obj: ET.Element) -> _Box:
-    box_name = obj.findtext("name")
-    bndbox = obj.find("bndbox")
-    if box_name is None or bndbox is None:
-        raise AdapterError(f"{xml_name}: <object> missing <name> or <bndbox>")
-    return _Box(
-        name=box_name,
-        xmin=float(bndbox.findtext("xmin", "0")),
-        ymin=float(bndbox.findtext("ymin", "0")),
-        xmax=float(bndbox.findtext("xmax", "0")),
-        ymax=float(bndbox.findtext("ymax", "0")),
-    )
-
-
-def _yolo_lines(annotation: _Annotation, names: list[str]) -> tuple[list[str], int]:
-    """Convert absolute VOC-XML boxes to normalised YOLO ``cls cx cy w h`` lines.
-
-    Coordinates are clamped to the image before normalising -- a handful of FLIR's boxes run
-    slightly past the edge, and a box that's zero-area after clamping is dropped rather than
-    written as a degenerate detection target.
-    """
-    lines: list[str] = []
-    dropped = 0
-    for box in annotation.boxes:
-        xmin = max(0.0, min(box.xmin, annotation.width))
-        xmax = max(0.0, min(box.xmax, annotation.width))
-        ymin = max(0.0, min(box.ymin, annotation.height))
-        ymax = max(0.0, min(box.ymax, annotation.height))
-        w, h = xmax - xmin, ymax - ymin
-        if w <= 0 or h <= 0:
-            dropped += 1
-            continue
-        cx = (xmin + xmax) / 2 / annotation.width
-        cy = (ymin + ymax) / 2 / annotation.height
-        nw = w / annotation.width
-        nh = h / annotation.height
-        lines.append(f"{names.index(box.name)} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}")
-    return lines, dropped
