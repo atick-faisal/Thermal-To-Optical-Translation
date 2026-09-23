@@ -3236,6 +3236,39 @@ and its code comment conflates the two. A per-epoch `empty_cache()` cannot help 
 lands mid-epoch: fragmentation rebuilds across an epoch's hundreds of steps. Corrected in the
 comment at `trainer.py`'s `empty_cache()` site so the next reader does not re-credit it.
 
+**Allocator settings are now exhausted, and the mechanism says why.** This section predicted
+that outcome and the fourth episode reached it, but by an argument worth writing down rather
+than by running out of flags. Torch already releases every *fully free* segment before it
+raises an OOM. The tracebacks nevertheless report ~6.8 GB reserved-but-unallocated **at the
+moment of the raise** — so that memory is not releasable. It is trapped in segments that each
+still hold at least one live tensor: `cudaFree` works per segment, a segment with one survivor
+cannot be returned, and the holes around the survivors are too small and too scattered to serve
+a contiguous 320 MiB request. That is *intra-segment* fragmentation, and it explains all three
+failed flags at once. `garbage_collection_threshold` would release exactly the set the
+emergency path already releases, so it cannot reach these. `max_split_size_mb` limits splitting
+but not survivorship. `expandable_segments` — one growable virtual segment, no per-segment
+trapping — is the setting that actually addresses it, and Windows does not have it.
+
+A probe was run against `garbage_collection_threshold:0.8` and came back identical to baseline
+(`reserved 27.80 GiB, allocated 27.79 GiB` both ways), **but that probe is inconclusive and is
+not the evidence above.** Its `reserved ≈ allocated` is the tell: the test allocation was far
+larger than any cached block, so torch hit its internal allocation failure and flushed the
+whole cache in both arms, which is precisely the emergency path that masks what the flag does
+differently. A probe that forces the emergency cannot measure a setting whose only job is to
+act before it. Recorded because the campaign has already paid once for crediting a flag on
+weak evidence, and discrediting one on weak evidence is the same error wearing the other hat.
+
+**The code-change lever, taken: release the cache between training steps, not between epochs.**
+`Trainer._train_epoch` now calls `torch.cuda.empty_cache()` every `CACHE_RELEASE_STEPS` = 50
+steps. The moment matters more than the frequency. Mid-`backward()` the activations are live
+and almost nothing is releasable — which is why no amount of cache-clearing helps *there*.
+Between two `fit()` calls the graph is gone and only parameters, gradients and optimizer state
+survive, so most segments are fully free and can genuinely be handed back before the next
+step's allocations re-trap them. Numerically inert, a no-op without CUDA, and cheap: ~8 calls
+per epoch against ~14 minutes of compute. It is not a guarantee — the run still needs ~32 GB of
+a 39.70 GB card — but it attacks the accrual the per-epoch release was never positioned to
+catch.
+
 **The campaign is one stage from n = 3, which is why the decision above is now takeable.** The
 queues' `break` semantics leave four runs at 4/4 — `e3t-control-s3`, `e3t-loop-s3`,
 `e3t-loop-s0`, `e3t-control-s1` — and two at 3/4, `e3t-control-s0` and `e3t-loop-s1`, both
@@ -3260,13 +3293,38 @@ generator, `:276` for the PatchGAN), and neither is in the checkpoint, so **ever
 resets both**. A crashed-and-resumed run is therefore not the same experiment as a clean one, and
 this campaign has resumed repeatedly. The transient is probably short — AdamW's second moment
 rebuilds over roughly 1/(1−β₂) = 1000 optimizer steps, a small fraction of a 100-epoch stage —
-but "probably short" is an argument, and the fact that it is **unrecorded** is the actual
-problem. **Before the readout, reconstruct which runs resumed** from the
-`epochs` list length per stage in each `metrics.json` (a stage shorter than 100 entries is a
-resume fingerprint; this is how `e3t-control-s3` was identified as twice-resumed below), and
-report it per pair. If the asymmetry falls in opposite directions across pairs — s0's control
-resumed against a clean loop, s1's loop against a clean control — it cannot systematically
-favour either arm, which is the best case available and must be stated rather than hoped for.
+but "probably short" is an argument, and the fact that it was **unrecorded** was the actual
+problem.
+
+**Measured 2026-09-23, and it is nearly a non-issue for the endpoint.** A resumed stage records
+only the epochs it ran after the resume, so an `epochs` list shorter than 100 in `metrics.json`
+is a crash scar. Reading all six:
+
+| run | epochs per stage | scarred stages | **stage-3 steps under reset moments** |
+| --- | --- | --- | --- |
+| `e3t-control-s3` | `[56, 100, 100, 99]` | 0, 3 | 1 epoch |
+| `e3t-loop-s3` | `[100, 2, 100, 100]` | 1 | none |
+| `e3t-loop-s0` | `[100, 100, 100, 0]` | 3 | **none** |
+| `e3t-control-s1` | `[100, 100, 100, 100]` | none — never resumed | none |
+| `e3t-control-s0` | `[100, 1, 100]` | 1 | stage 3 in flight |
+| `e3t-loop-s1` | `[100, 2, 100]` | 1 | stage 3 in flight |
+
+The reset only reaches the readout through optimizer steps taken *after* a resume in the stage
+that produces the reported checkpoint, and stage 3 is the reported row. `e3t-loop-s0` resumed
+with its checkpoint already at the final epoch, so `range(100, 100)` was empty and it took
+**zero** steps on reset moments — the artefact is a `[]` in `metrics.json`, not a perturbation.
+`e3t-loop-s3` and `e3t-control-s1` never resumed in stage 3 at all. `e3t-control-s3` took one
+epoch. **Four of the six runs therefore carry an effectively uncontaminated endpoint**, and the
+scars that do exist sit in stages 0 and 1, which nothing reports.
+
+What remains to be checked is the two runs still in flight: their stage-3 resumes *will* take
+real post-reset steps, as many as `100 − checkpoint epoch`. Read that epoch off
+`stage3/translator_last.pt` before relaunching and record it here; if either sits early in the
+stage, say so beside its number rather than leaving it implied.
+
+Worth recording for its own sake: **`e3t-control-s1` ran all four stages without a single
+crash.** The configuration can fit. It just does not reliably fit, which is the same statement
+as the ~98% occupancy above and the reason this section exists.
 
 **Not fixed now, deliberately.** Checkpointing the optimizers via `get_extra_state()` /
 `set_extra_state()`, as the docstring itself suggests, would make the two resumed runs differ
