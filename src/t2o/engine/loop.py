@@ -225,6 +225,13 @@ def run_loop(
             if tracker is not None:
                 tracker.log(_zero_shot_metrics(zero_shot, f"stage{stage}/zero_shot"))
                 tracker.log(_fidelity_metrics(fidelity, f"stage{stage}/fidelity"))
+            # Precautionary, not a response to a measured failure here. `train_detector` hands
+            # the card to ultralytics for a 50-epoch fine-tune at batch 16 while the translator,
+            # both its optimizers and the PatchGAN all stay resident -- the heaviest moment of
+            # the stage -- and it inherits whatever FID's Inception and LPIPS just left cached.
+            # Nothing in this campaign has OOM'd here, but nothing else releases between the two
+            # either, and the same line above (before FID) is there for the same reason.
+            torch.cuda.empty_cache()
             detector_result = train_detector(
                 data_yaml=data_yaml,
                 init_weights=eval_weights,
