@@ -184,7 +184,17 @@ class Trainer:
             self.train_dataset.set_epoch(epoch)
             train_losses = self._train_epoch()
             val_loss = self._validate()
+            # Read before the `empty_cache()` below, which would flatten `reserved`.
+            memory = self._peak_memory()
             history.append(EpochStats(epoch=epoch, train_losses=train_losses, val_loss=val_loss))
+            if memory:
+                logger.info(
+                    "epoch %d peak memory: %.2f GiB allocated, %.2f GiB reserved of %.2f GiB",
+                    epoch,
+                    memory["allocated_gib"],
+                    memory["reserved_gib"],
+                    memory["total_gib"],
+                )
 
             if self.tracker is not None:
                 # No `step=`, and the epoch travels as a *value* -- same shape as
@@ -198,15 +208,42 @@ class Trainer:
                 metrics = {f"{prefix}train/{k}": v for k, v in train_losses.items()}
                 metrics[f"{prefix}val/pixel_l2"] = val_loss
                 metrics[f"{prefix}epoch"] = float(epoch)
+                metrics.update({f"{prefix}memory/{key}": v for key, v in memory.items()})
                 self.tracker.log(metrics)
 
             self._checkpoint(epoch, val_loss)
             # Windows has no `expandable_segments`, so a day of training leaves the caching
-            # allocator fragmented (OOMs with ~6.6 GB reserved-but-unallocated) and holding
-            # nearly the whole card. Releasing the cache once per epoch is numerically inert
-            # and costs seconds against a ~14-minute epoch; a no-op without CUDA.
+            # allocator fragmented and holding nearly the whole card. Releasing the cache once
+            # per epoch is numerically inert and costs seconds against a ~14-minute epoch; a
+            # no-op without CUDA. It fixed the cuSOLVER failure it was written for (M2a step 5,
+            # e3t-loop-s0 in FID) and did *not* stop the OOMs inside `fit()`: those land
+            # mid-epoch, and fragmentation rebuilds across an epoch's hundreds of steps. The
+            # peak logged above is what tells the two apart.
             torch.cuda.empty_cache()
+            if self.device.type == "cuda":
+                # After `empty_cache`, so the next epoch's peak starts from what this one
+                # actually left behind instead of inheriting its high-water mark.
+                torch.cuda.reset_peak_memory_stats(self.device)
         return history
+
+    def _peak_memory(self) -> dict[str, float]:
+        """This epoch's peak device memory in GiB, or `{}` off CUDA.
+
+        `reserved`, not just `allocated`, is the point. M2a step 5 spent ~1150 GPU-hours
+        learning its own margin by crashing into it: the `batch_size: 2` calibration recorded
+        34.14 GB of *allocated* peak, which fits a 40 GB card, and never the ~39.0 GB
+        *reserved* peak, which does not. The allocator serves an allocation out of reserved
+        memory, so reserved is the number that decides whether the next one raises -- and it
+        is the number four separate tracebacks reported (~6.8 GB of it unallocated) before
+        anyone measured it directly.
+        """
+        if self.device.type != "cuda":
+            return {}
+        return {
+            "allocated_gib": torch.cuda.max_memory_allocated(self.device) / 2**30,
+            "reserved_gib": torch.cuda.max_memory_reserved(self.device) / 2**30,
+            "total_gib": torch.cuda.get_device_properties(self.device).total_memory / 2**30,
+        }
 
     def _train_epoch(self) -> dict[str, float]:
         translator = cast(Translator, self.translator)
