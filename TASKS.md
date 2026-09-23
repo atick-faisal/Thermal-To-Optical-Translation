@@ -3620,6 +3620,98 @@ Observation B does not survive per-run. The endpoint, C2 and the sd direction al
 - [ ] E4 coupling comparison: cascaded vs bilevel-**reimplemented** (TarDAL's released code
       severs the generator gradient — see PLAN.md §11)
 
+### E8 — the low-annotation sweep
+
+**Why this and not another E3 cell.** Scoring the project against `RESEARCH_FINDINGS.md`
+§10 after the turbo campaign closed: **causality, stability and faithfulness are all
+satisfied** — twice over for causality (pix2pix n=6 p=0.031, turbo n=3 9/9). **Margin and
+consistency are at zero.** Every campaign since M1.2 step 7 served a criterion that step 8
+had already met. That is over-convergence, not divergence, and the fix is to spend the next
+block on a criterion that is not yet met.
+
+E8 is the cheapest of the two by a wide margin, and PLAN.md §11 already calls it *"likely the
+headline, not the fallback"* while §15 predicts *direct thermal detection wins at full
+annotation*. Until it runs, the paper does not know which claim it is defending.
+
+**The budget lesson from M2a step 5 applies to the choice of instrument.** pix2pix is ~6 h per
+4-stage run against turbo's ~96 h (line 1502 vs line 3105) — 16×. **pix2pix is the exploration
+instrument; turbo is the confirmation instrument**, and turbo stays frozen until a cheap
+instrument reports back. E8 is cheaper still: it is almost entirely *detector* fine-tunes over
+exports that already exist, with no translator training at all.
+
+#### Design
+
+**Question.** At what target-domain annotation budget does translation beat training a
+detector directly on thermal?
+
+**x-axis.** `N` annotated images, `N ∈ {0, 10, 25, 50, 100, 200, 400, 600}` (600 = the full
+custom train split). Three seeds per point. These are **error bars on a curve, not a paired
+significance test** — no p-value is claimed from the curve itself.
+
+**Arms.** All four score the same 153-image / 423-instance val split against the same labels.
+
+| arm | detector | trained on | annotation cost |
+| --- | --- | --- | --- |
+| **A. Direct thermal** (the §8 baseline) | yolo11n from COCO | `N` annotated **thermal** images | `N` |
+| **B. Translated + adapted** | yolo11n from COCO | `N` annotated **translated** images (λ=0 export) | `N` |
+| **C. Translated + zero-shot, λ=0** | the reference judge, visible-trained, never sees thermal | — | **0** |
+| **D. Translated + zero-shot, λ>0** | same judge | — (`N` went to the *translator*) | `N` |
+
+- **A vs B** is paired by construction: identical init, epochs, seed, budget and val protocol,
+  differing only in the pixels. The exact sign-flip test applies per budget.
+- **A's crossover with C** is the headline number. C is flat and needs **zero** target-domain
+  annotations — M1's gate measured it at 0.7751 against the raw-thermal floor's 0.1887. The `N`
+  at which A catches up *is* the claim.
+- **D vs A at matched `N`** states C1's practical value: the same annotations spent on the
+  translator's loop rather than on the detector (0.8696 at N=600).
+
+**Annotation accounting, stated up front rather than found by a reviewer.** Arms A and B cost
+**the same** annotations — training on translated frames still requires those scenes labelled.
+Only arm C is genuinely annotation-free. Writing the accounting down is what makes the claim
+defensible; a table that implies B is cheap would not survive review.
+
+**Fixed-epoch caveat.** Epochs are held constant across budgets so A and B stay comparable. At
+N=10 that overfits. The *comparison* is fair; the absolute numbers at small `N` are not optimal,
+and the paper must say so rather than present them as tuned.
+
+**This is not `DataConfig.annotation_fraction` inside E3.** PLAN.md §16 records why: that knob
+gates only the batch's `cls`/`bboxes` in the coupling term, and the λ=0 control never reads
+annotations at all — so lowering it makes the two arms *more* alike. E8 cuts the **detector's**
+budget instead. The two cuts share one selector (below) precisely so the x-axis means one thing.
+
+**Cost.** ~48 YOLO fine-tunes (2 trained arms × 8 budgets × 3 seeds) at ~10 min mean ≈ **8
+GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minutes.
+
+#### Steps
+
+- [x] **The seam.** `data/dataset.py::_annotated_subset` promoted to public
+      `annotated_subset`, and new `data/budget.py::write_budget_manifest` building an
+      **ultralytics** manifest (`train:` → a text file of image paths) at a given
+      `(fraction, seed)`, with `infrared=True` switching to the thermal side of the same
+      pairs via `Pairing`. One selector serves both the translator and detector cuts, so a
+      budget means the same thing on both. `train_detector` needed no change —
+      `detector_stage.py:111` hands `data_yaml` straight to ultralytics.
+
+      Two guards worth keeping in mind when this reaches the server:
+
+      - A budget manifest is **rejected by `DatasetManifest.load`** (it requires split
+        *directories*). Deliberate: a detector-side budget must never reach the translator's
+        data layer. Symlinked directories would have loaded on both sides and PLAN.md §3 rules
+        symlinks out on native Windows anyway.
+      - `infrared=True` **fails loudly if that modality has no labels beside it**. Every
+        adapted public dataset labels the visible side only (`data/adapters/common.py`), so
+        arm A there would train on a split ultralytics reads as entirely unlabelled — it
+        trains, it reports, and the mAP describes nothing. The custom pairs do carry both
+        sides, which is exactly what makes the difference easy to miss.
+
+- [ ] **Step 0 (read-only, server).** Confirm the stage exports and a thermal `data.yaml` still
+      exist before planning any run. Arms B/C/D reuse the λ=0 and λ>0 exports from the pix2pix
+      campaign; if they were cleaned up, `t2o export --checkpoint` rebuilds them cheaply.
+- [ ] **The sweep driver** — `scripts/annotation_sweep.py`, following the `scripts/loss_share.py`
+      precedent. `t2o evaluate` and `t2o train-detector` only log, so the driver calls
+      `train_detector` / `evaluate_detector` in-process and writes a tidy CSV.
+- [ ] **The run**, then the curve and the crossover `N` recorded here.
+
 ## M4 — Phase 4: Harden
 
 - [ ] ≥3 seeds on every headline result

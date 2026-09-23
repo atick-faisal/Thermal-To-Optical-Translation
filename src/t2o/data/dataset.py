@@ -131,13 +131,19 @@ def _crop_bboxes(
     return cropped[keep], keep
 
 
-def _annotated_subset(paths: list[Path], fraction: float, seed: int) -> frozenset[Path]:
+def annotated_subset(paths: list[Path], fraction: float, seed: int) -> frozenset[Path]:
     """Deterministically choose which paths keep their annotations (E8 sweep).
 
     Every image still trains the translator's reconstruction losses -- the visible target
     is always present -- so this only decides which images additionally supply detection
     supervision. Shuffling a copy of the (already sorted) path list under a seeded RNG
     keeps the choice reproducible across processes without depending on filesystem order.
+
+    Public rather than private because :mod:`t2o.data.budget` builds E8's *detector*-side
+    budgets from it too. Both sides must select the **same** images at a given
+    ``(fraction, seed)``, or "annotation budget" is not one quantity across the sweep's
+    arms -- two independent samplers would make the x-axis mean two different things and
+    nothing in the output would say so.
     """
     if fraction >= 1.0:
         return frozenset(paths)
@@ -187,9 +193,7 @@ class TranslationPairDataset(Dataset[TranslationSample]):
 
         if not 0.0 < annotation_fraction <= 1.0:
             raise ValueError(f"annotation_fraction must be in (0, 1], got {annotation_fraction}")
-        self._annotated = _annotated_subset(
-            self.visible_paths, annotation_fraction, annotation_seed
-        )
+        self._annotated = annotated_subset(self.visible_paths, annotation_fraction, annotation_seed)
 
         logger.info(
             "%s: %d paired samples, %d annotated",
