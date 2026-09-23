@@ -3067,9 +3067,10 @@ arm's fine-tune and never the zero-shot gate metric E3 is decided on.
 
 #### Step 5 — the turbo campaign (server)
 
-- [ ] Six seeds × two arms, aggregated with `t2o aggregate` exactly as M1.2 step 5 does. This
-      is E3's strong arm; the pix2pix campaign is the control it is read against
-- [ ] Score C2 again on the twelve stage-3 exports, against the same reference judge
+- [x] ~~Six~~ **Three** seeds × two arms (0, 1, 3 — the budget fallback taken at line 3203),
+      aggregated with `t2o aggregate` exactly as M1.2 step 5 does. This is E3's strong arm; the
+      pix2pix campaign is the control it is read against
+- [x] Score C2 again on the ~~twelve~~ **six** stage-3 exports, against the same reference judge
 
 Twelve runs at the calibrated dose, `e3t-` prefix so `runs/e3-*` and `runs/e3b-*` stay
 unambiguous (`pair_runs` refuses a mixed glob anyway). **Split across the two cards by seed,
@@ -3446,6 +3447,147 @@ faithfulness metrics and 2.4× tighter on stage-3 mAP50 — recorded there as an
 observation, and this campaign is where it becomes a real prediction (M1.2 step 8 finding 8);
 and (b) `grad_scale` is identical across the two campaigns, so the turbo-minus-pix2pix contrast
 is a backbone contrast and nothing else.
+
+### Campaign result: E3 replicates on turbo at n = 3 (2026-09-23)
+
+Seeds 0, 1, 3 × two arms, all six runs 4/4. Per-run rows in `runs/e3t-tidy.csv`.
+
+| stage | Δ mAP50 (s0 / s1 / s3) | mean | p | 95% CI |
+| --- | --- | --- | --- | --- |
+| 0 (null) | +.0276 / +.0256 / **−.0601** | −0.0023 | 1.000 | [−.0601, +.0276] |
+| 1 | +.0339 / +.0383 / +.0101 | +0.0274 | 0.250 | [+.0100, +.0383] |
+| 2 | +.0358 / +.0298 / +.0048 | +0.0235 | 0.250 | [+.0048, +.0359] |
+| **3** | +.0338 / +.0121 / +.0459 | **+0.0306** | **0.250** | [+.0121, +.0459] |
+
+**1. The endpoint clears, at the only p this design can reach, and the null control is level.**
+p = 0.25 is 2/2³. Stronger than the per-stage p conveys: the loop arm wins **9 of 9** paired
+comparisons across the three coupled stages, and 2 of 3 at stage 0 — exactly the pattern a real
+effect with an honest null produces. Compare pix2pix, whose stage-0 null drew −0.0397: there the
+loop arm started four points behind and finished five ahead. Here the arms start level.
+Reported as *consistent across three seeds*, never significant; pix2pix's n=6 / p=0.031 carries
+the significance claim and this is backbone-transfer corroboration.
+
+**2. Observation B is falsified as written, and the pre-registration is what caught it.** The
+prediction (recorded 2026-09-14) was that `control-s0` and `control-s1` would show
+`control-s3`'s monotone decline. Per run:
+
+```
+control-s0  .8303 → .8384 → .8294 → .8184     up, down, down     net −.0119
+control-s1  .8604 → .8468 → .8455 → .8501     down, down, up     net −.0103
+control-s3  .8889 → .8570 → .8569 → .8293     monotone           net −.0596
+```
+
+Only the run the observation was derived from is monotone, and its decline is **five times**
+the other two. The arm *mean* (.8599 → .8474 → .8439 → .8326) looks monotone only because
+averaging smooths the wobbles while `control-s3` dominates the trend. What survives is weaker
+and still worth reporting: **all three control runs finish below where they started**, so
+warm-started fidelity training does cost detection legibility on this backbone. The monotonicity
+was one run's history, which is precisely what the prediction was written to test. It did its
+job; the finding does not get promoted.
+
+**3. The trajectory statistic is one pair's baseline draw, not a contradiction of the headline.**
+Stage 3 gives +0.0329, p = 0.75, CI [−.0135, +.1060] — and the three per-seed values are
++.0063 / −.0135 / **+.1060**. The whole statistic is the s3 pair, which drew a −0.0601 stage-0
+imbalance and regressed to the mean by stage 3. The raw paired contrast at the same stage is
++.0338 / +.0121 / +.0459 — homogeneous, 3/3. The pre-registered rule (`aggregate.py::aggregate`)
+says the raw contrast governs when the stage-0 draw is level, and for mAP50 it is level
+(p = 1.000). Applied mechanically, not chosen after the fact.
+
+**4. `fidelity.lpips` is null, by the same rule read the other way.** Stage 3 raw is −0.0197,
+3/3 — but the stage-0 null is −0.0117, also 3/3, so the arms did *not* start level on this
+metric and the trajectory is the contrast that still means what the rule intended: **−0.0080,
+p = 0.500**, CI crossing zero. No LPIPS benefit is claimed. Opposite treatment from mAP50 from
+the same pre-registered rule, because the two metrics' stage-0 draws differ.
+
+**Not a device confound**, which the stage-0 loss tables first suggested (every control loss term
+7–15% above the loop's). The per-seed offsets span an 8× range (−.0028 / −.0221 / −.0102), which
+a hardware difference would not produce; a sign-consistent null is a 1-in-4 event at n = 3; and
+step 5's launch instructions pin each *pair* to one card by seed, never by arm, for exactly this
+reason. `control-s3` does not explain it either — it has the **lowest** stage-0 `loss_lpips` in
+the arm (0.7821 against `control-s1`'s clean 1.0832). Chance draw, recorded and closed.
+
+**5. C2 comes back clean, and the effect sizes replicate pix2pix on a different backbone.**
+
+| metric | pix2pix (n=6) | turbo (n=3) |
+| --- | --- | --- |
+| false-object rate ↓ | −0.0289, p=.156 | −0.0193, p=.500 |
+| missed-object rate ↓ | −0.0370, **p=.031** | −0.0386, **p=.250** (floor) |
+| detection-consistency ↑ | +0.0291, **p=.031** | +0.0319, **p=.250** (floor) |
+
+The pre-registered discriminator was "false objects flat or falling"; they fell. The mechanism is
+**recall, not precision** — missed objects drop 0.1552 → 0.1166, a 25% relative reduction, 3/3
+seeds. The translator renders real objects more legibly; it does not invent new ones, which is
+coherent with a mAP50 gain. Same caveat as finding 13 there, and for the same pre-registered
+reason: false-object rate is the only one of the three independent of the gain, and it is the one
+that does not reach the floor. Directionally favourable, not established. `reward_target` stays
+null on this backbone too.
+
+**6. No dose-response — because the realised dose plateaued, not because coupling behaves
+differently here.** The paired difference goes 0 → +.0274 → +.0235 → +.0306, against pix2pix's
+monotone 0 → +.0280 → +.0357 → +.0512. The loss tables say why:
+
+| | stage 1 | stage 2 (clean both arms) | stage 3 |
+| --- | --- | --- | --- |
+| pix2pix `loss_gan` | 1.80 | 1.75 | 1.82 |
+| pix2pix detector share | 10.0% | **16.1%** | 19.8% |
+| turbo `loss_gan` (loop) | 2.47 | 3.31 | 4.51 |
+| turbo detector share | 8.8% | **12.3%** | 12.9% |
+
+pix2pix's GAN loss is flat across the ramp, so tripling `w` nearly doubles the detector's share.
+Turbo's quadruples, outrunning `w`, and the share saturates below the 20–30% calibration band.
+**The dose stopped rising and the gain stopped rising with it.** Falsifiable: a `grad_scale` that
+tracks GAN inflation rather than sitting constant should restore the dose-response. That is the
+concrete experiment this campaign earned, carried to M2b.
+
+**The inflation is backbone-intrinsic, not caused by coupling.** The control arm has no detection
+term at all and inflates just as hard (`--terms-only`: 1.17 → 2.27 → 3.26 → 4.44), and at stage 2
+the two arms are within 1% (3.26 vs 3.31).
+
+**Consequence for pre-registered reading (b).** `grad_scale` and λ_eff *are* identical across the
+two campaigns, but identical configuration does not mean identical realised dose: 12.3% against
+16.1% at the same nominal λ. The turbo-minus-pix2pix contrast is a backbone contrast, and the
+backbone's own adversarial dynamics are part of what differs. Reading (b) stands, with that stated.
+
+**7. Loss-space figures at n = 3 are weak, and only stage 2 is clean in both arms.**
+`epoch_means` weights each run equally regardless of length and drops a 0-epoch run silently
+while the `runs` column still says 3, so the resumed stages' loss rows are pooled from stumps:
+loop stage 1 is {100, 2, 2}, loop stage 3 is {0, 4, 100}, control stage 3 is {2, 100, 99}. Stage 2
+is {100,100,100} in both arms and is the only row that should be quoted. Separately, control-arm
+`loss_gan` at that clean stage 2 runs **1.55 / 3.81 / 4.42** across three seeds of one arm — a
+3× spread at identical settings, so pooled loss means here describe rather than measure.
+
+**8. The resume audit comes out balanced, and it is now a measurement rather than a hope.**
+`loop.py:174` builds a fresh `Trainer` per stage, so both `AdamW` optimizers are new at every
+stage boundary regardless; a resume's cost is therefore set by *where in the stage* it landed —
+a reset at epoch 1 is free, one at epoch 96 costs those last four epochs' momentum.
+
+```
+                 stage:  0    1    2    3          endpoint exposure
+e3t-control-s0         100    1  100    2          2 epochs  (reset @98)
+e3t-control-s1         100  100  100  100          clean
+e3t-control-s3          56  100  100   99          ~free     (reset @1)
+e3t-loop-s0            100  100  100    0          free      (no training after resume)
+e3t-loop-s1            100    2  100    4          4 epochs  (reset @96)
+e3t-loop-s3            100    2  100  100          clean
+```
+
+At the endpoint the exposure is **2 control epochs against 4 loop epochs, falling on opposite
+pairs** (s0 handicaps control, s1 handicaps loop, s3 neither), at a decayed LR out of 100. It
+cannot systematically favour either arm. M2a's open caveat is closed. `e3t-control-s1` is clean
+across all four stages and is the anchor to read the others against. The one substantial
+disturbance in the campaign is `control-s3`'s stage-0 reset at epoch 44 — and finding 4 shows it
+is not what produced the stage-0 offset.
+
+**9. Pre-registered reading (a) partially replicates.** Loop/control sd ratios at stage 3:
+mAP50 0.71×, LPIPS 0.40×, missed-object 0.54×, detection-consistency 0.25× — all in pix2pix's
+0.69 / 0.52 / 0.41 band. The exception is false-object rate at **1.07×**, which is also the metric
+with the weakest effect in both campaigns. So the regularisation pattern replicates on the metrics
+tied to the gain and does not on the one independent metric. At n = 3 an sd is a 2-dof estimate;
+this is a direction, not a measurement, and no variance test is run on it.
+
+**Standing limits of this cell.** n = 3 caps p at 0.25, so turbo corroborates and pix2pix carries
+significance; LPIPS is null; the dose-response does not replicate and finding 6 says why;
+Observation B does not survive per-run. The endpoint, C2 and the sd direction all replicate.
 
 ### M2b — LBBDM-f4 + ReFL (comparison arm, lower priority)
 
