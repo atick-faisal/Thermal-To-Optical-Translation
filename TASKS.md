@@ -3704,9 +3704,35 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
         trains, it reports, and the mAP describes nothing. The custom pairs do carry both
         sides, which is exactly what makes the difference easy to miss.
 
-- [ ] **Step 0 (read-only, server).** Confirm the stage exports and a thermal `data.yaml` still
-      exist before planning any run. Arms B/C/D reuse the λ=0 and λ>0 exports from the pix2pix
-      campaign; if they were cleaned up, `t2o export --checkpoint` rebuilds them cheaply.
+- [x] **Step 0 (read-only, server).** Every artifact E8 needs is on disk; **nothing has to be
+      retrained or re-exported**, which is what makes the sweep an ~8 GPU-hour job rather than
+      a campaign.
+
+      - **The paired dataset is not under the repo.** `$DATA` on the server is
+        `D:\Atick\data\dataset\Brazil-Aligned\yolo_rgbt_29_jul\data.yaml`, and `dataset/` at
+        the repo root does not exist there at all. The driver must therefore take `--data`
+        like every other command in this project and never assume `dataset/yolo_rgbt` — the
+        campaign commands above already pass `$DATA` for exactly this reason.
+      - **Arm A is buildable.** 600/600 train and 153/153 val images-to-labels on **both**
+        modalities, so the infrared guard passes on the real data, not only on the fixture.
+        `write_budget_manifest` was run against `$DATA` at `fraction = 50/600` on both arms
+        and selected N = 50 from `train\visible\images` and `train\infrared\images`
+        respectively — the seam is confirmed end to end on the machine that will run it.
+      - **All twelve stage-3 exports survive**, `runs/e3b-{control,loop}-s{0..5}`, each
+        600 train / 153 val with label counts matching image counts exactly, and each with
+        `translator_last.pt` still beside it as a rebuild path that was not needed.
+        Consequence for the design: arm B **pairs export seed `s` with detector seed `s`**
+        for s ∈ {0,1,2}, so its error bars carry translator variance instead of treating one
+        export as though it were the translator. Pinning a single export would have made the
+        bars understate spread, and the writeup would have had to say so.
+      - `runs/reference-yolo11s/weights/best.pt` present (arms C and D's judge).
+        `yolo11n.pt` is **not** at the repo root — ultralytics auto-downloads it, so the run
+        needs network on first touch. 1016 GB free on `D:`.
+      - **Label resolution verified** rather than assumed: ultralytics 8.4.117's
+        `img2label_paths` substitutes `os.sep + "images" + os.sep` and takes the *last*
+        occurrence, so the Windows `\` separator is handled and both the source layout
+        (`{split}/{visible,infrared}/{images,labels}`) and the export layout
+        (`{split}/{images,labels}`) resolve with zero missing labels.
 - [ ] **The sweep driver** — `scripts/annotation_sweep.py`, following the `scripts/loss_share.py`
       precedent. `t2o evaluate` and `t2o train-detector` only log, so the driver calls
       `train_detector` / `evaluate_detector` in-process and writes a tidy CSV.
