@@ -3557,26 +3557,36 @@ is {100,100,100} in both arms and is the only row that should be quoted. Separat
 3× spread at identical settings, so pooled loss means here describe rather than measure.
 
 **8. The resume audit comes out balanced, and it is now a measurement rather than a hope.**
-`loop.py:174` builds a fresh `Trainer` per stage, so both `AdamW` optimizers are new at every
-stage boundary regardless; a resume's cost is therefore set by *where in the stage* it landed —
-a reset at epoch 1 is free, one at epoch 96 costs those last four epochs' momentum.
+`loop.py:174` builds a fresh `Trainer` per stage, but the optimizers are the *translator's*
+(`pix2pix_turbo.py:263,276`) and `run_loop` holds one translator across all four stages — that
+is the warm start. **So both `AdamW` states accumulate over the whole run, and a resume is the
+only thing that ever resets them**; it resets everything built so far, not the current stage's
+share. (An earlier draft of this finding had it backwards, reasoning from the fresh `Trainer`.)
+What a resume costs is therefore the epochs it runs on rebuilt moments — β₁ = 0.9 recovers in
+~10 steps and β₂ = 0.999 in ~1000, so with hundreds of steps per epoch the damage is the first
+two or three epochs after the reset, wherever in the stage it landed.
 
 ```
                  stage:  0    1    2    3          endpoint exposure
-e3t-control-s0         100    1  100    2          2 epochs  (reset @98)
+e3t-control-s0         100    1  100    2          2 epochs  (reset @98, capped by the stage)
 e3t-control-s1         100  100  100  100          clean
-e3t-control-s3          56  100  100   99          ~free     (reset @1)
-e3t-loop-s0            100  100  100    0          free      (no training after resume)
-e3t-loop-s1            100    2  100    4          4 epochs  (reset @96)
+e3t-control-s3          56  100  100   99          ~2-3 epochs  (reset @1)
+e3t-loop-s0            100  100  100    0          none      (no training after resume)
+e3t-loop-s1            100    2  100    4          ~3 epochs (reset @96)
 e3t-loop-s3            100    2  100  100          clean
 ```
 
-At the endpoint the exposure is **2 control epochs against 4 loop epochs, falling on opposite
-pairs** (s0 handicaps control, s1 handicaps loop, s3 neither), at a decayed LR out of 100. It
-cannot systematically favour either arm. M2a's open caveat is closed. `e3t-control-s1` is clean
-across all four stages and is the anchor to read the others against. The one substantial
-disturbance in the campaign is `control-s3`'s stage-0 reset at epoch 44 — and finding 4 shows it
-is not what produced the stage-0 offset.
+At the endpoint that is **two control runs carrying ~2–3 degraded epochs against one loop run
+carrying ~3**, on opposite pairs (s0 handicaps control, s1 handicaps loop, s3 roughly neither),
+out of 100 at a decayed LR. It cannot systematically favour either arm. M2a's open caveat is
+closed. `e3t-control-s1` is clean across all four stages and is the anchor to read the others
+against. The largest single disturbance is `control-s3`'s stage-0 reset at epoch 44 — and
+finding 4 shows it is not what produced the stage-0 offset.
+
+**Fixed for the next campaign, not this one.** `Pix2PixTurboTranslator.get_extra_state()` /
+`set_extra_state()` now checkpoint both `AdamW` states, so a resume continues instead of
+restarting. It cannot repair a run that already resumed, and it changes no numerics, so these
+six runs stand as reported. Checkpoints grow by ~2x the trainable parameters.
 
 **9. Pre-registered reading (a) partially replicates.** Loop/control sd ratios at stage 3:
 mAP50 0.71×, LPIPS 0.40×, missed-object 0.54×, detection-consistency 0.25× — all in pix2pix's

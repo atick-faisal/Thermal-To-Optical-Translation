@@ -232,14 +232,81 @@ def test_the_checkpoint_holds_only_what_trains_and_round_trips() -> None:
     translator = _translator()
     reduced = translator.state_dict()
     full = torch.nn.Module.state_dict(translator)
+    weights = {k: v for k, v in reduced.items() if k != "_extra_state"}
 
     assert set(reduced) < set(full)
-    assert all("lora" in k or "unet.conv_in" in k or "skip_conv" in k for k in reduced)
+    assert all("lora" in k or "unet.conv_in" in k or "skip_conv" in k for k in weights)
     # How much smaller is a property of the real checkpoint, not of a toy whose LoRA rank is
     # a large fraction of its own width -- the slow test below carries that number.
-    assert sum(v.numel() for v in reduced.values()) < sum(v.numel() for v in full.values())
+    assert sum(v.numel() for v in weights.values()) < sum(
+        v.numel() for k, v in full.items() if k != "_extra_state"
+    )
 
     translator.load_state_dict(reduced)
+
+
+def test_adamw_moments_survive_a_checkpoint_round_trip() -> None:
+    """The reason M2a's six resumes each cost more than the epoch they restarted.
+
+    `engine/loop.py` holds one translator across all four stages, so these moments accumulate
+    over the whole run; before `get_extra_state`, every resume silently zeroed them.
+    """
+    trained = _translator()
+    trained.train()
+    trained.fit(_batch())
+    saved = trained.state_dict()
+
+    resumed = _translator()
+    resumed.load_state_dict(saved)
+
+    before = trained.optimizer_g.state_dict()["state"]
+    after = resumed.optimizer_g.state_dict()["state"]
+    assert before and set(before) == set(after)
+    for index, moments in before.items():
+        assert after[index]["step"] == moments["step"]
+        assert torch.equal(after[index]["exp_avg"], moments["exp_avg"])
+        assert torch.equal(after[index]["exp_avg_sq"], moments["exp_avg_sq"])
+
+
+def test_the_discriminators_optimizer_round_trips_too() -> None:
+    trained = _translator(loss_gan=0.5)
+    trained.train()
+    trained.fit(_batch())
+
+    resumed = _translator(loss_gan=0.5)
+    resumed.load_state_dict(trained.state_dict())
+
+    assert resumed.optimizer_d is not None
+    assert trained.optimizer_d is not None
+    before = trained.optimizer_d.state_dict()["state"]
+    after = resumed.optimizer_d.state_dict()["state"]
+    assert before and set(before) == set(after)
+    assert all(torch.equal(after[i]["exp_avg"], m["exp_avg"]) for i, m in before.items())
+
+
+def test_a_checkpoint_written_at_a_different_gan_weight_is_refused() -> None:
+    """Silently dropping half the optimiser state would look like a successful resume."""
+    coupled = _translator(loss_gan=0.5)
+    coupled.train()
+    coupled.fit(_batch())
+
+    with pytest.raises(TurboTranslatorError, match="different `loss_gan`"):
+        _translator(loss_gan=0.0).load_state_dict(coupled.state_dict())
+
+
+def test_a_checkpoint_written_before_the_optimizers_were_saved_still_loads() -> None:
+    """Every checkpoint M1 and M2a wrote lacks `_extra_state`, and they must stay readable --
+    they just resume without moments, exactly as they did before.
+    """
+    translator = _translator()
+    translator.train()
+    translator.fit(_batch())
+    legacy = {k: v for k, v in translator.state_dict().items() if k != "_extra_state"}
+
+    fresh = _translator()
+    fresh.load_state_dict(legacy)
+
+    assert fresh.optimizer_g.state_dict()["state"] == {}
 
 
 def test_a_checkpoint_from_a_different_model_is_refused() -> None:

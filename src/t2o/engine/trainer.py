@@ -14,11 +14,16 @@ not consumed here.
 Also drops ``DistributedContext`` entirely -- t2o has no DDP (PLAN.md §3).
 
 Checkpoints hold ``translator.state_dict()`` rather than separate
-``optimizer``/``scheduler``/``scaler`` entries, so a translator's optimizer momentum does
-not survive resume (``nn.Module.state_dict()`` does not see ``StubTranslator``'s private
-``Adam`` attribute). Accepted rather than worked around: ``StubTranslator`` is dev/test-only,
-and a real backbone that needs this can expose it itself via ``get_extra_state()``/
-``set_extra_state()``.
+``optimizer``/``scheduler``/``scaler`` entries, because the optimizer belongs to the
+translator here and ``nn.Module.state_dict()`` cannot see a private ``Adam`` attribute. A
+backbone that needs its optimizer to survive a resume exposes it itself, through
+``get_extra_state()``/``set_extra_state()``; ``Pix2PixTurboTranslator`` does exactly that
+(M2b), and its ``get_extra_state`` carries the reasoning. ``StubTranslator`` does not and
+does not need to -- it is dev/test-only.
+
+The distinction matters more than "one stage's momentum": ``engine/loop.py`` holds one
+translator instance across every stage, so a backbone's optimizer state accumulates over the
+whole run and a resume is the only thing that resets it.
 
 Validation is a single generic pixel-L2 pass through ``translate()`` alone, under
 ``no_grad`` -- the one method every backbone keeps grad-connected and comparable

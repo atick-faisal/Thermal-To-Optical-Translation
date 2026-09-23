@@ -62,6 +62,12 @@ from peft import LoraConfig
 from third_party.pix2pix import networks
 from third_party.pix2pix_turbo.model import my_vae_decoder_fwd, my_vae_encoder_fwd
 from torch import Tensor, nn
+
+# Private, and imported rather than written out as "_extra_state" on purpose: `state_dict`
+# below has to recognise the key `nn.Module` files extra state under, and if a future torch
+# renames it an ImportError here is loud. A literal would keep importing and silently stop
+# checkpointing the optimizers -- the exact failure this pair exists to prevent.
+from torch.nn.modules.module import _EXTRA_STATE_KEY_SUFFIX
 from torchmetrics.image import LearnedPerceptualImagePatchSimilarity
 from transformers import AutoTokenizer, CLIPTextModel
 
@@ -349,10 +355,56 @@ class Pix2PixTurboTranslator(nn.Module):
         stats["loss_total"] = float(total.detach())
         return stats
 
+    def get_extra_state(self) -> dict[str, Any]:
+        """Both AdamW states, so a resumed run continues its optimisation rather than restarting.
+
+        `engine/trainer.py` checkpoints `translator.state_dict()` and nothing else, because the
+        optimizers are this module's own and `nn.Module.state_dict()` cannot see them. Its
+        docstring names this pair as the hook a backbone that needs them should use.
+
+        It matters more than that note assumed. `engine/loop.py` holds **one** translator across
+        every stage -- that is the warm start -- so these two optimizers are the same objects for
+        all four stages and their moments accumulate across stage boundaries. A resume is the
+        only thing in a campaign that ever resets them, and it resets everything built so far,
+        not just the current stage's share.
+
+        Costs roughly 2x the trainable parameters on top of the weights (AdamW keeps `exp_avg`
+        and `exp_avg_sq` per parameter), so a stage checkpoint goes from tens of MB to low
+        hundreds. Bought deliberately: M2a's campaign had six resumes across six runs.
+        """
+        return {
+            "optimizer_g": self.optimizer_g.state_dict(),
+            "optimizer_d": None if self.optimizer_d is None else self.optimizer_d.state_dict(),
+        }
+
+    def set_extra_state(self, state: dict[str, Any]) -> None:
+        # `torch.optim.Optimizer.load_state_dict` catches a param-group mismatch itself, but not
+        # a discriminator that exists on one side and not the other -- that is a `loss_gan`
+        # difference between the checkpoint's config and this one, and it would otherwise drop
+        # half the optimiser state in silence.
+        checkpoint_has_d = state["optimizer_d"] is not None
+        if checkpoint_has_d is not (self.optimizer_d is not None):
+            raise TurboTranslatorError(
+                f"checkpoint {'has' if checkpoint_has_d else 'has no'} discriminator optimizer "
+                f"state but this translator {'has none' if checkpoint_has_d else 'has one'} -- "
+                "the checkpoint was written at a different `loss_gan`"
+            )
+        self.optimizer_g.load_state_dict(state["optimizer_g"])
+        if self.optimizer_d is not None:
+            self.optimizer_d.load_state_dict(state["optimizer_d"])
+
     def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
-        """Only the parameters that train -- see deviation 5 in the module docstring."""
+        """Only the parameters that train -- see deviation 5 in the module docstring.
+
+        Plus `get_extra_state`'s entry, which `nn.Module` files under a reserved key rather than
+        a parameter name and which this filter would otherwise drop on the floor.
+        """
         full = super().state_dict(*args, **kwargs)
-        return {key: value for key, value in full.items() if key in self._trainable_keys}
+        return {
+            key: value
+            for key, value in full.items()
+            if key in self._trainable_keys or key.endswith(_EXTRA_STATE_KEY_SUFFIX)
+        }
 
     def load_state_dict(self, state_dict: Any, strict: bool = True, assign: bool = False) -> Any:
         """Accept the reduced checkpoint `state_dict()` writes.
