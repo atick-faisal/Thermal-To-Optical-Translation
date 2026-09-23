@@ -3317,10 +3317,26 @@ with its checkpoint already at the final epoch, so `range(100, 100)` was empty a
 epoch. **Four of the six runs therefore carry an effectively uncontaminated endpoint**, and the
 scars that do exist sit in stages 0 and 1, which nothing reports.
 
-What remains to be checked is the two runs still in flight: their stage-3 resumes *will* take
-real post-reset steps, as many as `100 − checkpoint epoch`. Read that epoch off
-`stage3/translator_last.pt` before relaunching and record it here; if either sits early in the
-stage, say so beside its number rather than leaving it implied.
+**The two in flight, measured before relaunch.** `e3t-control-s0`'s stage-3 checkpoint sits at
+epoch 97 and `e3t-loop-s1`'s at epoch 95, so they resume for 2 and 4 epochs respectively — the
+cheapest place in the stage to have crashed. Those are also the only epochs in their reported
+stage trained on reset moments, since export runs off the live translator at the final epoch
+and not off `translator_best.pt`. The full picture for the endpoint:
+
+| pair | control post-reset epochs in stage 3 | loop post-reset epochs in stage 3 |
+| --- | --- | --- |
+| s3 | 1 | 0 |
+| s0 | 2 | 0 |
+| s1 | 0 | 4 |
+
+**The disturbance does not fall systematically on one arm** — s3 and s0 disturb the control,
+s1 the loop — and at 1–4 epochs out of 400 warm-started it is small on any reading. Stated as
+a limitation; nothing is re-run for it.
+
+Remaining cost from here: ~25 min of training for `e3t-control-s0` and ~50 min for
+`e3t-loop-s1`, then ~4 h of stage boundary each, in parallel on the two cards. **n = 3 is about
+five hours away, not the ~24 h the stage-level estimate above assumed** — that figure was
+written for a stage restarting at epoch 0 and does not apply to either of these.
 
 Worth recording for its own sake: **`e3t-control-s1` ran all four stages without a single
 crash.** The configuration can fit. It just does not reliably fit, which is the same statement
