@@ -61,6 +61,10 @@ logger = logging.getLogger(__name__)
 LAST_CHECKPOINT = "translator_last.pt"
 BEST_CHECKPOINT = "translator_best.pt"
 
+# Release the allocator's cache every this many training steps (M2a step 5). See
+# `_train_epoch` for why the *between-steps* moment is the one that can do any good.
+CACHE_RELEASE_STEPS = 50
+
 
 @dataclass(frozen=True, slots=True)
 class EpochStats:
@@ -255,6 +259,22 @@ class Trainer:
             for key, value in losses.items():
                 totals[key] = totals.get(key, 0.0) + value
             n += 1
+            # The per-epoch release in `train()` cannot help a crash that lands mid-epoch, and
+            # every OOM in this campaign has (M2a step 5). What kills the run is *intra-segment*
+            # fragmentation: torch already frees every fully-free segment before it raises, so
+            # the ~6.8 GB the tracebacks report as reserved-but-unallocated is memory trapped in
+            # segments that each still hold one live tensor, unreclaimable and too holey to serve
+            # a 320 MiB request. `expandable_segments` is the real fix and Windows does not have
+            # it; no allocator flag reaches this (three were tried).
+            #
+            # Here is different. Between two `fit()` calls the activations are gone and only
+            # parameters, gradients and optimizer state are live, so most segments are fully free
+            # and *can* be handed back -- the one moment in the step where releasing does
+            # anything. Numerically inert; a no-op without CUDA. Every 50 steps rather than every
+            # step because `cudaMalloc` is not free and the point is to stop fragmentation
+            # accruing over an epoch, not to run defragmented.
+            if n % CACHE_RELEASE_STEPS == 0:
+                torch.cuda.empty_cache()
         return {key: value / n for key, value in totals.items()} if n else {}
 
     @torch.no_grad()
