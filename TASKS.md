@@ -3197,8 +3197,85 @@ the cheapest pair plus two; see the endpoint pre-registration item in the writin
 below). Reducing n costs statistical power and nothing else:
 `grad_scale`, `epochs_per_stage` and the reference judge are untouched, so turbo-minus-pix2pix
 stays a pure backbone contrast, and the reduction is budget-driven and decided **before** any
-stage-3 number was read. **Not taken yet** — it requires accepting the exact sign-flip test's
-resolution at n = 3, and the mismatch against pix2pix's n = 6 must then be stated in the paper.
+stage-3 number was read. ~~**Not taken yet** — it requires accepting the exact sign-flip test's
+resolution at n = 3, and the mismatch against pix2pix's n = 6 must then be stated in the paper.~~
+**Taken 2026-09-23, on the terms above** — see "the fourth episode" below. The cost is accepted
+as written: the sign-flip floor at n = 3 is p = 0.25, so turbo is reported as *consistent across
+three seeds* and never as *significant*, pix2pix's n = 6 / p = 0.031 result stays the headline,
+and the mismatch between the two campaigns' n is a stated limitation rather than a silent one.
+
+**The fourth episode, 2026-09-23 — and the finding that reframes the other three.** Both cards
+OOM'd again some hours after the `b7b1627` relaunch, `e3t-control-s0` on cuda:0 inside
+`total.backward()` and `e3t-loop-s1` on cuda:1 inside `vae.decode`. Put the four episodes'
+allocator state side by side:
+
+| episode | allocated | reserved-but-unallocated | failed request |
+| --- | --- | --- | --- |
+| first attempt, all twelve runs | 32.05 GiB | 6.92 GiB | 320 MiB |
+| after `expandable_segments` (a silent no-op here) | 32.44 GiB | 6.63 GiB | 160 MiB |
+| after `max_split_size_mb:512` | — | — | failed again |
+| after `b7b1627`'s per-epoch `empty_cache` | 32.06 / 32.13 GiB | 6.83 / 6.93 GiB | 320 / 160 MiB |
+
+**That overhead does not drift across four independent crashes, three allocator configurations
+and two cards. It is a steady state, not a leak** — and a steady ~6.8 GiB on top of ~32.1 GiB
+allocated puts *reserved* peak at ~39.0 GiB of a 39.70 GiB card. About 98% occupancy.
+
+So the diagnosis this section has carried since the first attempt — "fragmentation, not
+capacity" — is wrong, or at best half true. **The configuration never fit.** Step 4 measured
+34.14 GB of `max_memory_allocated`, with `--no-detector`, on one stage, and recorded ~5.8 GB of
+headroom. It never measured `max_memory_reserved`. The allocator serves an allocation out of
+reserved memory, so reserved is the quantity that decides whether the next one raises; the
+calibration measured the wrong one, and every run that finished did so by winning a coin flip
+repeatedly. Step 4's own closing note called this "an argument, not a measurement" and said to
+watch stage 0→1 of the first run. The risk fired three times and was read as fragmentation each
+time, because an allocator flag is a cheaper hypothesis than a wrong margin.
+
+**`b7b1627` is credited for the wrong thing.** It genuinely fixed the cuSOLVER/FID failure it
+was written for — that failure has not recurred. It was never a fix for the OOM inside `fit()`,
+and its code comment conflates the two. A per-epoch `empty_cache()` cannot help a crash that
+lands mid-epoch: fragmentation rebuilds across an epoch's hundreds of steps. Corrected in the
+comment at `trainer.py`'s `empty_cache()` site so the next reader does not re-credit it.
+
+**The campaign is one stage from n = 3, which is why the decision above is now takeable.** The
+queues' `break` semantics leave four runs at 4/4 — `e3t-control-s3`, `e3t-loop-s3`,
+`e3t-loop-s0`, `e3t-control-s1` — and two at 3/4, `e3t-control-s0` and `e3t-loop-s1`, both
+stranded in stage 3. Each stranded run's partner is already complete, so finishing those two
+(one per card, in parallel, ~24 h of wall clock) completes pairs **s0, s1 and s3**: precisely
+the "seeds 3, 0, 1" subset the open decision above had already named. Going on to n = 6 needs
+seeds 2, 4 and 5 in both arms — six runs, ~576 GPU-h, ~12 days on two cards, at a crash rate
+that has so far been 100%.
+
+**Headroom is now logged instead of discovered by crashing.** `Trainer.train` records
+`max_memory_allocated`, `max_memory_reserved` and the card's total per epoch, to the console and
+to W&B under `stage{n}/memory/*`, reading them before `empty_cache()` and resetting the peak
+after it (`trainer.py::_peak_memory`). Numerically inert, a no-op off CUDA. This is what makes
+the next margin question a measurement. **Watch `reserved_gib` on the two resumed runs: if it
+sits near 39 GiB again, stop rather than spend another day on a coin flip.**
+
+**The one contaminant nobody has priced: resume resets the optimizer.** `trainer.py`'s module
+docstring states that optimizer momentum does not survive a resume, and accepts it — but that
+note was written when `StubTranslator`, a CPU dev stand-in, was the only backbone.
+`Pix2PixTurboTranslator` owns **two** `AdamW` optimizers (`pix2pix_turbo.py:263` for the LoRA
+generator, `:276` for the PatchGAN), and neither is in the checkpoint, so **every resume silently
+resets both**. A crashed-and-resumed run is therefore not the same experiment as a clean one, and
+this campaign has resumed repeatedly. The transient is probably short — AdamW's second moment
+rebuilds over roughly 1/(1−β₂) = 1000 optimizer steps, a small fraction of a 100-epoch stage —
+but "probably short" is an argument, and the fact that it is **unrecorded** is the actual
+problem. **Before the readout, reconstruct which runs resumed** from the
+`epochs` list length per stage in each `metrics.json` (a stage shorter than 100 entries is a
+resume fingerprint; this is how `e3t-control-s3` was identified as twice-resumed below), and
+report it per pair. If the asymmetry falls in opposite directions across pairs — s0's control
+resumed against a clean loop, s1's loop against a clean control — it cannot systematically
+favour either arm, which is the best case available and must be stated rather than hoped for.
+
+**Not fixed now, deliberately.** Checkpointing the optimizers via `get_extra_state()` /
+`set_extra_state()`, as the docstring itself suggests, would make the two resumed runs differ
+from the four finished ones by machinery as well as by seed, and cannot retroactively repair a
+run that has already resumed. It is the right fix for the next campaign; carried to M2b. For the
+same reason `batch_size: 1`, the `[512, 512]` crop and UNet gradient checkpointing
+(PLAN.md §15's own named ladder) are all off the table here: they would orphan the four finished
+runs. They are what a *restarted* campaign should be built on, with reserved peak as the
+acceptance number.
 
 **Two resume artefacts for the readout.** (a) A resumed stage records only the epochs run after the
 resume, so stage 1's `epochs` list truncates to 1–2 entries on the stranded runs;
