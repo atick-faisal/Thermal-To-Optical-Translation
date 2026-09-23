@@ -3404,19 +3404,34 @@ backbone, reported **alongside** the stage-3 endpoint and never in place of it.
 
 Then the readout, mirroring M1.2 steps 8–9 so the two backbones' cells are directly comparable:
 
-```powershell
-uv run t2o aggregate --runs 'runs/e3t-*' --stage 3 `
-  --metric zero_shot.map50 fidelity.lpips --csv runs/e3t-tidy.csv
-uv run python scripts/loss_share.py --runs 'runs/e3t-loop-*'
+**Name the six runs; do not glob.** `runs/e3t-*` also matches the six stumps the first
+attempt's OOM left behind (`control-s2` [0,1], `control-s4` [0], `control-s5` [0],
+`loop-s2` [0], `loop-s4` [0], `loop-s5` [0,1]), and `aggregate` computes on
+`common_stages` — the intersection over *every* matched run — which those collapse to `[0]`.
+The stumps are paired by arm for seeds 2, 4 and 5, so `pair_runs`' unpaired-seed guard stays
+quiet and the run **succeeds** at n = 6 over stage 0 alone. That happened here on 2026-09-23
+and produced a plausible, wrong table; `--stage` selecting a stage the runs do not all reach
+is now fatal (`cli.py::_run_aggregate`), but the glob is still the thing to avoid.
 
-foreach ($arm in 'control','loop') { foreach ($s in 0,1,2,3,4,5) {
+```powershell
+$RUNS = 'runs/e3t-control-s0','runs/e3t-loop-s0','runs/e3t-control-s1',
+        'runs/e3t-loop-s1','runs/e3t-control-s3','runs/e3t-loop-s3'
+
+uv run t2o aggregate --runs $RUNS --stage 3 `
+  --metric zero_shot.map50 fidelity.lpips --csv runs/e3t-tidy.csv
+uv run python scripts/loss_share.py --runs runs/e3t-loop-s0 runs/e3t-loop-s1 runs/e3t-loop-s3
+
+foreach ($arm in 'control','loop') { foreach ($s in 0,1,3) {
   uv run t2o faithfulness --translated "runs/e3t-$arm-s$s/stage3/translated" `
     --data $DATA --weights runs/reference-yolo11s/weights/best.pt --write-back --device cuda:0
 } }
-uv run t2o aggregate --runs 'runs/e3t-*' --stage 3 `
+uv run t2o aggregate --runs $RUNS --stage 3 `
   --metric faithfulness.false_object_rate faithfulness.missed_object_rate `
            faithfulness.detection_consistency
 ```
+
+Check `aggregate`'s first line before reading anything below it: it must say
+`6 runs, stages [0, 1, 2, 3]`.
 
 **C2 must be scored with the reference yolo11s**, exactly as on pix2pix — it is what makes the
 turbo cell comparable to the pix2pix cell at all, and this backbone back-props through the entire
@@ -3425,7 +3440,8 @@ for this campaign, not a guarantee about it.
 
 **Two pre-registered readings, written down before the numbers arrive.** The pre-registered
 endpoint is unchanged: the paired stage-3 zero-shot mAP50 difference, exact sign-flip test,
-n = 6. Beyond it, (a) the loop arm's sd ran 0.69 / 0.52 / 0.41× the control's on pix2pix's three
+n = 3 per the decision at line 3203 (the test itself is unchanged; only its floor moves, to
+p = 0.25). Beyond it, (a) the loop arm's sd ran 0.69 / 0.52 / 0.41× the control's on pix2pix's three
 faithfulness metrics and 2.4× tighter on stage-3 mAP50 — recorded there as an untested
 observation, and this campaign is where it becomes a real prediction (M1.2 step 8 finding 8);
 and (b) `grad_scale` is identical across the two campaigns, so the turbo-minus-pix2pix contrast

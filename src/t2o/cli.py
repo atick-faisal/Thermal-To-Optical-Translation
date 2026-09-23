@@ -212,8 +212,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--stage",
         type=int,
         help="the stage the verdict line reports; defaults to the last stage common to "
-        "every run. Every common stage is computed regardless, so stage 0's null control "
-        "is always printed beside it",
+        "every run. It selects, it does not filter: every common stage is computed "
+        "regardless, so stage 0's null control is always printed beside it. A stage the "
+        "runs do not all reach is an error, not a silent fallback",
     )
     aggregate.add_argument("--csv", type=Path, help="also write the tidy per-run rows here")
     aggregate.add_argument("--resamples", type=int, default=10000, help="bootstrap resamples")
@@ -551,7 +552,7 @@ def _expand_run_globs(patterns: Sequence[str]) -> list[Path]:
 
 
 def _run_aggregate(args: argparse.Namespace) -> int:
-    from t2o.analysis.aggregate import aggregate, tidy_rows, write_csv
+    from t2o.analysis.aggregate import AggregationError, aggregate, tidy_rows, write_csv
 
     report = aggregate(
         _expand_run_globs(args.runs),
@@ -560,6 +561,16 @@ def _run_aggregate(args: argparse.Namespace) -> int:
         seed=args.seed,
     )
     headline = args.stage if args.stage is not None else report.stages[-1]
+    # The computed stages are the intersection across every matched run, so one crashed run
+    # swept in by a glob silently collapses them to [0] -- and `--stage 3` would then mark no
+    # row at all and print a stage-0 answer under a stage-3 question. Asking for a stage that
+    # was not computed is the symptom, so it has to be an error rather than a missing marker.
+    if headline not in report.stages:
+        raise AggregationError(
+            f"--stage {headline} is not among the stages these runs share "
+            f"{list(report.stages)}. Every run must reach that stage: "
+            + ", ".join(f"{run.name} {list(run.stage_indices)}" for run in report.runs)
+        )
 
     # Widened to the longest metric actually asked for: a dotted per-class path
     # (zero_shot.per_class_ap50.Switch) overruns any fixed width and shears the table.

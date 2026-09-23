@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from t2o.analysis.aggregate import AggregationError
 from t2o.cli import (
     _export_run_and_stage,
     build_parser,
@@ -538,16 +539,27 @@ def test_main_train_detector_writes_a_checkpoint(
     assert (weights / "best.pt").is_file() or (weights / "last.pt").is_file()
 
 
-def _write_e3_run(root: Path, name: str, seed: int, weights: list[float], map50: float) -> None:
-    """A minimal run directory, mirroring what `run_loop` + `Config.snapshot` leave behind."""
+def _write_e3_run(
+    root: Path,
+    name: str,
+    seed: int,
+    weights: list[float],
+    map50: float,
+    stages: tuple[int, ...] = (0,),
+) -> None:
+    """A minimal run directory, mirroring what `run_loop` + `Config.snapshot` leave behind.
+
+    `stages` is how far the run actually got, which need not be the whole `weights` schedule --
+    a crashed run leaves a short `metrics.json` behind and still matches the campaign glob.
+    """
     run_dir = root / name
     run_dir.mkdir(parents=True)
     (run_dir / "metrics.json").write_text(
         json.dumps(
             [
                 {
-                    "stage": 0,
-                    "task_weight": weights[0],
+                    "stage": stage,
+                    "task_weight": weights[stage],
                     "epochs": [],
                     "detector": None,
                     "zero_shot": {
@@ -560,6 +572,7 @@ def _write_e3_run(root: Path, name: str, seed: int, weights: list[float], map50:
                     },
                     "fidelity": None,
                 }
+                for stage in stages
             ]
         )
     )
@@ -594,6 +607,23 @@ def test_main_aggregate_expands_a_glob_and_writes_the_csv(tmp_path: Path) -> Non
     assert exit_code == 0
     rows = csv_path.read_text().splitlines()
     assert len(rows) == 1 + 4 * 1 * 2  # header + runs x stages x metrics
+
+
+def test_main_aggregate_refuses_a_stage_the_runs_do_not_all_reach(tmp_path: Path) -> None:
+    """A crashed run swept in by the campaign glob collapses the shared stages to [0], and
+    `--stage 3` then marked nothing and printed a stage-0 answer under a stage-3 question.
+    That cost a readout once (TASKS.md M2a step 5), so the mismatch has to be fatal.
+    """
+    for seed in (0, 1):
+        _write_e3_run(tmp_path, f"e3-control-s{seed}", seed, [0.0, 0.0], 0.70, stages=(0, 1))
+        _write_e3_run(tmp_path, f"e3-loop-s{seed}", seed, [1.0, 1.0], 0.80, stages=(0, 1))
+    # The stump: paired by arm, so `pair_runs`' unpaired-seed guard stays quiet.
+    (tmp_path / "e3-loop-s1" / "metrics.json").write_text(
+        json.dumps(json.loads((tmp_path / "e3-loop-s1" / "metrics.json").read_text())[:1])
+    )
+
+    with pytest.raises(AggregationError, match=r"--stage 1 is not among.*e3-loop-s1 \[0\]"):
+        main(["aggregate", "--runs", f"{tmp_path}/e3-*", "--stage", "1", "--resamples", "100"])
 
 
 def test_main_aggregate_reports_a_missing_literal_run(tmp_path: Path) -> None:
