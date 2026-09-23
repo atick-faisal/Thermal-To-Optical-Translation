@@ -3733,9 +3733,38 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
         occurrence, so the Windows `\` separator is handled and both the source layout
         (`{split}/{visible,infrared}/{images,labels}`) and the export layout
         (`{split}/{images,labels}`) resolve with zero missing labels.
-- [ ] **The sweep driver** — `scripts/annotation_sweep.py`, following the `scripts/loss_share.py`
+- [x] **The sweep driver** — `scripts/annotation_sweep.py`, following the `scripts/loss_share.py`
       precedent. `t2o evaluate` and `t2o train-detector` only log, so the driver calls
-      `train_detector` / `evaluate_detector` in-process and writes a tidy CSV.
+      `train_detector` / `evaluate_detector` in-process and appends a tidy CSV row per cell.
+
+      Three decisions in it that the design above did not settle:
+
+      - **A fifth arm, `A0`** — the reference judge on raw thermal, the zero-annotation floor
+        the headline is quoted against (M1 measured 0.1887). Arms A and B fine-tune from COCO
+        `yolo11n`, which has no class correspondence with this vocabulary and so cannot be
+        scored at `N=0` at all; the judge can. The `detector` column records `finetuned` vs
+        `reference` so that discontinuity is visible in the CSV rather than hidden in a curve.
+        `A0` has no seed dependence — one judge, one split — so it is written once at
+        `seed = -1` instead of duplicated across seeds to look symmetric.
+      - **One seed does two jobs**: it picks *which* `N` images are annotated and it seeds the
+        detector's training. Splitting them would report error bars that exclude the luck of
+        the draw, and at `N=10` that luck is most of the variance.
+      - **`--control-template` / `--loop-template`** carry a `{seed}` placeholder rather than
+        taking a list of export directories, so the detector seed is paired with the *export*
+        seed structurally. A list of six paths against three seeds would misalign silently and
+        produce error bars that look like translator variance and are not.
+
+      Cells run cheapest-first (zero-shot anchors, then ascending `N`) and each row is flushed
+      as it completes, so an interrupted sweep keeps its GPU time and a re-run resumes.
+
+      ```powershell
+      uv run python scripts/annotation_sweep.py --data $DATA --out runs/e8 --device cuda:0
+      ```
+
+      Smoked end to end through real ultralytics on CPU before shipping: it trains on exactly
+      `N` images, validates against the **full** untouched val split, and resolves labels on
+      the thermal side — the failure this most needed ruling out, since an unlabelled split
+      trains and reports a number that means nothing.
 - [ ] **The run**, then the curve and the crossover `N` recorded here.
 
 ## M4 — Phase 4: Harden
