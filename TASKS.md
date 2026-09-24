@@ -3766,9 +3766,11 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       `N` images, validates against the **full** untouched val split, and resolves labels on
       the thermal side — the failure this most needed ruling out, since an unlabelled split
       trains and reports a number that means nothing.
-- [x] **The run.** All 49 cells in one pass, no failed cell. Raw rows at
-      `runs/e8/e8-tidy.csv` on the server — `runs/` is gitignored, so the tables below are
-      the durable copy.
+- [x] **The run.** All 49 cells in one pass, no failed cell. The per-seed rows are tracked at
+      **`docs/results/e8-tidy.csv`** — the server copy lives under gitignored `runs/e8/` and
+      would not survive that box being wiped, and any later re-analysis needs the rows, not
+      just the means below. The tracked copy drops the driver's `weights` and `data` columns,
+      which hold server-local paths under `runs/` and point at nothing here.
 
       **The curve.** mAP50 on the fixed 153-image / 423-instance val split, mean ± sd over
       seeds {0,1,2}. A and B are paired per seed: same budget, same scenes, same COCO init,
@@ -3790,8 +3792,10 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
 
       **The crossover — the number E8 was run for.** Linear interpolation inside the
       bracketing budgets: A passes **C at `N ≈ 157`** (bracket 100–200) and **D at `N ≈ 243`**
-      (bracket 200–400). Quote the bracket in the paper, not the interpolated point — the
-      sweep does not measure at either `N`.
+      (bracket 200–400). **Quote the interval, not the point.** The sweep measures at neither
+      `N`, and the dominant uncertainty is not the interpolation — it is C's ±0.0438 spread
+      across translator seeds, which alone puts the first crossover between `N` ≈ 111 and
+      `N` ≈ 214. See the follow-up step below, which narrows the right arm.
 
       **1. The headline, with its regime attached.** Annotation-free translation is worth
       **≈150 annotated thermal images**, a quarter of the 600-image train split. Spending the
@@ -3834,10 +3838,39 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       that result and must not be counted twice — it is also the size of the 0.059
       same-computation noise gap measured at the gate re-check, which is precisely why the
       paired test, and not a gap between means, carries that claim.
-- [ ] **Optional, ~1 GPU-hour: tighten the crossover bracket.** Only arm A is needed —
-      `--arms A --budgets 125 150 175` appends to the same CSV and the driver resumes around
-      the cells already there. Worth it only if the paper quotes a number rather than the
-      100–200 bracket.
+- [ ] **Tighten the crossover — but on arm C, not on arm A.** The obvious move is to infill
+      budgets (`--arms A --budgets 125 150 175`, ~1 GPU-hour) and it is the wrong one. **A's
+      curve is not what makes the bracket wide.** A is already tight where it matters
+      (±0.0125 at `N`=100, ±0.0053 at `N`=200); the bracket is wide because **C is the moving
+      target**, at ±0.0438 across three translator seeds. Reading C ± 1 sd (0.761 to 0.849)
+      back through A's curve puts the crossover anywhere from **`N` ≈ 111 to `N` ≈ 214** — so
+      extra A budgets would buy a *falsely precise* crossover against a line that has not been
+      pinned down.
+
+      The cheap fix is the other arm, and it is not GPU-hours: **seeds 3–5 of the same twelve
+      exports are still on disk** (step 0), and arms C and D are `evaluate` calls, so
+
+      ```powershell
+      uv run python scripts/annotation_sweep.py --data $DATA --out runs/e8 --arms C D --seeds 0 1 2 3 4 5 --device cuda:0
+      ```
+
+      resumes past the nine rows already written, adds six, and takes **minutes**. That halves
+      C's standard error and turns the crossover into an honest interval instead of a point.
+      Infill A's budgets afterwards only if the interval is still the binding uncertainty.
+
+      Caveat to carry forward: this widens C and D to n=6 **without** making the D−C gap new
+      evidence for E3 — same exports, re-scored (finding 7 above).
+- [ ] **Deferred: `RESEARCH_FINDINGS.md` §10 criterion 1 is not edited yet.** E8 makes the
+      margin *measured and conditional* (+0.650 at `N`=0, −0.125 at `N`=600) rather than
+      unknown, which would normally be the moment to rewrite the scorecard. Held deliberately
+      until the public-dataset cell runs, on the user's reasoning: **the custom dataset may
+      simply be a bad case for this method.** Power lines are close to invisible in thermal,
+      which is what makes the zero-annotation gap enormous (+0.650) — and the very same
+      legibility gap is why a fine-tuned thermal detector then catches up so fast once it has
+      a few hundred boxes. A dataset where thermal is *moderately* legible could behave
+      differently in both directions. If it does, the right response may be to **loosen the
+      criterion to admit a public dataset** rather than to record a conditional pass here.
+      Decide once there is a second dataset to decide with — not before.
 
 ## M4 — Phase 4: Harden
 
