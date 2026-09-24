@@ -3766,7 +3766,8 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       `N` images, validates against the **full** untouched val split, and resolves labels on
       the thermal side — the failure this most needed ruling out, since an unlabelled split
       trains and reports a number that means nothing.
-- [x] **The run.** All 49 cells in one pass, no failed cell. The per-seed rows are tracked at
+- [x] **The run.** All 49 cells in one pass, no failed cell; the C/D top-up below brings the
+      file to **55 rows**. The per-seed rows are tracked at
       **`docs/results/e8-tidy.csv`** — the server copy lives under gitignored `runs/e8/` and
       would not survive that box being wiped, and any later re-analysis needs the rows, not
       just the means below. The tracked copy drops the driver's `weights` and `data` columns,
@@ -3786,25 +3787,26 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       | 400 | 0.9025 ± 0.0070 | 0.8641 ± 0.0160 | +0.038 | 3/3 for **A** |
       | 600 | 0.9300 ± 0.0096 | 0.8978 ± 0.0047 | +0.032 | 3/3 for **A** |
 
-      Flat anchors: **A0** (judge on raw thermal, 0 annotations) **0.1552**, a single cell;
-      **C** (judge on the λ=0 export, 0 annotations) **0.8049 ± 0.0438**; **D** (judge on the
-      λ>0 export, `N`=600 spent inside the *translator*) **0.8572 ± 0.0110**.
+      Flat anchors, C and D at **n=6** after the top-up below: **A0** (judge on raw thermal,
+      0 annotations) **0.1552**, a single cell; **C** (judge on the λ=0 export, 0 annotations)
+      **0.7975 ± 0.0330**; **D** (judge on the λ>0 export, `N`=600 spent inside the
+      *translator*) **0.8487 ± 0.0140**.
 
-      **The crossover — the number E8 was run for.** Linear interpolation inside the
-      bracketing budgets: A passes **C at `N ≈ 157`** (bracket 100–200) and **D at `N ≈ 243`**
-      (bracket 200–400). **Quote the interval, not the point.** The sweep measures at neither
-      `N`, and the dominant uncertainty is not the interpolation — it is C's ±0.0438 spread
-      across translator seeds, which alone puts the first crossover between `N` ≈ 111 and
-      `N` ≈ 214. See the follow-up step below, which narrows the right arm.
+      **The crossover — the number E8 was run for.** A passes **C at `N ≈ 150`** and **D at
+      `N ≈ 214`**, by linear interpolation inside the bracketing budgets (100–200 and
+      200–400). **Quote the interval, not the point**: the sweep measures at neither `N`, and
+      the dominant uncertainty is the flat line's spread across translator seeds, not the
+      interpolation. Reading C ± 1 sd back through A's curve gives **`N` ∈ [114, 185]**
+      (± 1 sem: [135, 164]); for D, `N` ∈ [189, 262].
 
       **1. The headline, with its regime attached.** Annotation-free translation is worth
-      **≈150 annotated thermal images**, a quarter of the 600-image train split. Spending the
-      same annotations inside the translator's loop instead (arm D) raises that to ≈240 — so
-      C1's coupling is itself worth another ~85 annotations.
+      **≈150 annotated thermal images** (interval [114, 185]), a quarter of the 600-image
+      train split. Spending the same annotations inside the translator's loop instead (arm D)
+      raises that to **≈214** — so C1's coupling is itself worth another ~64 annotations.
 
       **2. `PLAN.md` §15's prediction is confirmed: direct thermal wins at full annotation.**
-      A reaches 0.9300 at `N`=600 against C's 0.8049 and D's 0.8572. Criterion 1 is therefore
-      **measured, not met**: the margin over the §8 baseline is +0.650 at `N`=0 and **−0.125**
+      A reaches 0.9300 at `N`=600 against C's 0.7975 and D's 0.8487. Criterion 1 is therefore
+      **measured, not met**: the margin over the §8 baseline is +0.642 at `N`=0 and **−0.133**
       at `N`=600. Any claim must name the regime, and the honest sentence is *"below ~150
       target-domain annotations, translation beats direct thermal detection"* — not
       *"translation beats direct thermal detection"*.
@@ -3830,15 +3832,23 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
 
       **6. A free validity check, passed.** A0's 0.1552 reproduces the gate re-check's
       clean-judge thermal floor (line 1636) to four decimals, through a different code path
-      and months later. C's interval straddles that table's λ=0 row (0.7851) and D's 0.8572
-      sits just above its stage-3 row (0.8470). Nothing drifted between campaigns.
+      and months later. C at n=6 (0.7975) and D (0.8487) land on that table's single-seed λ=0
+      (0.7851) and stage-3 (0.8470) rows. Nothing drifted between campaigns.
 
-      **7. C vs D inside E8 is *not* new evidence for E3.** These are seeds 0–2 of the very
-      exports whose n=6 sign-flip test gave p=0.031, re-scored. The +0.052 gap is a re-read of
-      that result and must not be counted twice — it is also the size of the 0.059
-      same-computation noise gap measured at the gate re-check, which is precisely why the
-      paired test, and not a gap between means, carries that claim.
-- [ ] **Tighten the crossover — but on arm C, not on arm A.** The obvious move is to infill
+      **7. C vs D reproduces E3's headline *exactly* — which makes it a reproduction, not
+      evidence.** At n=6 the paired D−C difference is **+0.051218 → +0.0512, 6/6 seeds,
+      p = 0.031**, identical to the recorded stage-3 endpoint (line 1535, line 2427) to every
+      digit that entry carries. It is the same computation: the same judge
+      (`runs/reference-yolo11s/weights/best.pt`, set in `experiments/e3_pix2pix_*.yaml`), the
+      same six exports, reached through the sweep driver instead of the campaign's own metric
+      path.
+
+      Both halves of that matter. It is **worth recording**: the stored exports still score
+      exactly as the campaign recorded months ago, so nothing in the export or evaluation path
+      has drifted and the artifacts every downstream arm reuses are sound. And it is **not to
+      be counted twice**: E8 contributes nothing new to the causality criterion, and a paper
+      that reported +0.0512 from E3 and again from E8 would be reporting one result as two.
+- [x] **Tighten the crossover — but on arm C, not on arm A.** The obvious move is to infill
       budgets (`--arms A --budgets 125 150 175`, ~1 GPU-hour) and it is the wrong one. **A's
       curve is not what makes the bracket wide.** A is already tight where it matters
       (±0.0125 at `N`=100, ±0.0053 at `N`=200); the bracket is wide because **C is the moving
@@ -3858,8 +3868,23 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       C's standard error and turns the crossover into an honest interval instead of a point.
       Infill A's budgets afterwards only if the interval is still the binding uncertainty.
 
-      Caveat to carry forward: this widens C and D to n=6 **without** making the D−C gap new
-      evidence for E3 — same exports, re-scored (finding 7 above).
+      **Ran. It worked, and it paid twice.** Twelve C/D rows, no duplicate `(arm, seed)` —
+      the resume skipped the nine already written and added six in minutes.
+
+      | | n=3 | **n=6** |
+      | --- | --- | --- |
+      | C mAP50 | 0.8049 ± 0.0438 (sem 0.0253) | **0.7975 ± 0.0330 (sem 0.0135)** |
+      | D mAP50 | 0.8572 ± 0.0110 (sem 0.0064) | **0.8487 ± 0.0140 (sem 0.0057)** |
+      | A × C crossover | `N` ≈ 157, ±1 sd [111, 214] | **`N` ≈ 150, ±1 sd [114, 185]** |
+
+      C's standard error nearly halved, which was the point, and the crossover interval
+      narrowed from a span of 103 images to 71 — while the point estimate barely moved (157 →
+      150), which is the reassuring outcome. Infilling arm A's budgets is **not** worth doing:
+      the remaining width is still C's spread, not A's resolution.
+
+      The second payment was unplanned — at n=6 the D−C difference reproduces E3's recorded
+      stage-3 endpoint to every digit. See finding 7 above for why that is worth recording and
+      why it must not be counted as evidence.
 - [ ] **Deferred: `RESEARCH_FINDINGS.md` §10 criterion 1 is not edited yet.** E8 makes the
       margin *measured and conditional* (+0.650 at `N`=0, −0.125 at `N`=600) rather than
       unknown, which would normally be the moment to rewrite the scorecard. Held deliberately
