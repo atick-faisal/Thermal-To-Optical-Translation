@@ -3614,7 +3614,8 @@ Observation B does not survive per-run. The endpoint, C2 and the sd direction al
 ## M3 — Phase 3: Defend
 
 - [ ] Full baseline suite (`RESEARCH_FINDINGS.md` §8)
-- [ ] E8 low-annotation sweep — likely the headline at 850 pairs
+- [x] E8 low-annotation sweep — **run**. Crossover at `N ≈ 150` annotated thermal images;
+      direct thermal wins above it. Arm A is also the first real §8 baseline row. See below.
 - [ ] E9 cross-dataset generalisation
 - [ ] E10 faithfulness stress tests
 - [ ] E4 coupling comparison: cascaded vs bilevel-**reimplemented** (TarDAL's released code
@@ -3765,7 +3766,78 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       `N` images, validates against the **full** untouched val split, and resolves labels on
       the thermal side — the failure this most needed ruling out, since an unlabelled split
       trains and reports a number that means nothing.
-- [ ] **The run**, then the curve and the crossover `N` recorded here.
+- [x] **The run.** All 49 cells in one pass, no failed cell. Raw rows at
+      `runs/e8/e8-tidy.csv` on the server — `runs/` is gitignored, so the tables below are
+      the durable copy.
+
+      **The curve.** mAP50 on the fixed 153-image / 423-instance val split, mean ± sd over
+      seeds {0,1,2}. A and B are paired per seed: same budget, same scenes, same COCO init,
+      same 50 epochs, differing only in the pixels.
+
+      | `N` | **A** direct thermal | **B** translated, fine-tuned | A − B | seeds agreeing |
+      | --- | --- | --- | --- | --- |
+      | 10 | 0.1090 ± 0.0190 | 0.1412 ± 0.0105 | −0.032 | 3/3 for **B** |
+      | 25 | 0.3564 ± 0.0809 | 0.3556 ± 0.0248 | +0.001 | 1/3 — a tie |
+      | 50 | 0.6210 ± 0.0824 | 0.5621 ± 0.0394 | +0.059 | 3/3 for **A** |
+      | 100 | 0.7511 ± 0.0125 | 0.6920 ± 0.0383 | +0.059 | 3/3 for **A** |
+      | 200 | 0.8447 ± 0.0053 | 0.8046 ± 0.0154 | +0.040 | 3/3 for **A** |
+      | 400 | 0.9025 ± 0.0070 | 0.8641 ± 0.0160 | +0.038 | 3/3 for **A** |
+      | 600 | 0.9300 ± 0.0096 | 0.8978 ± 0.0047 | +0.032 | 3/3 for **A** |
+
+      Flat anchors: **A0** (judge on raw thermal, 0 annotations) **0.1552**, a single cell;
+      **C** (judge on the λ=0 export, 0 annotations) **0.8049 ± 0.0438**; **D** (judge on the
+      λ>0 export, `N`=600 spent inside the *translator*) **0.8572 ± 0.0110**.
+
+      **The crossover — the number E8 was run for.** Linear interpolation inside the
+      bracketing budgets: A passes **C at `N ≈ 157`** (bracket 100–200) and **D at `N ≈ 243`**
+      (bracket 200–400). Quote the bracket in the paper, not the interpolated point — the
+      sweep does not measure at either `N`.
+
+      **1. The headline, with its regime attached.** Annotation-free translation is worth
+      **≈150 annotated thermal images**, a quarter of the 600-image train split. Spending the
+      same annotations inside the translator's loop instead (arm D) raises that to ≈240 — so
+      C1's coupling is itself worth another ~85 annotations.
+
+      **2. `PLAN.md` §15's prediction is confirmed: direct thermal wins at full annotation.**
+      A reaches 0.9300 at `N`=600 against C's 0.8049 and D's 0.8572. Criterion 1 is therefore
+      **measured, not met**: the margin over the §8 baseline is +0.650 at `N`=0 and **−0.125**
+      at `N`=600. Any claim must name the regime, and the honest sentence is *"below ~150
+      target-domain annotations, translation beats direct thermal detection"* — not
+      *"translation beats direct thermal detection"*.
+
+      **3. Arm B does not work, and that is the finding that most changes the paper.**
+      Training on translated λ=0 frames is worse than training on thermal at every budget
+      ≥50, 3/3 seeds each, by +0.032 to +0.059 mAP50. Translation's value is **entirely** in
+      annotation-free transfer (arm C); as a preprocessing step in front of a supervised
+      detector it costs accuracy. "Translate, then fine-tune" is off the table. B's win at
+      `N`=10 is not evidence against this — see 4, both arms are broken there.
+
+      **4. `N`=10 is degenerate and must never be read as "what 10 images buy".** Both arms
+      land *below* the zero-annotation raw-thermal floor (0.109 and 0.141 against A0's 0.155),
+      at precision ≈0.01 with recall ≈0.45 — the detector is firing on everything. The
+      fixed-epoch caveat pre-registered above bit exactly where it was predicted to. The
+      A-crosses-A0 point at `N ≈ 13` sits inside this zone and is not quotable.
+
+      **5. The error bars behave, and no p-value is claimed.** A's spread collapses from
+      ±0.082 at `N`=50 to ±0.010 at `N`=600, which is why the crossover bracket is wide while
+      the endpoint is tight. At n=3 the exact sign-flip test floors at p=0.25, so the
+      reportable statistic is **sign consistency** (3/3 at every budget ≥50), exactly as
+      pre-registered — never significance.
+
+      **6. A free validity check, passed.** A0's 0.1552 reproduces the gate re-check's
+      clean-judge thermal floor (line 1636) to four decimals, through a different code path
+      and months later. C's interval straddles that table's λ=0 row (0.7851) and D's 0.8572
+      sits just above its stage-3 row (0.8470). Nothing drifted between campaigns.
+
+      **7. C vs D inside E8 is *not* new evidence for E3.** These are seeds 0–2 of the very
+      exports whose n=6 sign-flip test gave p=0.031, re-scored. The +0.052 gap is a re-read of
+      that result and must not be counted twice — it is also the size of the 0.059
+      same-computation noise gap measured at the gate re-check, which is precisely why the
+      paired test, and not a gap between means, carries that claim.
+- [ ] **Optional, ~1 GPU-hour: tighten the crossover bracket.** Only arm A is needed —
+      `--arms A --budgets 125 150 175` appends to the same CSV and the driver resumes around
+      the cells already there. Worth it only if the paper quotes a number rather than the
+      100–200 bracket.
 
 ## M4 — Phase 4: Harden
 
