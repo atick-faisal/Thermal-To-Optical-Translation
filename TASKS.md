@@ -3616,7 +3616,8 @@ Observation B does not survive per-run. The endpoint, C2 and the sd direction al
 - [ ] Full baseline suite (`RESEARCH_FINDINGS.md` §8)
 - [x] E8 low-annotation sweep — **run**. Crossover at `N ≈ 150` annotated thermal images;
       direct thermal wins above it. Arm A is also the first real §8 baseline row. See below.
-- [ ] E9 cross-dataset generalisation
+- [ ] E9 cross-dataset generalisation — **priced, not started.** FLIR-aligned, gated on a
+      minutes-long kill-test that decides whether the cell is worth running at all. See below.
 - [ ] E10 faithfulness stress tests
 - [ ] E4 coupling comparison: cascaded vs bilevel-**reimplemented** (TarDAL's released code
       severs the generator gradient — see PLAN.md §11)
@@ -3896,6 +3897,139 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       differently in both directions. If it does, the right response may be to **loosen the
       criterion to admit a public dataset** rather than to record a conditional pass here.
       Decide once there is a second dataset to decide with — not before.
+
+### E9 — the public-dataset cell (FLIR-aligned): the three blockers, priced
+
+The three blockers recorded against this cell (dataset audit, M0.9) are now costed. Pricing them
+**changed the shape of the cell**, which is why it happened before the cell was planned:
+
+- **Blocker 1 costs nothing** — the measurement already exists in a sibling repo, and it is far
+  better characterised than our note said.
+- **Blocker 2 is not a blocker.** It is the entry fee for answering blocker 3 — and pricing it
+  surfaced a hard gap nobody had on a list: **FLIR carries no thermal labels at all**, so blocker
+  3's measurement is *impossible today*.
+- **Blocker 3 is a minutes-long kill-test that gates everything else**, so it runs first.
+- And the cell's own cost rests on a throughput figure this repo **never measured** and was once
+  wrong about by 16×.
+
+#### Blocker 1 — cross-modal misalignment. Price: **0 GPU-h, already measured**
+
+`../Thermal-Image-Registration` has gone well past the "4–6 px" line our note carried:
+
+| fact | value | source |
+| --- | --- | --- |
+| FLIR-aligned residual, three matchers | roma **5.90**, eloftr 5.65, splg 5.69 px `epe_mean` | sibling `TASKS.md:232-234` (P1-1a) |
+| the pipeline's own noise floor, under a full 30° warp | **~0.2 px**, `sr_3px` 1.00 in all eight cells | sibling `TASKS.md:316` (P1-1b, sweep B) |
+| structure of FLIR's residual | a **fixed −1.18° camera roll**; p10 10.23 / p50 10.66 / p90 11.56 px, 48 of 50 pairs above 10 px | sibling `TASKS.md:331`, `:355` (P1-1b, sweep A) |
+| checked-in correction | `calibration/flir.json` — a corner field, n = 1,013 val pairs, element-wise median of three matchers, spread 1.23 px, magnitude 9.32 px | sibling repo, `calibration/` |
+| composed, end to end on flir val | `epe_median` **5.48 → 2.25 px**, `sr_3px` **0.00 → 0.30** | sibling `TASKS.md:795-806` |
+| irreducible afterwards | ~4–5 px of per-pair scatter no calibration removes | sibling P1-1c/d |
+
+Three matchers spanning three decades of compute cost agreeing, against a 0.2 px pipeline floor, is
+what makes this a property of **the data** rather than of a matcher.
+
+**Why it bites this project specifically.** pix2pix trains against the paired visible frame with
+`l2: 1.0` + `lpips: 5.0` (`experiments/e3_pix2pix_control.yaml`). A *systematic* roll rotates the
+supervision target relative to the input, and the generator's only way to satisfy that is to blur.
+Our custom pairs are registered, so **this confound exists on the public cell and nowhere else** —
+exactly the thing that would leave a weak FLIR result uninterpretable.
+
+**Decision: pre-register the residual as a stated caveat; de-roll only if the cell survives the
+kill-test and then comes back weak or null.** Nothing is paid to correct a cell that may not run.
+`calibration/flir.json` is the *accepted* constant — the sibling repo keeps `calibration/rejected/`
+for ones that failed, so the distinction is real and worth re-checking before relying on it.
+
+#### Blocker 2 — no detector weights. Price: **~1 unattended GPU-day, plus one ~15-line seam**
+
+1. **`runs/reference-flir-yolo11s`** — the judge, `t2o train-detector --init-weights yolo11s.pt
+   --epochs 100 --seed 1` on FLIR visible (4,129 train / 1,013 val). The custom equivalent (600
+   train images, mAP50 0.9364, step 1 above) **has no recorded wall clock** — the campaign never
+   logged one. Scaling E8's yolo11n cells gives **~6–15 GPU-h, which is an estimate, not a
+   measurement**, and should be timed when it runs.
+2. **`runs/inloop-flir-yolo11n`** — the in-loop detector, same data, `yolo11n.pt`, seed 0. Needed
+   because COCO `yolo11n.pt` in-loop trips `detection/frozen.py:84-95`'s nc-mismatch warning (4
+   FLIR classes against 80 COCO) — not fatal, semantically wrong. Cheaper than the judge.
+3. **FLIR carries no thermal labels — and not in the "empty directory" sense.**
+   `dataset/processed/flir/{train,val}/infrared/labels` **does not exist**.
+   `data/adapters/common.py:129` and `:144` (`write_label` / `write_label_lines`) both hardcode
+   `split_root / "visible" / LABELS_SEGMENT`, and the pairing layer resolves a label from the
+   *visible* path, so one copy of the labels is by design sufficient for everything built so far.
+   It is not sufficient for a raw-thermal evaluation. **Blocker 3's entire measurement cannot be
+   taken today.** Fix: mirror `visible/labels` → `infrared/labels` by stem — precisely what
+   `tests/test_budget.py:23-39`'s `thermal_labelled` fixture already does in-memory. ~15 lines plus
+   a test.
+
+   **This couples back to blocker 1, and the direction of the bias must be stated up front.**
+   Mirrored labels inherit the 5.90 px residual. At mAP50 (IoU 0.5) a ~6 px offset on a typical
+   FLIR car or person box is a small IoU penalty — it pushes the thermal floor **down**, which
+   *flatters* translation. That floor is the number the headline would rest on, so it gets
+   pre-registered rather than discovered by a reviewer.
+
+#### Blocker 3 — does the premise transfer? Price: **minutes, and it gates everything**
+
+Reproduce M1's gate table (above) on FLIR: two `t2o evaluate` calls against the new judge, one on
+visible val (the ceiling), one on the mirrored thermal val (the floor).
+
+Custom headroom was **0.9213 − 0.1887 = +0.733**, and the per-class row says why — Fuse 0.0377,
+Switch 0.0047, i.e. thermally invisible components. FLIR's classes are bicycle / car / dog /
+person; night pedestrians and warm engine blocks are highly legible in thermal. **Expect a much
+higher floor.** That is the whole reason this is a kill-test and not a formality.
+
+**The decision rule, recorded before the number exists:**
+
+| FLIR headroom (ceiling − floor) | reading | action |
+| --- | --- | --- |
+| **≥ 0.40** | the premise transfers | run the cell at 600 matched pairs |
+| **0.15 – 0.40** | transfers weakly | still run it — "a smaller gain where thermal is legible" is honest criterion-2 evidence, and arguably a better paper than a second large win |
+| **< 0.15** | translation has nothing to buy here | **do not spend the ~72 GPU-h.** The floor measurement *is* the finding, and it is direct evidence for the hypothesis behind the deferred §10 criterion-1 decision above |
+
+**Also pre-registered: the class imbalance, and it is a *different* case from the custom set's.**
+Instance counts over every FLIR label file are car 24,732, person 13,094, bicycle 2,926, **dog
+108**. The custom manifest's 5th class was genuinely empty, and lines 1459-1463 record that this
+costs nothing — `metrics/task.py::_extract_per_class_ap` omits zero-instance classes and
+ultralytics averages only over classes present, so no reported mAP was diluted. **Dog is not
+empty**, so none of that protection applies: 108 instances is enough to be averaged in and far too
+few for a stable AP, and it lands at full weight in a 4-class mean. Report **3-class (bicycle /
+car / person) as primary**, with dog stated separately.
+
+#### The pricing finding that reframes the cell
+
+FLIR-aligned is **4,129 train pairs against the custom set's 600 — 6.9×** the translator's epoch
+cost. A full-corpus twelve-run E3 cell prices at **~496 GPU-h ≈ 10 days on two cards**.
+
+**Decision: run the cell on a seeded 600-pair matched subset.** The cell then costs what the custom
+one did, and corpus size is *held fixed* instead of becoming a second variable a reviewer can
+attribute the result to — criterion 2 is about the method being consistent, not about dataset
+scale. This needs a small new seam, `DataConfig.max_train_images` plus its own seed, because
+`annotation_fraction` gates **annotations, not image count**: `config/schema.py:62` and
+`data/dataset.py:196` show `visible_paths` is every image in the directory and
+`annotation_fraction` only decides which of them count as labelled.
+
+**But ~72 GPU-h is not a measurement either.** Line 1564 asserts "~6 h per 4-stage run"; lines
+3112-3115 record that carrying that same unverified figure across to turbo was **wrong by 16× and
+cost three weeks that finished nothing**. Repeating that here is the one avoidable mistake
+available, and the fix is free — derive pix2pix's real per-stage wall clock from checkpoint mtimes
+on the server, the identical method that produced turbo's *measured* ~96 h (lines 3100-3110):
+
+```powershell
+Get-ChildItem runs\e3-pix2pix-* -Recurse -Filter translator_last.pt |
+  Sort-Object FullName | Select-Object FullName, LastWriteTime
+```
+
+#### The sequence, each step gated by the one before it
+
+| # | step | cost | gates |
+| --- | --- | --- | --- |
+| 0 | mtime-derive pix2pix's real per-stage wall clock | free, no GPU | every figure below |
+| 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | ~15 lines | step 3 |
+| 2 | train the FLIR judge (`yolo11s`, 100 ep) and the in-loop `yolo11n` | ~6–15 GPU-h, **unmeasured** | step 3 |
+| 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes | *everything* |
+| 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
+| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | ~72 GPU-h *if step 0 holds* | criterion 2 |
+| — | de-roll the thermal side via `calibration/flir.json` | ~1 day + CPU-minutes | only if step 5 is weak or null |
+
+- [ ] **Step 0** — the free throughput measurement above. Nothing below it is trustworthy until
+      the ~6 h/run figure is a measurement rather than an assertion.
 
 ## M4 — Phase 4: Harden
 
