@@ -12,6 +12,7 @@ from t2o.data.dataset import (
 )
 from t2o.data.labels import load_yolo_labels
 from t2o.data.manifest import DatasetManifest, ManifestError
+from t2o.data.mirror import MirrorError, mirror_labels_onto_infrared
 from t2o.data.pairing import Pairing
 from t2o.data.splits import (
     SplitDriftError,
@@ -26,6 +27,7 @@ __all__ = [
     "BudgetError",
     "DatasetManifest",
     "ManifestError",
+    "MirrorError",
     "Pairing",
     "SplitDriftError",
     "SplitManifest",
@@ -37,6 +39,7 @@ __all__ = [
     "freeze_split",
     "load_split_manifest",
     "load_yolo_labels",
+    "mirror_labels_onto_infrared",
     "verify_split",
     "write_budget_manifest",
     "write_split_manifest",

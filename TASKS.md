@@ -4122,7 +4122,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | # | step | cost | gates |
 | --- | --- | --- | --- |
 | 0 | mtime-derive pix2pix's real per-stage wall clock | free, no GPU — **done, see above** | every figure below |
-| 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | ~15 lines | step 3 |
+| 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | done — 79 lines + 5 tests | step 3 |
 | 2 | train the FLIR judge (`yolo11s`, 100 ep) and the in-loop `yolo11n` | ~6–15 GPU-h, **unmeasured** | step 3 |
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes | *everything* |
 | 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
@@ -4133,6 +4133,31 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       **10.18 h control / 10.75 h loop**, so the twelve-run cell is **~126 GPU-h**, not ~72 —
       the old figure was 1.75× low. Step-cost grows ~20% per stage, so step 4's FLIR probe must
       not assume it is flat.
+
+- [x] **Step 1** — the thermal-label mirror. **Done 2026-09-26.** `t2o.data.mirror` +
+      `scripts/mirror_thermal_labels.py`; 5 tests, suite 458 passed / 4 skipped, pyright clean.
+      It runs on an *already-adapted* tree rather than inside the adapters, because
+      `adapt_datasets.py` short-circuits on a populated destination and re-extracting FLIR's
+      ~1.4 GB archive to add a few thousand text files would be absurd. Two things worth
+      knowing: E8 had already built the guard rail this unblocks
+      (`data/budget.py::_require_labels_beside`, whose message literally says *"Mirror the
+      labels onto this modality first"*), and the mirror **refuses a non-empty
+      `infrared/labels` unless forced** — the custom set carries labels on both sides, and if
+      its thermal ones are drawn on the thermal frame in their own right, a blind copy would
+      replace better boxes with worse on the dataset every headline rests on. The 5.90 px
+      caveat and its direction of bias are written into the module docstring, not just here.
+
+      Server command, once per dataset:
+
+      ```powershell
+      uv run python scripts/mirror_thermal_labels.py --data dataset/processed/flir
+      ```
+
+      Expect `train=4129, val=1013`. The stale absolute `path:` recorded as a hygiene item
+      below does **not** affect this: `manifest.py::_resolve_root` tries each candidate and
+      takes the first that actually contains the declared train split, so a `path:` pointing
+      nowhere falls through to the manifest's own directory. That is *why* the hygiene item is
+      classed non-blocking — worth re-checking rather than assumed, which is what this was.
 
 ## M4 — Phase 4: Harden
 
