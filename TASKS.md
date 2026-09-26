@@ -4011,10 +4011,43 @@ cost three weeks that finished nothing**. Repeating that here is the one avoidab
 available, and the fix is free — derive pix2pix's real per-stage wall clock from checkpoint mtimes
 on the server, the identical method that produced turbo's *measured* ~96 h (lines 3100-3110):
 
+**Two sources, and W&B is the better one.** The campaign ran `--wandb --group e3-pix2pix-g015`
+(line 2364), so W&B's **Runtime** column already holds the exact per-run wall clock for the twelve
+`e3b-*` runs — a measurement to read, not to derive. Use it if the group is still reachable.
+
+The local fallback derives per-stage intervals from checkpoint mtimes. It is written
+self-discovering on purpose: **`e3-pix2pix` is the W&B *group*, not a directory** — the run dirs are
+`runs/e3b-<arm>-s<seed>` (lines 2364, 2381), with `runs/e3-*` from the pre-`g015` launch and
+`runs/e3t-*` from turbo also on disk, so a glob is the wrong tool here.
+
 ```powershell
-Get-ChildItem runs\e3-pix2pix-* -Recurse -Filter translator_last.pt |
-  Sort-Object FullName | Select-Object FullName, LastWriteTime
+$rows = Get-ChildItem runs -Recurse -Filter translator_last.pt | ForEach-Object {
+  [pscustomobject]@{ Run = $_.Directory.Parent.Name; Stage = $_.Directory.Name; Done = $_.LastWriteTime }
+}
+$out = foreach ($g in ($rows | Sort-Object Run, Stage | Group-Object Run)) {
+  $prev = $null
+  foreach ($r in $g.Group) {
+    $h = ''
+    if ($prev) { $h = [math]::Round(($r.Done - $prev).TotalHours, 2) }
+    [pscustomobject]@{ Run = $r.Run; Stage = $r.Stage; Done = $r.Done; Hours = $h }
+    $prev = $r.Done
+  }
+}
+$out | Format-Table -AutoSize
+$h = @($out | Where-Object { $_.Hours -ne '' } | Select-Object -ExpandProperty Hours | Sort-Object)
+"intervals=$($h.Count)  median=$($h[[int]($h.Count/2)]) h  min=$($h[0]) h  max=$($h[-1]) h"
 ```
+
+**How to read it.** `translator_last.pt` is rewritten every epoch (`engine/trainer.py:308`), so its
+mtime is when that stage's *training* ended. Consecutive mtimes therefore bracket [stage *N*'s
+boundary work + stage *N*+1's 100 epochs] — the same unit turbo's table above calls "one stage"
+(24.1 h = ~20 h training + ~4 h boundary), so the two are directly comparable. `stage0` has no
+predecessor and shows blank, giving up to 3 intervals per run against turbo's 13 in total.
+
+**Read the median, not the mean.** Two shells ran concurrently by seed (0–2 on `cuda:0`, 3–5 on
+`cuda:1`), so these intervals include cross-card CPU and dataloader contention — which is the
+realistic figure, since the FLIR cell would run the same way. But an interval that is wildly large
+is idle wall clock or an interruption, not compute, and the mtime method cannot tell the difference.
 
 #### The sequence, each step gated by the one before it
 
