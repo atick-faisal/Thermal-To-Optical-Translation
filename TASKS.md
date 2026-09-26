@@ -3616,9 +3616,10 @@ Observation B does not survive per-run. The endpoint, C2 and the sd direction al
 - [ ] Full baseline suite (`RESEARCH_FINDINGS.md` §8)
 - [x] E8 low-annotation sweep — **run**. Crossover at `N ≈ 150` annotated thermal images;
       direct thermal wins above it. Arm A is also the first real §8 baseline row. See below.
-- [ ] E9 cross-dataset generalisation — **priced; step 0 measured, nothing else started.**
-      FLIR-aligned, gated on a minutes-long kill-test that decides whether the cell is worth
-      running at all. The cell's own cost is now a measurement: **~126 GPU-h**, not ~72. See below.
+- [ ] E9 cross-dataset generalisation — **priced; steps 0, 1 and 3's driver done. The kill-test
+      itself waits on one detector training (step 2).** FLIR-aligned, gated on a minutes-long
+      kill-test that decides whether the cell is worth running at all. The cell's own cost is now a
+      measurement: **~126 GPU-h**, not ~72. See below.
 - [ ] E10 faithfulness stress tests
 - [ ] E4 coupling comparison: cascaded vs bilevel-**reimplemented** (TarDAL's released code
       severs the generator gradient — see PLAN.md §11)
@@ -3995,6 +3996,22 @@ empty**, so none of that protection applies: 108 instances is enough to be avera
 few for a stable AP, and it lands at full weight in a 4-class mean. Report **3-class (bicycle /
 car / person) as primary**, with dog stated separately.
 
+**Counted per split while building step 3's driver, and it is worse than the 108 suggests.** The
+four classes reconcile exactly with the totals above, so this refines them rather than
+contradicting them:
+
+| split | bicycle | car | dog | person |
+| --- | --- | --- | --- | --- |
+| train | 2,566 | 20,608 | **95** | 8,987 |
+| val | 360 | 4,124 | **13** | 4,107 |
+
+**The kill-test is scored on val, where dog has 13 instances** against 4,124 cars — and it still
+carries 25% of a 4-class mean. An AP50 that swings by 0.4 on 13 instances, which is entirely
+ordinary, moves the 4-class mAP50 by 0.1: *the width of the decision band in the rule table above*.
+So the 3-class primary is not tidiness. Reported 4-class, this kill-test could be flipped by a
+single dog detection, which is why `scripts/gate_table.py` computes the primary mean itself instead
+of leaving it as arithmetic on a terminal log.
+
 #### The pricing finding that reframes the cell
 
 FLIR-aligned is **4,129 train pairs against the custom set's 600 — 6.9×** the translator's epoch
@@ -4124,7 +4141,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 0 | mtime-derive pix2pix's real per-stage wall clock | free, no GPU — **done, see above** | every figure below |
 | 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | done — 79 lines + 5 tests | step 3 |
 | 2 | train the FLIR judge (`yolo11s`, 100 ep) and the in-loop `yolo11n` | ~6–15 GPU-h, **unmeasured** | step 3 |
-| 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes | *everything* |
+| 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — **driver built, awaiting the judge** | *everything* |
 | 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
 | 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
 | — | de-roll the thermal side via `calibration/flir.json` | ~1 day + CPU-minutes | only if step 5 is weak or null |
@@ -4153,11 +4170,95 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       uv run python scripts/mirror_thermal_labels.py --data dataset/processed/flir
       ```
 
-      Expect `train=4129, val=1013`. The stale absolute `path:` recorded as a hygiene item
-      below does **not** affect this: `manifest.py::_resolve_root` tries each candidate and
-      takes the first that actually contains the declared train split, so a `path:` pointing
-      nowhere falls through to the manifest's own directory. That is *why* the hygiene item is
-      classed non-blocking — worth re-checking rather than assumed, which is what this was.
+      Expect `train=4129, val=1013` — confirmed, on a real 4,129/1,013 tree. The stale
+      absolute `path:` recorded as a hygiene item does **not** affect *this* script:
+      `manifest.py::_resolve_root` tries each candidate and takes the first that actually
+      contains the declared train split, so a `path:` pointing nowhere falls through to the
+      manifest's own directory.
+
+      **That tolerance does not generalise, and step 3 found out the hard way.** It is
+      `t2o`'s loader that falls through; **ultralytics honours `path:` literally** and raises
+      `FileNotFoundError`. So any command that hands a *source* `data.yaml` straight to
+      ultralytics — `t2o evaluate --data dataset/processed/flir/data.yaml`, and **`t2o
+      train-detector`, i.e. step 2 below** — fails immediately on a tree that has moved since
+      it was adapted, because `write_manifest_yaml` writes `path:` absolute at adapt time. The
+      hygiene item is therefore **non-blocking for the data layer and blocking for ultralytics**,
+      which is a sharper statement than the one first recorded here.
+
+- [ ] **Step 2** — the two detectors. **Server, no repo changes.** The CLI, its defaults and the
+      one known trap are already in place: `train_detector` resolves a relative `project` to an
+      absolute path (`engine/detector_stage.py:138-146`), which is the bug that sent the custom
+      judge into a different repository (lines 1576-1590).
+
+      ```powershell
+      # shell 1 -- the judge. This is what gates step 3.
+      uv run t2o train-detector --data dataset/processed/flir/data.yaml `
+          --init-weights yolo11s.pt --epochs 100 --seed 1 --workers 16 `
+          --out runs/reference-flir-yolo11s --device cuda:0
+
+      # shell 2 -- the in-loop detector. Gates step 5, not step 3; worth running now only
+      # because the second card would otherwise sit idle.
+      uv run t2o train-detector --data dataset/processed/flir/data.yaml `
+          --init-weights yolo11n.pt --epochs 100 --seed 0 --workers 16 `
+          --out runs/inloop-flir-yolo11n --device cuda:1
+      ```
+
+      **Pre-flight, and it is not hypothetical.** Both commands hand the *source* `data.yaml`
+      straight to ultralytics, which honours `path:` literally — see the correction under step 1.
+      If `head -1 dataset/processed/flir/data.yaml` does not name this machine's real dataset
+      root, fix that line first or the run dies at once. This exact failure was hit locally
+      while building step 3's driver.
+
+      - **`--workers 16`, not the CLI's default 0.** Throughput only, and confirmed clean on this
+        server (line 1763). At 4,129 images × 100 epochs, single-process dataloading is most of
+        the 6–15 h estimate. The FLIR judge is not required to be bit-comparable with the custom
+        one — different dataset — so this costs nothing that matters.
+      - **`--batch 16` left at its default deliberately**, matching the recorded custom-judge
+        recipe (lines 1600-1601) rather than changing a second variable at the same time.
+      - **`--seed 1` for the judge, `0` for the in-loop detector** — invariant 7, and the reason
+        `cli.py:187` defaults `--seed 1` rather than inheriting `train.seed`.
+      - **Measure the cost, do not inherit an estimate.** The ~6–15 GPU-h above is still an
+        estimate, and step 0 is the standing warning about what those cost. ultralytics writes
+        `runs/reference-flir-yolo11s/results.csv` with a cumulative **`time`** column in seconds
+        per epoch (`ultralytics/engine/trainer.py:919-927`), so **row 3 already predicts the
+        100-epoch total** — read it after a few minutes rather than discovering a surprise after
+        fifteen hours, and record the last row here when it finishes. This also closes the gap
+        line 4001 complains about: the custom judge has no recorded wall clock because nobody
+        looked at this file.
+
+- [ ] **Step 3** — the kill-test. **Driver built 2026-09-26; the measurement waits on step 2.**
+      `scripts/gate_table.py` + `tests/test_gate_table.py` (12 tests; suite 470 passed / 4
+      skipped, ruff and pyright clean). Two validation passes, no training.
+
+      ```powershell
+      uv run python scripts/gate_table.py --data dataset/processed/flir/data.yaml `
+          --weights runs/reference-flir-yolo11s/weights/best.pt `
+          --primary-classes bicycle car person --out runs/gate/flir --device 0
+      ```
+
+      It prints the gate table as markdown ready to paste in below, writes `runs/gate/flir/gate.csv`,
+      and prints the **pre-registered verdict** — `KILL_THRESHOLD = 0.15` and
+      `STRONG_THRESHOLD = 0.40` are module constants citing the rule table above, so the band is
+      fixed by this file rather than chosen by whoever reads the number.
+
+      **Both arms are built with `write_budget_manifest` at fraction 1.0, differing only in
+      `infrared`** — the same construction `annotation_sweep.py:328-330` uses for arm A0, with the
+      same "fraction 1.0 only to obtain a val path; nothing trains on it" rationale. Three things
+      that buys, and the second was learned by hitting it:
+
+      1. `_require_labels_beside` (`data/budget.py:51`) **refuses a thermal side with no labels**,
+         so step 1 is verified before a GPU starts rather than scored as an unlabelled split.
+      2. What it emits carries resolved `train`/`val` and **no `path:` at all**
+         (`budget.py:128-130`), so neither arm depends on that field being current. Passing the
+         source manifest for the ceiling arm is what failed locally.
+      3. One construction with one flag flipped is what makes ceiling and floor differ in the
+         pixels and in nothing else.
+
+      **Verified end to end on the real FLIR tree**, against a randomly-initialised 4-class
+      `yolo11s` on CPU (the mAP is meaningless by construction; the plumbing is the point). Both
+      arms ran, and the thermal arm read **1,013 images / 8,601 instances** — against the 8,604
+      counted by hand, the difference being three duplicate label lines ultralytics drops and
+      logs. That reconciliation is the real evidence the mirror landed.
 
 ## M4 — Phase 4: Harden
 
