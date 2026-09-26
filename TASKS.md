@@ -3616,8 +3616,9 @@ Observation B does not survive per-run. The endpoint, C2 and the sd direction al
 - [ ] Full baseline suite (`RESEARCH_FINDINGS.md` §8)
 - [x] E8 low-annotation sweep — **run**. Crossover at `N ≈ 150` annotated thermal images;
       direct thermal wins above it. Arm A is also the first real §8 baseline row. See below.
-- [ ] E9 cross-dataset generalisation — **priced, not started.** FLIR-aligned, gated on a
-      minutes-long kill-test that decides whether the cell is worth running at all. See below.
+- [ ] E9 cross-dataset generalisation — **priced; step 0 measured, nothing else started.**
+      FLIR-aligned, gated on a minutes-long kill-test that decides whether the cell is worth
+      running at all. The cell's own cost is now a measurement: **~126 GPU-h**, not ~72. See below.
 - [ ] E10 faithfulness stress tests
 - [ ] E4 coupling comparison: cascaded vs bilevel-**reimplemented** (TarDAL's released code
       severs the generator gradient — see PLAN.md §11)
@@ -3636,7 +3637,9 @@ headline, not the fallback"* while §15 predicts *direct thermal detection wins 
 annotation*. Until it runs, the paper does not know which claim it is defending.
 
 **The budget lesson from M2a step 5 applies to the choice of instrument.** pix2pix is ~6 h per
-4-stage run against turbo's ~96 h (line 1502 vs line 3105) — 16×. **pix2pix is the exploration
+4-stage run against turbo's ~96 h (line 1502 vs line 3105) — 16×. *[Corrected by E9 step 0: a
+pix2pix run is 10.5 h measured, so the real ratio is 9×. The decision it justifies is unchanged.]*
+**pix2pix is the exploration
 instrument; turbo is the confirmation instrument**, and turbo stays frozen until a cheap
 instrument reports back. E8 is cheaper still: it is almost entirely *detector* fine-tunes over
 exports that already exist, with no translator training at all.
@@ -3981,7 +3984,7 @@ higher floor.** That is the whole reason this is a kill-test and not a formality
 | --- | --- | --- |
 | **≥ 0.40** | the premise transfers | run the cell at 600 matched pairs |
 | **0.15 – 0.40** | transfers weakly | still run it — "a smaller gain where thermal is legible" is honest criterion-2 evidence, and arguably a better paper than a second large win |
-| **< 0.15** | translation has nothing to buy here | **do not spend the ~72 GPU-h.** The floor measurement *is* the finding, and it is direct evidence for the hypothesis behind the deferred §10 criterion-1 decision above |
+| **< 0.15** | translation has nothing to buy here | **do not spend the ~126 GPU-h** (step 0's measured figure, up from the ~72 first estimated)**.** The floor measurement *is* the finding, and it is direct evidence for the hypothesis behind the deferred §10 criterion-1 decision above |
 
 **Also pre-registered: the class imbalance, and it is a *different* case from the custom set's.**
 Instance counts over every FLIR label file are car 24,732, person 13,094, bicycle 2,926, **dog
@@ -4005,7 +4008,9 @@ scale. This needs a small new seam, `DataConfig.max_train_images` plus its own s
 `data/dataset.py:196` show `visible_paths` is every image in the directory and
 `annotation_fraction` only decides which of them count as labelled.
 
-**But ~72 GPU-h is not a measurement either.** Line 1564 asserts "~6 h per 4-stage run"; lines
+**And ~72 GPU-h was not a measurement either — it is now, and it was 1.75× low.** The derivation
+and its result are below; read them before costing anything in the table that follows. Line 1564
+asserts "~6 h per 4-stage run"; lines
 3112-3115 record that carrying that same unverified figure across to turbo was **wrong by 16× and
 cost three weeks that finished nothing**. Repeating that here is the one avoidable mistake
 available, and the fix is free — derive pix2pix's real per-stage wall clock from checkpoint mtimes
@@ -4049,20 +4054,85 @@ predecessor and shows blank, giving up to 3 intervals per run against turbo's 13
 realistic figure, since the FLIR cell would run the same way. But an interval that is wildly large
 is idle wall clock or an interruption, not compute, and the mtime method cannot tell the difference.
 
+#### Step 0's result — measured, 2026-09-26
+
+Ran locally (W&B was not needed). **24 completed pix2pix runs on disk — `e3-*` (the pre-`g015`
+launch) and `e3b-*` (the campaign) — 72 stage intervals.** The two launches agree to within noise,
+so they are pooled.
+
+**A stage is not a constant, and that is the first finding.** Cost grows monotonically with stage
+index, by about +20% a stage:
+
+| interval | n | median | min | max |
+| --- | --- | --- | --- | --- |
+| `stage0` → `stage1` | 24 | **2.40 h** | 2.19 | 2.58 |
+| `stage1` → `stage2` | 24 | **2.83 h** | 2.66 | 3.06 |
+| `stage2` → `stage3` | 24 | **3.37 h** | 3.16 | 3.62 |
+| all intervals pooled | 72 | 2.83 h | 2.19 | 3.62 |
+
+The spread within a boundary is ±8%, which is what a clean unattended campaign looks like — so
+these are compute, not idle wall clock. Why it grows is not established here; the natural
+explanation is that the adapted detector's fine-tune set grows with each stage's export, and it is
+worth *not* assuming a flat per-stage cost when probing FLIR in step 4.
+
+**`stage0`'s own cost, which the mtime method cannot read directly.** `stage0` has no predecessor
+checkpoint, so it shows blank. It is recoverable anyway: the twelve `e3b-*` runs went six-deep on
+each card, so the gap from one run's `stage3` to the next run's `stage0` on the same card is
+[previous run's final eval + this run's `stage0`] — the identical composition to every other
+interval. **n=10, median 1.79 h, range 1.66–1.85 h** — tighter than any other boundary.
+
+| unit | measured |
+| --- | --- |
+| one complete 4-stage **control** run | **10.18 h** |
+| one complete 4-stage **loop** run | **10.75 h** |
+| the coupling's own cost | **+0.57 h/run, +6.8%** |
+| the twelve-run cell | **~126 GPU-h ≈ 63 h wall clock on two cards ≈ 2.6 days** |
+
+**The derivation validates against itself.** Predicting per-card wall clock from the parts gives
+62.8 h; the observed `e3b-*` campaign span from estimated launch to last checkpoint is 63.0 h. A
+0.2 h agreement over 63 h means nothing material is missing from the accounting.
+
+**So "~6 h per 4-stage run" (line 1564) was low by 1.7×, and "~72 GPU-h" by 1.75×.** Nothing
+already spent changes — the campaigns ran and finished. What changes is every *forward* estimate
+that was a multiple of that figure, starting with this cell.
+
+**The instrument ratio was also wrong, in the other direction.** Re-deriving turbo from the same
+disk, discarding the six intervals of 130–502 h that are plainly interruption and not compute,
+gives a median of **23.46 h** per stage against the 24.1 h recorded at line 3105 — the method
+reproduces a number it was not fitted to, which is the real check on it. But the *ratio*
+pix2pix:turbo is **9.0× per complete run** (10.5 h against ~94 h), not the 16× asserted at lines
+3639 and 3114, because that 16× divided turbo's measured run by pix2pix's *estimated* one. The
+standing decision does not move — turbo stays frozen, pix2pix stays the exploration instrument —
+but the honest figure is 9×.
+
+**Rows to ignore in that output**, recorded so the next reader does not chase them: `Run = runs`
+(the `dataloader-check*` and `vram-probe` directories sit directly under `runs/`, so the walk reads
+`runs` as their parent — this is also where the nonsensical −0.42 h and 268 h intervals come from);
+`e3-probe-g015`, `turbo-probe-g015`, `turbo-probe-g075`, `vram-probe` and `pix2pix-loop-test`, all
+reduced-epoch probes; and `e3t-*`, whose 130–502 h intervals are the first turbo attempt's idle
+gaps.
+
+**What this changes for the FLIR cell.** The 600-matched decision holds and gets *more* attractive:
+at full corpus the cell is 6.9× of 126 GPU-h ≈ **870 GPU-h ≈ 18 days on two cards**, not the ~496 h
+/ 10 days estimated from the bad base. The matched cell is ~126 GPU-h ≈ 2.6 days — still cheap
+enough that the kill-test remains the only real gate, which is the point of sequencing it first.
+
 #### The sequence, each step gated by the one before it
 
 | # | step | cost | gates |
 | --- | --- | --- | --- |
-| 0 | mtime-derive pix2pix's real per-stage wall clock | free, no GPU | every figure below |
+| 0 | mtime-derive pix2pix's real per-stage wall clock | free, no GPU — **done, see above** | every figure below |
 | 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | ~15 lines | step 3 |
 | 2 | train the FLIR judge (`yolo11s`, 100 ep) and the in-loop `yolo11n` | ~6–15 GPU-h, **unmeasured** | step 3 |
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes | *everything* |
 | 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
-| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | ~72 GPU-h *if step 0 holds* | criterion 2 |
+| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
 | — | de-roll the thermal side via `calibration/flir.json` | ~1 day + CPU-minutes | only if step 5 is weak or null |
 
-- [ ] **Step 0** — the free throughput measurement above. Nothing below it is trustworthy until
-      the ~6 h/run figure is a measurement rather than an assertion.
+- [x] **Step 0** — the free throughput measurement. **Done 2026-09-26.** A 4-stage pix2pix run is
+      **10.18 h control / 10.75 h loop**, so the twelve-run cell is **~126 GPU-h**, not ~72 —
+      the old figure was 1.75× low. Step-cost grows ~20% per stage, so step 4's FLIR probe must
+      not assume it is flat.
 
 ## M4 — Phase 4: Harden
 
