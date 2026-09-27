@@ -4145,8 +4145,8 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | --- | --- | --- | --- |
 | 0 | mtime-derive pix2pix's real per-stage wall clock | free, no GPU — **done, see above** | every figure below |
 | 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | done — 79 lines + 5 tests | step 3 |
-| 2 | train the FLIR judge (`yolo11s`, 100 ep); the in-loop `yolo11n` deferred to step 5 | **≈1.25 h projected** from the crashed run's `results.csv`, not the ~6–15 GPU-h first written here; **relaunching after a host-RAM failure** | step 3 |
-| 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — **driver built, awaiting the judge** | *everything* |
+| 2 | train the FLIR judge (`yolo11s`, 100 ep); the in-loop `yolo11n` deferred to step 5 | **1.43 h measured** — done 2026-09-27; `best.pt` is **epoch 46**, not 100 | step 3 |
+| 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
 | 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
 | 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
 | — | de-roll the thermal side via `calibration/flir.json` | ~1 day + CPU-minutes | only if step 5 is weak or null |
@@ -4190,9 +4190,10 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       hygiene item is therefore **non-blocking for the data layer and blocking for ultralytics**,
       which is a sharper statement than the one first recorded here.
 
-- [ ] **Step 2** — the judge. **Server, one run at a time.** `train_detector` already resolves a
-      relative `project` to an absolute path (`engine/detector_stage.py:138-146`), the bug that sent
-      the custom judge into a different repository (lines 1576-1590).
+- [x] **Step 2** — the judge. **Done 2026-09-27 in 1.43 h. Server, one run at a time.**
+      `train_detector` already resolves a relative `project` to an absolute path
+      (`engine/detector_stage.py:138-146`), the bug that sent the custom judge into a different
+      repository (lines 1576-1590).
 
       ```powershell
       uv run t2o train-detector --data dataset/processed/flir/data.yaml `
@@ -4275,15 +4276,43 @@ enough that the kill-test remains the only real gate, which is the point of sequ
         seconds per epoch (`ultralytics/engine/trainer.py:919-927`), so **row 3 already predicts the
         100-epoch total**. The crashed run's first four rows gave 66.0 / 62.7 / 45.1 / 44.0 s per
         epoch (the first two carry startup and the label-cache build), projecting **≈1.25 h**, i.e.
-        the estimate was 5–12× high — pessimistic this time, so it cost nothing. Record the real
-        last row here when the relaunched run finishes; that also closes the gap line 4001 complains
-        about, the custom judge having no recorded wall clock because nobody read this file.
-      - **Measure the host-RAM peak too, since it is free and step 5 needs it.** The peak lands at
-        the end of epoch 1, when the validation pool spawns —
-        `Get-Process python | Measure-Object WorkingSet64 -Sum`. One number, and it decides whether
-        step 5's twelve runs can go two at a time.
+        the estimate was 5–12× high — pessimistic this time, so it cost nothing. **Measured:
+        `time` = 5137.57 s at epoch 100 = 1.43 h**, so the projection was 14% low and the original
+        ~6–15 GPU-h was 4–10× high. That also closes the gap line 4001 complains about, the custom
+        judge having no recorded wall clock because nobody read this file.
+      - **The host-RAM peak was not taken, and it is now unrecoverable for this run.** The probe
+        (`Get-Process python | Measure-Object WorkingSet64 -Sum`, at the end of epoch 1 when the
+        validation pool spawns) needs the processes to be alive, and the run had exited before
+        anyone looked. So step 5's concurrency decision still rests on the **≳1.3 GiB per-process
+        lower bound derived from the crash**, not on a measurement. Recorded as an open measurement
+        rather than extrapolated: take it during the in-loop `yolo11n` run or step 4's 1-epoch
+        probe, whichever comes first. Not worth a GPU-hour on its own.
 
-- [ ] **Step 3** — the kill-test. **Driver built 2026-09-26; the measurement waits on step 2.**
+      **The run that counts, 2026-09-27 — and `best.pt` is epoch 46, not epoch 100.**
+
+      | row | epoch | `time` | mAP50 | mAP50-95 | precision | recall |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | best (`best.pt`) | **46** | 2403.77 s = 0.67 h | **0.5525** | **0.2765** | 0.7791 | 0.5108 |
+      | last | 100 | 5137.57 s = 1.43 h | 0.5079 | 0.2486 | 0.6321 | 0.5066 |
+
+      **The last 54 epochs made the model worse** — −8.1% mAP50 and −10.1% mAP50-95 against epoch
+      46, for 0.76 h of GPU time. Nothing downstream is harmed, because `train_detector` reports and
+      every later step loads `weights/best.pt`. But it means **the first-glance "mAP50 0.508" is the
+      final epoch, not the judge**; the judge is **0.5525**, and the gate table below confirms it by
+      reproducing 0.5523 on the same split.
+
+      **What does *not* follow: that `--epochs 50` would have done the same job.** ultralytics
+      decays the LR across the *total* epoch count, and `lr/pg0` at epoch 46 was 6.93e-4 —
+      mid-decay, not converged. A 50-epoch run is a different schedule that finishes fully decayed,
+      not a prefix of this one, so it could land either side of 0.5525. Worth one 0.7 h test for the
+      in-loop `yolo11n` that step 5 needs; not worth assuming.
+
+      **No append corruption.** `time` is monotone across all 100 rows at a steady 52.3 s/epoch to
+      row 46 and 50.6 s/epoch after, which is one continuous run — the `exist_ok` / mode-`"a"` trap
+      above did not fire, so the wall clock above is real.
+
+- [x] **Step 3** — the kill-test. **Done 2026-09-27: headroom +0.2123, WEAK PASS.** Driver built
+      2026-09-26.
       `scripts/gate_table.py` + `tests/test_gate_table.py` (12 tests; suite 470 passed / 4
       skipped, ruff and pyright clean). Two validation passes, no training.
 
@@ -4316,6 +4345,62 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       arms ran, and the thermal arm read **1,013 images / 8,601 instances** — against the 8,604
       counted by hand, the difference being three duplicate label lines ultralytics drops and
       logs. That reconciliation is the real evidence the mirror landed.
+
+#### GATE DECISION — FLIR-aligned, 2026-09-27: **WEAK PASS**, headroom **+0.2123**
+
+`runs/gate/flir/gate.csv`, one visible-trained judge (`reference-flir-yolo11s/weights/best.pt`,
+epoch 46), two validation passes over the same 1,013 scenes.
+
+| arm | mAP50 | mAP50 (3-class) | mAP50-95 | bicycle | car | dog | person |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ceiling (visible) | 0.5523 | **0.6566** | 0.2767 | 0.4922 | 0.8176 | 0.2396 | 0.6599 |
+| floor (thermal) | 0.3397 | **0.4442** | 0.1492 | 0.3627 | 0.6033 | 0.0260 | 0.3667 |
+| **headroom** | +0.2126 | **+0.2123** | +0.1275 | +0.1295 | +0.2143 | +0.2135 | +0.2932 |
+
+**Verdict, read off the pre-registered band and not chosen after the fact:** 0.15 ≤ 0.2123 < 0.40 →
+*"WEAK PASS — transfers weakly. Still run the cell: a smaller gain where thermal is legible is
+honest cross-dataset evidence."* Note the size of the margin: **+0.062 over the 0.15 kill line**.
+This is a pass, but not a comfortable one, and the next two points are why that matters.
+
+**The prediction written before the number existed was correct.** Blocker 3 said *"night pedestrians
+and warm engine blocks are highly legible in thermal — expect a much higher floor"*. The custom
+set's floor was 0.1887; FLIR's is **0.4442, 2.4× higher**, and it is that raised floor and not a
+lowered ceiling that does the compressing. The kill-test earned its name: it moved the headroom from
++0.733 to +0.212 on the same construction.
+
+**The 3-class guard was right to build and did not bind.** Dog's own headroom (+0.2135) happens to
+land within 0.0012 of the 3-class figure, so 4-class and 3-class agree to 0.0003 and the verdict is
+the same either way. Recorded plainly rather than claimed as a save: ex ante a 0.4 AP50 swing on 13
+instances could have moved a 4-class mean by 0.1 — the width of the decision band — so the guard was
+correct insurance that happened not to be needed. Dog's two numbers (0.2396 ceiling, 0.0260 floor)
+are noise on 13 instances in both arms and should not be read as a signal in either.
+
+**`person` has the *largest* headroom (+0.2932) — the class thermal is supposedly best at.** Not a
+contradiction, and worth stating in the paper. The floor measures **a visible-trained judge's domain
+gap, not thermal information content**: a human reads a thermal pedestrian instantly, an RGB-trained
+YOLO does not. That gap is exactly what translation claims to close, so this is the supportive
+direction rather than the awkward one.
+
+**`bicycle` is the weak class (+0.1295, below the kill line on its own)** — and its *ceiling* is the
+low one (0.4922), so the compression comes from above, not from an unusually good thermal floor.
+Unheated metal frames are thermally dim and small in frame. If the cell's gain concentrates in `car`
+and `person` and leaves `bicycle` flat, this row predicted it.
+
+**The misalignment confound is now load-bearing, not cosmetic.** Blocker 1 pre-registered the
+direction: mirrored labels inherit the 5.90 px residual, at IoU 0.5 that penalises small boxes, and
+it pushes the **floor down**, which *flatters* translation. With only +0.062 of margin the question
+is no longer academic — a large enough share of this headroom being label error would move the
+verdict toward KILL.
+
+- **Cheap counter-evidence already in hand.** The ratio mAP50-95 / mAP50 is **0.501 for the
+  ceiling against 0.439 for the floor — a 12.3% relative drop.** A ~6 px label offset attacks
+  high-IoU AP far harder than AP50, so if it dominated the floor this ratio would fall much further
+  than 12%. That is *mild* evidence misalignment is not the main driver. Suggestive, not conclusive:
+  the two arms also differ in the pixels, which is the point of the experiment.
+- **The clean test is the de-roll, then re-gate**: `calibration/flir.json`, ~1 day plus CPU-minutes,
+  against the cell's ~126 GPU-h. Cheaper than the thing it protects, and it runs on CPU. Deciding
+  it *before* the cell inverts the standing plan (de-roll only if the cell comes back weak or null),
+  which was written when the headroom was expected to be large. Left as a decision, not taken here.
 
 **Carried forward to step 5 — a host-RAM ceiling, found for the price of one hour.** The twelve-run
 cell was going to run two arms concurrently, one per card, and E3's configs carry
