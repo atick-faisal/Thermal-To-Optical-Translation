@@ -4222,11 +4222,26 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       | 3 | each pool is capped at `os.cpu_count() // device_count()`, and `device_count()` is **2 regardless of `--device cuda:0`** — a halving that assumes one process per card and does nothing to stop two processes taking it twice | `data/build.py:363` |
       | 4 | every worker is a full Windows `spawn` import of torch, and each *train* worker also holds a mosaic buffer of `min(ni, batch*8, 1000)` = **128 decoded images** (~1 MB each at 640×512); `pin_memory` is on and the val batch is doubled to 32 | `data/base.py:131`; `engine/trainer.py:293` |
 
-      So `--workers 16` is up to **48 spawned processes per run, 96 across two** — tens of GB of
-      host RAM before an image is read. That is also why `cuda:0` hung rather than failed: a main
-      process waiting on starved or dead workers waits forever. Pinned in place as a comment beside
-      the `workers` parameter in `engine/detector_stage.py`, so the next reader does not have to
-      rediscover it.
+      **The server's numbers, measured 2026-09-27: 64 logical CPUs and 128 GiB of RAM**
+      (`[Environment]::ProcessorCount` = 64; `TotalVisibleMemorySize` = 134,216,648 KB). So the
+      per-pool cap is 64 / 2 = **32**, and the arithmetic is exact rather than indicative:
+
+      | `--workers` | train pool | val pool (`workers * 2`, capped at 32) | processes |
+      | --- | --- | --- | --- |
+      | 8 — the relaunch | 8 | 16 | **24** |
+      | 16 — what crashed | 16 | 32 | **48 per run, 96 across two** |
+
+      Two things follow, and the second is the one that generalises. **96 loader workers on 64
+      logical CPUs is also 1.5× CPU oversubscription**, so `cuda:0`'s hang had two causes and not
+      just one — a main process waiting on starved or dead workers waits forever. And **the failure
+      itself bounds the per-process cost from below**: 96 workers plus two main processes exhausted
+      128 GiB, so each averaged **≳1.3 GiB**. At that rate a single `--workers 16` run (48
+      processes, ≈64 GiB) would probably have squeezed through and two never could — which is why
+      *one run at a time* is the load-bearing half of this fix, and the lower worker count is only
+      the margin.
+
+      The arithmetic is pinned as a comment beside the `workers` parameter in
+      `engine/detector_stage.py`, so the next reader does not have to rediscover it.
 
       **Line 1763's "16 workers runs clean" did not transfer, and carrying it here was the
       mistake.** It was confirmed for *one* process on t2o's own single-pool loader at
@@ -4311,7 +4326,9 @@ completed server runs did survive at `workers: 16`, and their profile differs (t
 loader at `batch_size: 2` for most of the run), so whether two concurrent E3 runs clear the ceiling
 is **unknown**. It is also free to settle — step 2's `Measure-Object WorkingSet64` probe answers it
 with no extra GPU time. Take that number before committing ~126 GPU-h to a pair of runs that could
-die on day two.
+die on day two. The budget it has to fit inside is now known: **128 GiB across both cards**, minus
+whatever the two translators hold, and step 2's own failure says a detector worker costs ≳1.3 GiB of
+it.
 
 ## M4 — Phase 4: Harden
 
