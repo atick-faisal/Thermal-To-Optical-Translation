@@ -145,6 +145,14 @@ def train_detector(
     # the loop's stage directories mean what they say.
     project = Path(project).resolve()
 
+    # `workers` is not the number of processes this creates. ultralytics builds a *second*
+    # persistent pool for validation at `workers * 2` (`models/yolo/detect/train.py:100`), and both
+    # pools are `InfiniteDataLoader`s that spawn in `__init__` (`data/build.py:75`) and never shut
+    # down, so both stay resident for the whole run: `workers=N` means up to `3N` Windows `spawn`
+    # processes, each a full torch import, each train worker also holding a ~128-image mosaic
+    # buffer (`data/base.py:131`). ultralytics' cap, `os.cpu_count() // device_count()`, is sized
+    # for one process per card, so two concurrent runs take it twice over -- which is how E9 step 2
+    # exhausted host RAM and died on a 2.83 MiB numpy allocation (TASKS.md M3 E9 step 2).
     model = YOLO(str(init_weights))
     if tracker is not None:
         model.add_callback("on_fit_epoch_end", _forward_epoch_metrics(tracker, metric_prefix))

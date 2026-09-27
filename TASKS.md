@@ -1761,7 +1761,11 @@ raising it via `--workers` changed `config_hash()` at the same time — so a pai
 launched with a different worker count would not have been paired at all.
 
 **User confirmed up to 16 workers runs clean on the server**, which is what made this worth
-fixing rather than documenting.
+fixing rather than documenting. **Scope of that confirmation, narrowed 2026-09-27:** it holds for
+*one* process on t2o's own single-pool `DataLoader` at `batch_size: 2`. It does **not** transfer to
+an ultralytics detector run — which builds a second, permanently resident validation pool at
+`workers * 2` — and certainly not to two of those at once. M3 E9 step 2 exhausted host RAM that
+way; the mechanism is recorded there and pinned as a comment in `engine/detector_stage.py`.
 
 - [x] `data/dataset.py` — augmentation draws from a per-sample generator seeded by
       `(augment_seed, epoch, index)`, never the ambient RNG. Keying on the *sample index*
@@ -3617,7 +3621,8 @@ Observation B does not survive per-run. The endpoint, C2 and the sd direction al
 - [x] E8 low-annotation sweep — **run**. Crossover at `N ≈ 150` annotated thermal images;
       direct thermal wins above it. Arm A is also the first real §8 baseline row. See below.
 - [ ] E9 cross-dataset generalisation — **priced; steps 0, 1 and 3's driver done. The kill-test
-      itself waits on one detector training (step 2).** FLIR-aligned, gated on a minutes-long
+      waits on one detector training (step 2), which crashed on host RAM and is being relaunched
+      one card at a time.** FLIR-aligned, gated on a minutes-long
       kill-test that decides whether the cell is worth running at all. The cell's own cost is now a
       measurement: **~126 GPU-h**, not ~72. See below.
 - [ ] E10 faithfulness stress tests
@@ -4140,7 +4145,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | --- | --- | --- | --- |
 | 0 | mtime-derive pix2pix's real per-stage wall clock | free, no GPU — **done, see above** | every figure below |
 | 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | done — 79 lines + 5 tests | step 3 |
-| 2 | train the FLIR judge (`yolo11s`, 100 ep) and the in-loop `yolo11n` | ~6–15 GPU-h, **unmeasured** | step 3 |
+| 2 | train the FLIR judge (`yolo11s`, 100 ep); the in-loop `yolo11n` deferred to step 5 | **≈1.25 h projected** from the crashed run's `results.csv`, not the ~6–15 GPU-h first written here; **relaunching after a host-RAM failure** | step 3 |
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — **driver built, awaiting the judge** | *everything* |
 | 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
 | 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
@@ -4185,46 +4190,83 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       hygiene item is therefore **non-blocking for the data layer and blocking for ultralytics**,
       which is a sharper statement than the one first recorded here.
 
-- [ ] **Step 2** — the two detectors. **Server, no repo changes.** The CLI, its defaults and the
-      one known trap are already in place: `train_detector` resolves a relative `project` to an
-      absolute path (`engine/detector_stage.py:138-146`), which is the bug that sent the custom
-      judge into a different repository (lines 1576-1590).
+- [ ] **Step 2** — the judge. **Server, one run at a time.** `train_detector` already resolves a
+      relative `project` to an absolute path (`engine/detector_stage.py:138-146`), the bug that sent
+      the custom judge into a different repository (lines 1576-1590).
 
       ```powershell
-      # shell 1 -- the judge. This is what gates step 3.
       uv run t2o train-detector --data dataset/processed/flir/data.yaml `
-          --init-weights yolo11s.pt --epochs 100 --seed 1 --workers 16 `
+          --init-weights yolo11s.pt --epochs 100 --seed 1 --workers 8 `
           --out runs/reference-flir-yolo11s --device cuda:0
-
-      # shell 2 -- the in-loop detector. Gates step 5, not step 3; worth running now only
-      # because the second card would otherwise sit idle.
-      uv run t2o train-detector --data dataset/processed/flir/data.yaml `
-          --init-weights yolo11n.pt --epochs 100 --seed 0 --workers 16 `
-          --out runs/inloop-flir-yolo11n --device cuda:1
       ```
 
-      **Pre-flight, and it is not hypothetical.** Both commands hand the *source* `data.yaml`
-      straight to ultralytics, which honours `path:` literally — see the correction under step 1.
-      If `head -1 dataset/processed/flir/data.yaml` does not name this machine's real dataset
-      root, fix that line first or the run dies at once. This exact failure was hit locally
-      while building step 3's driver.
+      **The first attempt (2026-09-27) died, and its reason is worth more than the run was.** Both
+      detectors were launched together on both cards at `--workers 16`. The `cuda:1` run raised
+      `numpy._core._exceptions._ArrayMemoryError: Unable to allocate 2.83 MiB for an array with
+      shape (296307, 10) and data type bool` inside the validator's `get_stats` at epoch 3, and the
+      `cuda:0` judge hung with no error at all.
 
-      - **`--workers 16`, not the CLI's default 0.** Throughput only, and confirmed clean on this
-        server (line 1763). At 4,129 images × 100 epochs, single-process dataloading is most of
-        the 6–15 h estimate. The FLIR judge is not required to be bit-comparable with the custom
-        one — different dataset — so this costs nothing that matters.
-      - **`--batch 16` left at its default deliberately**, matching the recorded custom-judge
-        recipe (lines 1600-1601) rather than changing a second variable at the same time.
-      - **`--seed 1` for the judge, `0` for the in-loop detector** — invariant 7, and the reason
-        `cli.py:187` defaults `--seed 1` rather than inheriting `train.seed`.
-      - **Measure the cost, do not inherit an estimate.** The ~6–15 GPU-h above is still an
-        estimate, and step 0 is the standing warning about what those cost. ultralytics writes
-        `runs/reference-flir-yolo11s/results.csv` with a cumulative **`time`** column in seconds
-        per epoch (`ultralytics/engine/trainer.py:919-927`), so **row 3 already predicts the
-        100-epoch total** — read it after a few minutes rather than discovering a surprise after
-        fifteen hours, and record the last row here when it finishes. This also closes the gap
-        line 4001 complains about: the custom judge has no recorded wall clock because nobody
-        looked at this file.
+      **2.83 MiB is the whole diagnosis.** A process that cannot allocate 2.83 MiB is out of *host*
+      memory (or past Windows' commit limit), not GPU memory — `GPU_mem` was 2.56G of 40, and a CUDA
+      OOM raises `torch.OutOfMemoryError`, not a numpy error. The array is ordinary too: 296,307
+      predictions × 10 IoU thresholds, ≈292 per val image against `max_det=300`, which is exactly
+      what an epoch-3 detector produces. Nothing about the data or the GPU was wrong.
+
+      **What actually exhausted RAM** — four ultralytics facts (8.4.117) that compound, and not one
+      of them is visible from the command line:
+
+      | # | fact | source |
+      | --- | --- | --- |
+      | 1 | the **validation** loader is built at `workers * 2` | `models/yolo/detect/train.py:100` |
+      | 2 | both loaders are `InfiniteDataLoader`s that spawn workers in `__init__` and, via `_RepeatSampler`, never shut them down — so **both pools are resident for the whole run**, the train pool included during every validation pass | `data/build.py:75`; `engine/trainer.py:281,291` |
+      | 3 | each pool is capped at `os.cpu_count() // device_count()`, and `device_count()` is **2 regardless of `--device cuda:0`** — a halving that assumes one process per card and does nothing to stop two processes taking it twice | `data/build.py:363` |
+      | 4 | every worker is a full Windows `spawn` import of torch, and each *train* worker also holds a mosaic buffer of `min(ni, batch*8, 1000)` = **128 decoded images** (~1 MB each at 640×512); `pin_memory` is on and the val batch is doubled to 32 | `data/base.py:131`; `engine/trainer.py:293` |
+
+      So `--workers 16` is up to **48 spawned processes per run, 96 across two** — tens of GB of
+      host RAM before an image is read. That is also why `cuda:0` hung rather than failed: a main
+      process waiting on starved or dead workers waits forever. Pinned in place as a comment beside
+      the `workers` parameter in `engine/detector_stage.py`, so the next reader does not have to
+      rediscover it.
+
+      **Line 1763's "16 workers runs clean" did not transfer, and carrying it here was the
+      mistake.** It was confirmed for *one* process on t2o's own single-pool loader at
+      `batch_size: 2`. An ultralytics detector run is a different shape entirely, and two of them
+      are a different shape again.
+
+      - **One run at a time, and the `yolo11n` in-loop detector is deferred.** It gates step 5, step
+        5 is gated on step 3's verdict, so under a sub-0.15 headroom it is never needed at all.
+        Running it now to keep card 1 busy traded a free idle GPU against the run that actually
+        gates the decision — the wrong trade, made here first time round.
+      - **`--workers 8`** → 8 train + 16 val, up to 24 processes in one process tree instead of 96
+        across two. `--workers 4` (4 + 8 = 12) is the fallback and costs little: at ~44 s/epoch the
+        GPU wants ~6.3 it/s of 640×512 crops, and mosaic mostly hits the in-worker buffer, not disk.
+      - **Before relaunching, delete the crashed run directories.** `train_detector` passes
+        `exist_ok=True` (`detector_stage.py:162`) and `save_metrics` opens `results.csv` with mode
+        `"a"`, writing a header only when the file is absent (`engine/trainer.py:919-927`).
+        Relaunching into the same `--out` therefore appends — epochs 1,2,3,1,2,3,… with a `time`
+        column that restarts — corrupting the one measurement this step exists to take.
+      - **`--batch 16` left at its default deliberately**, matching the recorded custom-judge recipe
+        (lines 1600-1601) rather than changing a second variable at the same time.
+      - **`--seed 1` for the judge** — invariant 7, and the reason `cli.py:187` defaults `--seed 1`
+        rather than inheriting `train.seed`.
+      - **Pre-flight, and it is not hypothetical.** The command hands the *source* `data.yaml`
+        straight to ultralytics, which honours `path:` literally — see the correction under step 1.
+        If `head -1 dataset/processed/flir/data.yaml` does not name this machine's real dataset
+        root, fix that line first or the run dies at once. Hit locally while building step 3's
+        driver.
+      - **Measure the cost, do not inherit an estimate.** The ~6–15 GPU-h first written here is
+        still an estimate, and step 0 is the standing warning about what those cost. ultralytics
+        writes `runs/reference-flir-yolo11s/results.csv` with a cumulative **`time`** column in
+        seconds per epoch (`ultralytics/engine/trainer.py:919-927`), so **row 3 already predicts the
+        100-epoch total**. The crashed run's first four rows gave 66.0 / 62.7 / 45.1 / 44.0 s per
+        epoch (the first two carry startup and the label-cache build), projecting **≈1.25 h**, i.e.
+        the estimate was 5–12× high — pessimistic this time, so it cost nothing. Record the real
+        last row here when the relaunched run finishes; that also closes the gap line 4001 complains
+        about, the custom judge having no recorded wall clock because nobody read this file.
+      - **Measure the host-RAM peak too, since it is free and step 5 needs it.** The peak lands at
+        the end of epoch 1, when the validation pool spawns —
+        `Get-Process python | Measure-Object WorkingSet64 -Sum`. One number, and it decides whether
+        step 5's twelve runs can go two at a time.
 
 - [ ] **Step 3** — the kill-test. **Driver built 2026-09-26; the measurement waits on step 2.**
       `scripts/gate_table.py` + `tests/test_gate_table.py` (12 tests; suite 470 passed / 4
@@ -4236,9 +4278,9 @@ enough that the kill-test remains the only real gate, which is the point of sequ
           --primary-classes bicycle car person --out runs/gate/flir --device 0
       ```
 
-      It prints the gate table as markdown ready to paste in below, writes `runs/gate/flir/gate.csv`,
-      and prints the **pre-registered verdict** — `KILL_THRESHOLD = 0.15` and
-      `STRONG_THRESHOLD = 0.40` are module constants citing the rule table above, so the band is
+      It prints the gate table as markdown ready to paste in below, writes
+      `runs/gate/flir/gate.csv`, and prints the **pre-registered verdict** — `KILL_THRESHOLD = 0.15`
+      and `STRONG_THRESHOLD = 0.40` are module constants citing the rule table above, so the band is
       fixed by this file rather than chosen by whoever reads the number.
 
       **Both arms are built with `write_budget_manifest` at fraction 1.0, differing only in
@@ -4259,6 +4301,17 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       arms ran, and the thermal arm read **1,013 images / 8,601 instances** — against the 8,604
       counted by hand, the difference being three duplicate label lines ultralytics drops and
       logs. That reconciliation is the real evidence the mirror landed.
+
+**Carried forward to step 5 — a host-RAM ceiling, found for the price of one hour.** The twelve-run
+cell was going to run two arms concurrently, one per card, and E3's configs carry
+`runtime.workers: 16` (line 1794), which `engine/loop.py:245` hands straight to `train_detector`.
+Every pix2pix run therefore builds step 2's two resident worker pools during each of its detector
+stages — the exact combination that just failed. Stated honestly rather than extrapolated: M1's two
+completed server runs did survive at `workers: 16`, and their profile differs (t2o's single-pool
+loader at `batch_size: 2` for most of the run), so whether two concurrent E3 runs clear the ceiling
+is **unknown**. It is also free to settle — step 2's `Measure-Object WorkingSet64` probe answers it
+with no extra GPU time. Take that number before committing ~126 GPU-h to a pair of runs that could
+die on day two.
 
 ## M4 — Phase 4: Harden
 
