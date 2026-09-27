@@ -39,7 +39,7 @@ import numpy as np
 from PIL import Image
 
 from t2o.data.calibration import FloatArray, ResidualCalibration
-from t2o.data.labels import load_yolo_labels
+from t2o.data.labels import invalidate_label_cache, load_yolo_labels
 from t2o.data.manifest import DatasetManifest
 from t2o.data.pairing import LABEL_SUFFIX, LABELS_SEGMENT
 
@@ -56,6 +56,20 @@ BoxTransform = Literal["corners", "centre"]
 
 class MirrorError(Exception):
     """Raised when labels cannot be mirrored onto a dataset's infrared side."""
+
+
+def read_label_provenance(labels_dir: Path) -> dict[str, object] | None:
+    """The ``LABELS_PROVENANCE.json`` beside ``labels_dir``, or ``None`` if there is none.
+
+    ``None`` means a plain mirror: the two states are the same filenames in the same directory, so
+    the marker's presence is the only thing that distinguishes them. Read by
+    ``scripts/gate_table.py`` to check that a tree is actually in the state its ``--calibration``
+    claims, rather than recording a flag as if it were a fact.
+    """
+    provenance = labels_dir.parent / PROVENANCE_FILENAME
+    if not provenance.is_file():
+        return None
+    return json.loads(provenance.read_text())
 
 
 def _split_image_shape(images_dir: Path) -> tuple[int, int]:
@@ -190,6 +204,11 @@ def mirror_labels_onto_infrared(
 
         destination.mkdir(parents=True, exist_ok=True)
         provenance = destination.parent / PROVENANCE_FILENAME
+        # Before the write, not after: a crash halfway through must not leave a cache claiming to
+        # describe the directory. Mandatory on both branches -- see `labels.invalidate_label_cache`
+        # for why ultralytics cannot notice that these files changed.
+        if (stale := invalidate_label_cache(destination)) is not None:
+            logger.info("%s: removed ultralytics' stale label cache %s", split, stale)
         if calibration is None or matrix is None:
             for label in labels:
                 shutil.copyfile(label, destination / label.name)

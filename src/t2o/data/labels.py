@@ -1,4 +1,4 @@
-"""YOLO ``.txt`` label parsing."""
+"""YOLO ``.txt`` label parsing, and the cache ultralytics keeps beside it."""
 
 from __future__ import annotations
 
@@ -42,3 +42,26 @@ def load_yolo_labels(path: Path) -> tuple[Tensor, Tensor]:
 
     table = torch.tensor(rows, dtype=torch.float32)
     return table[:, 0:1], table[:, 1:5]
+
+
+def invalidate_label_cache(labels_dir: Path) -> Path | None:
+    """Delete the ultralytics label cache beside ``labels_dir``. Returns it, or ``None``.
+
+    **Anything that rewrites label files in place must call this.** ultralytics caches a split's
+    parsed labels in ``<labels_dir>.cache`` and decides whether that cache is current with
+    ``ultralytics/data/utils.py::get_hash``, which hashes the *sum of the files' sizes* and the
+    path strings -- never their contents. ``YOLODataset.get_labels`` then reuses the pickle
+    whenever that hash matches.
+
+    A rewritten YOLO label file collides with that hash by construction. ``:.6f`` on a normalised
+    coordinate is always exactly 8 characters and the class index does not change, so a file whose
+    every box moved has byte-for-byte the same length as the one it replaced: across FLIR's
+    ``val/infrared`` split all 1,013 files changed content and **none** changed size. E9's first
+    de-rolled gate therefore scored the uncorrected boxes out of a day-old cache and returned
+    numbers identical to the previous run in all 17 significant figures (TASKS.md M3 E9 step 3b).
+    """
+    cache = labels_dir.with_suffix(".cache")
+    if not cache.is_file():
+        return None
+    cache.unlink()
+    return cache

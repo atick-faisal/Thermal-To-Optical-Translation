@@ -49,6 +49,8 @@ from pathlib import Path
 from t2o.data.budget import write_budget_manifest
 from t2o.data.calibration import load_calibration
 from t2o.data.manifest import DatasetManifest
+from t2o.data.mirror import read_label_provenance
+from t2o.data.pairing import LABELS_SEGMENT
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +130,38 @@ def _score(
         weights=str(args.weights),
         data=str(data_yaml),
         calibration_digest=calibration_digest,
+    )
+
+
+def _verified_digest(manifest: DatasetManifest, calibration: Path | None) -> str:
+    """The digest to stamp on both rows, checked against the tree the floor will be scored on.
+
+    E9's first de-rolled gate stamped a digest on a row whose boxes were *not* de-rolled: the
+    column recorded that a flag had been passed, not that the tree was in that state, so it
+    asserted a fact nothing had checked (TASKS.md M3 E9 step 3b). The check is symmetric -- a
+    de-rolled tree scored without ``--calibration`` is refused too -- because a column that is only
+    right when someone remembers the flag is not traceability.
+
+    Val only: val is the split both arms are scored on, and a de-rolled train split cannot reach
+    the number.
+    """
+    labels_dir = manifest.pairing.infrared_path(manifest.val_images).parent / LABELS_SEGMENT
+    recorded = read_label_provenance(labels_dir)
+    on_disk = str(recorded.get("calibration_digest", "")) if recorded else ""
+    expected = load_calibration(calibration).digest() if calibration else ""
+    if on_disk == expected:
+        return expected
+    if expected:
+        raise SystemExit(
+            f"{labels_dir} was not de-rolled by {calibration} (digest {expected}): it records "
+            f"{on_disk or 'a plain mirror'}. Run scripts/mirror_thermal_labels.py --data "
+            f"{manifest.root} --calibration {calibration} --force first -- scoring this tree "
+            "would report an uncorrected floor under a de-rolled label."
+        )
+    raise SystemExit(
+        f"{labels_dir} is de-rolled (digest {on_disk}) but no --calibration was given, so the "
+        "table would claim a plain-mirror floor. Pass --calibration, or restore the plain copies "
+        f"with scripts/mirror_thermal_labels.py --data {manifest.root} --force."
     )
 
 
@@ -220,8 +254,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--calibration",
         type=Path,
         help="the residual-misalignment constant the thermal labels were de-rolled by "
-        "(scripts/mirror_thermal_labels.py --calibration). Recorded, not applied: this stamps "
-        "both rows with its digest so a floor is traceable to the boxes it was measured against",
+        "(scripts/mirror_thermal_labels.py --calibration). Not applied here: its digest is "
+        "checked against the val thermal side's LABELS_PROVENANCE.json and then stamped on both "
+        "rows, so a floor is traceable to the boxes it was actually measured against",
     )
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=16)
@@ -249,7 +284,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     visible = write_budget_manifest(manifest, manifests / "visible", 1.0)
     thermal = write_budget_manifest(manifest, manifests / "thermal", 1.0, infrared=True)
 
-    digest = load_calibration(args.calibration).digest() if args.calibration else ""
+    digest = _verified_digest(manifest, args.calibration)
     rows = [
         _score(args, visible, "ceiling", "visible", primary, digest),
         _score(args, thermal, "floor", "thermal", primary, digest),

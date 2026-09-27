@@ -15,17 +15,20 @@ hand, so these also cover the E9 step 1 -> step 3 chain in one go.
 from __future__ import annotations
 
 import csv
+import json
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
 from scripts.gate_table import KILL_THRESHOLD, STRONG_THRESHOLD, _verdict, main
 
+from t2o.data.calibration import load_calibration
 from t2o.data.manifest import DatasetManifest
 from t2o.data.mirror import mirror_labels_onto_infrared
 from t2o.metrics.task import TaskMetrics
+from test_calibration import make_calibration
 
 CLASSES = ("Fuse", "Pole", "Switch", "Transformer")
 JUDGE = "best.pt"
@@ -54,6 +57,32 @@ def unmirrored(dataset_root: Path, tmp_path: Path) -> Path:
     copied = root / "data.yaml"
     copied.write_text(copied.read_text().replace(f"path: {dataset_root}", f"path: {root}"))
     return copied
+
+
+ROLL = ((0.0, 6.0), (-12.0, 1.0), (0.0, -6.0), (13.0, 0.0))
+
+
+def _copy(dataset_root: Path, tmp_path: Path, name: str) -> Path:
+    root = tmp_path / name
+    shutil.copytree(dataset_root, root)
+    copied = root / "data.yaml"
+    copied.write_text(copied.read_text().replace(f"path: {dataset_root}", f"path: {root}"))
+    return copied
+
+
+@pytest.fixture
+def derolled(dataset_root: Path, tmp_path: Path) -> tuple[Path, Path]:
+    """A tree whose thermal labels are de-rolled, and the constant file that did it.
+
+    `validate_for` compares the constant's dataset against the tree's own directory name, so the
+    two have to be built together.
+    """
+    copied = _copy(dataset_root, tmp_path, "derolled")
+    calibration = make_calibration(dataset=copied.parent.name, corner_shift=ROLL)
+    mirror_labels_onto_infrared(DatasetManifest.load(copied), calibration=calibration)
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(asdict(calibration)))
+    return copied, path
 
 
 @pytest.fixture
@@ -101,10 +130,14 @@ def stubbed_gpu(monkeypatch: pytest.MonkeyPatch) -> StubbedGpu:
     return stub
 
 
-def _argv(data: Path, judge: Path, out: Path, *primary: str) -> list[str]:
+def _argv(
+    data: Path, judge: Path, out: Path, *primary: str, calibration: Path | None = None
+) -> list[str]:
     argv = ["--data", str(data), "--weights", str(judge), "--out", str(out), "--device", "cpu"]
     if primary:
         argv += ["--primary-classes", *primary]
+    if calibration is not None:
+        argv += ["--calibration", str(calibration)]
     return argv
 
 
@@ -208,6 +241,47 @@ def test_refuses_a_tree_whose_thermal_side_has_no_labels(
     with pytest.raises(BudgetError, match="has no labels beside it"):
         main(_argv(unmirrored, judge, tmp_path / "gate"))
     assert stubbed_gpu.calls == []
+
+
+def test_refuses_a_calibration_the_tree_was_not_derolled_by(
+    mirrored: Path, judge: Path, tmp_path: Path, stubbed_gpu: StubbedGpu
+) -> None:
+    """The digest column must be a checked fact, not a record that a flag was passed.
+
+    E9's first de-rolled gate stamped a digest on a floor scored from a stale ultralytics label
+    cache, i.e. on uncorrected boxes -- and a floor that moved for the wrong reason is exactly
+    the failure the column exists to make visible.
+    """
+    calibration = tmp_path / "other.json"
+    calibration.write_text(json.dumps(asdict(make_calibration(dataset=mirrored.parent.name))))
+
+    with pytest.raises(SystemExit, match="was not de-rolled by"):
+        main(_argv(mirrored, judge, tmp_path / "gate", calibration=calibration))
+    assert stubbed_gpu.calls == []
+
+
+def test_refuses_a_derolled_tree_with_no_calibration(
+    derolled: tuple[Path, Path], judge: Path, tmp_path: Path, stubbed_gpu: StubbedGpu
+) -> None:
+    """The check is symmetric: otherwise the column is only right when someone remembers the flag,
+    and a de-rolled floor would be written as a plain-mirror one."""
+    data, _ = derolled
+
+    with pytest.raises(SystemExit, match="no --calibration was given"):
+        main(_argv(data, judge, tmp_path / "gate"))
+    assert stubbed_gpu.calls == []
+
+
+def test_stamps_the_verified_digest_on_both_rows(
+    derolled: tuple[Path, Path], judge: Path, tmp_path: Path, stubbed_gpu: StubbedGpu
+) -> None:
+    data, calibration = derolled
+    out = tmp_path / "gate"
+
+    assert main(_argv(data, judge, out, calibration=calibration)) == 0
+
+    expected = load_calibration(calibration).digest()
+    assert [row["calibration_digest"] for row in _rows(out)] == [expected, expected]
 
 
 @pytest.mark.parametrize(

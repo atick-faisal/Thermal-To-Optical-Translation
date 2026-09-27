@@ -13,7 +13,12 @@ from conftest import N_TRAIN, N_VAL
 from t2o.data.budget import BudgetError, write_budget_manifest
 from t2o.data.calibration import CalibrationError
 from t2o.data.manifest import DatasetManifest
-from t2o.data.mirror import PROVENANCE_FILENAME, MirrorError, mirror_labels_onto_infrared
+from t2o.data.mirror import (
+    PROVENANCE_FILENAME,
+    MirrorError,
+    mirror_labels_onto_infrared,
+    read_label_provenance,
+)
 from test_calibration import make_calibration
 
 
@@ -102,6 +107,13 @@ ONE_BOX = "1 0.500000 0.500000 0.125000 0.125000\n"  # 80x60 px centred in a 640
 # FLIR's own corner field in miniature -- a roll, so corner-mapping re-bounds and centre-mapping
 # does not. A uniform field would make the two modes identical and test nothing.
 ROLL = ((0.0, 6.0), (-12.0, 1.0), (0.0, -6.0), (13.0, 0.0))
+# Three boxes in the exact form `adapters/common.py::voc_to_yolo_lines` writes -- which is what a
+# real adapted tree holds, and what the byte-size collision below depends on.
+CANONICAL_BOXES = (
+    "1 0.500000 0.500000 0.125000 0.125000\n"
+    "0 0.250000 0.750000 0.062500 0.125000\n"
+    "2 0.750000 0.250000 0.100000 0.200000\n"
+)
 
 
 def _constant(manifest: DatasetManifest, corner_shift: tuple[tuple[float, float], ...]):
@@ -221,3 +233,65 @@ def test_a_constant_for_another_resolution_is_refused(mirrorable: DatasetManifes
 
     with pytest.raises(CalibrationError, match="does not rescale"):
         mirror_labels_onto_infrared(mirrorable, calibration=wrong_shape)
+
+
+def test_a_derolled_label_file_has_the_same_byte_size_as_the_copy(
+    mirrorable: DatasetManifest,
+) -> None:
+    """Why `invalidate_label_cache` is mandatory rather than tidy.
+
+    ultralytics validates its `labels.cache` with `data/utils.py::get_hash`, which hashes the sum
+    of the files' *sizes* and their paths, never their contents. On a real adapted tree every
+    label is written by `adapters/common.py::voc_to_yolo_lines` in the same `:.6f` form this
+    module re-emits -- and `:.6f` on a normalised coordinate is always exactly 8 characters, with
+    the class index unchanged -- so a file whose every box moved is byte-for-byte as long as the
+    copy it replaced. Across FLIR's 1,013 val labels, all 1,013 changed content and none changed
+    size, so E9's first de-rolled gate scored a day-old cache and reproduced the previous run's
+    numbers to 17 significant figures.
+    """
+    source = sorted(_labels_dir(mirrorable, "train", "visible").glob("*.txt"))[0]
+    source.write_text(CANONICAL_BOXES)
+
+    mirror_labels_onto_infrared(mirrorable, calibration=_constant(mirrorable, ROLL))
+
+    derolled = _mirrored(mirrorable, source)
+    assert derolled.read_text() != CANONICAL_BOXES
+    assert derolled.stat().st_size == source.stat().st_size
+
+
+@pytest.mark.parametrize("derolled", [True, False])
+def test_the_stale_ultralytics_label_cache_is_removed(
+    mirrorable: DatasetManifest, derolled: bool
+) -> None:
+    """Both write paths falsify the cache, so both must delete it.
+
+    Its location is ultralytics' own: `YOLODataset.get_labels` takes the labels directory and
+    swaps its suffix, so it lands beside `labels/` rather than inside it.
+    """
+    labels = _labels_dir(mirrorable, "val", "infrared")
+    cache = labels.with_suffix(".cache")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_bytes(b"stale pickle")
+    calibration = _constant(mirrorable, ROLL) if derolled else None
+
+    mirror_labels_onto_infrared(mirrorable, calibration=calibration)
+
+    assert not cache.exists()
+
+
+def test_the_provenance_marker_is_readable_and_absent_on_a_plain_mirror(
+    mirrorable: DatasetManifest,
+) -> None:
+    """`gate_table.py` reads this to check a tree is in the state its `--calibration` claims."""
+    labels = _labels_dir(mirrorable, "val", "infrared")
+    calibration = _shift(mirrorable, 4.0, 3.0)
+
+    mirror_labels_onto_infrared(mirrorable, calibration=calibration)
+    recorded = read_label_provenance(labels)
+
+    assert recorded is not None
+    assert recorded["calibration_digest"] == calibration.digest()
+
+    mirror_labels_onto_infrared(mirrorable, force=True)
+
+    assert read_label_provenance(labels) is None

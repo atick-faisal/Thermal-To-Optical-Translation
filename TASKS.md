@@ -4405,7 +4405,56 @@ verdict toward KILL.
 #### Step 3b — de-roll the thermal labels, then re-gate. **Built 2026-09-27, re-gate pending**
 
 - [x] **Step 3b (a)** — the de-roll. **Done 2026-09-27**, CPU only, 1.8 s for 5,142 label files.
-- [ ] **Step 3b (b)** — re-run the gate against the de-rolled floor. Server, minutes.
+- [ ] **Step 3b (b)** — re-run the gate against the de-rolled floor. Server, minutes. **The
+  first attempt on 2026-09-27 was invalid** — it scored a stale ultralytics label cache; see
+  below.
+
+##### The first re-gate was invalid — ultralytics scored a stale label cache
+
+The de-rolled `gate.csv` came back **bit-identical** to the uncorrected one: floor 0.3397, 3-class
+floor 0.4442, every per-class AP50 matching to the last digit. That is the diagnosis rather than a
+coincidence — 8,604 boxes moving by a median 5.2 px cannot leave 17 significant figures untouched.
+**The gate never read the de-rolled labels.**
+
+ultralytics caches a split's parsed labels in `labels.cache` beside `labels/` and decides whether
+that cache is current with `ultralytics/data/utils.py::get_hash`, which hashes the **sum of the
+files' sizes** and the path strings — never their contents. `YOLODataset.get_labels` then reuses the
+pickle whenever that hash matches.
+
+**The de-roll collides with that hash by construction.** `deroll_label_lines` re-emits every line in
+the same `:.6f` form `adapters/common.py::voc_to_yolo_lines` writes, and `:.6f` on a normalised
+coordinate is always exactly 8 characters, with the class index unchanged. So a label file whose
+every box moved is byte-for-byte as long as the one it replaced:
+
+| | files | content changed | byte size changed |
+| --- | --- | --- | --- |
+| `flir/val/infrared/labels` against the plain copy | 1,013 | **1,013** | **0** |
+
+326,952 bytes of val labels before, 326,952 after. The cache was written 2026-09-26 23:04 — the
+*first* gate run — and the labels 2026-09-27 17:10. A day stale, hash still matching.
+
+Two details confirm the mechanism rather than merely fit it. **Train's total moved by exactly 38
+bytes** (1,225,728 → 1,225,690), the length of the one dropped `FLIR_04106` line, so *train's* cache
+would have rebuilt — only val collided perfectly, and val is the one split the gate scores. And
+**the ceiling reproducing at 0.5523 / 0.6566 was never evidence of anything**, because that arm read
+its own equally-stale `val/visible/labels.cache`.
+
+**The pre-registration below is untouched, because no de-rolled number was ever produced.** The band
+stays `KILL_THRESHOLD = 0.15` and `STRONG_THRESHOLD = 0.40`, and the refutation line stays a 3-class
+floor above 0.5066. Nothing about the de-roll itself was wrong either: all 1,013 val files hold
+moved boxes and both markers are correct.
+
+**The fix.** `t2o.data.labels.invalidate_label_cache` deletes `<labels_dir>.cache`, and
+`mirror_labels_onto_infrared` calls it on both write paths *before* writing, so a crash halfway
+through cannot leave a cache claiming to describe the directory either. A test pins the byte-size
+collision itself, so removing that call can never look harmless.
+
+**And `gate.csv`'s digest column became a verified fact.** It had stamped `210142740cdba163` on a
+row whose boxes were not de-rolled: it recorded that a flag had been passed, not that the tree was
+in that state. `gate_table.py::_verified_digest` now reads the val thermal side's
+`LABELS_PROVENANCE.json` and refuses to start on a mismatch, in both directions — a `--calibration`
+the tree does not carry, and a de-rolled tree scored without one. Same shape as the α-sign trap, a
+number that looks exactly like a correction, so it gets a check rather than a comment.
 
 **The order is deliberately reversed, and this is the reversal.** The standing decision was *de-roll
 only if the cell comes back weak or null* (blocker 1, and the sequence table's last row until now).
@@ -4510,6 +4559,7 @@ Labels first, then the gate; the de-roll is CPU-only and takes seconds.
 ```powershell
 uv run python scripts/mirror_thermal_labels.py --data dataset/processed/flir `
     --calibration calibration/flir.json --force
+Remove-Item dataset/processed/flir/*/visible/labels.cache -ErrorAction SilentlyContinue
 uv run python scripts/gate_table.py --data dataset/processed/flir/data.yaml `
     --weights runs/reference-flir-yolo11s/weights/best.pt `
     --primary-classes bicycle car person --calibration calibration/flir.json `
@@ -4524,8 +4574,15 @@ label states are the same filenames in the same directory. Which state the tree 
 because ultralytics globs that directory. Restoring the uncorrected labels is the same command
 without `--calibration`, which removes the marker too, so it can never outlive what it describes.
 
-**The local Mac tree is de-rolled as of 2026-09-27; the server's is not yet.** The marker is how to
-tell them apart.
+The mirror deletes the *thermal* side's stale cache itself. The middle line clears the **visible**
+one, which the mirror never touches and which is legitimately current — its labels have not moved.
+Removing it anyway is what turns "the ceiling reproduced at 0.5523 / 0.6566" into a real end-to-end
+check of the pipeline rather than a check that a pickle can be unpickled twice.
+
+**Both trees are de-rolled as of 2026-09-27**, but the server's was written by the pre-fix mirror,
+so its `val/infrared/labels.cache` is still the stale one and the mirror must be re-run there before
+the gate. `{train,val}/infrared/LABELS_PROVENANCE.json` is what records which label state a tree
+holds; the gate now refuses to start unless it matches `--calibration`.
 
 ##### Also worth knowing
 
