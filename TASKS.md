@@ -4149,7 +4149,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
 | 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
 | 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
-| — | de-roll the thermal side via `calibration/flir.json` | ~1 day + CPU-minutes | only if step 5 is weak or null |
+| 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — built 2026-09-27, re-gate pending | step 4 |
 
 - [x] **Step 0** — the free throughput measurement. **Done 2026-09-26.** A 4-stage pix2pix run is
       **10.18 h control / 10.75 h loop**, so the twelve-run cell is **~126 GPU-h**, not ~72 —
@@ -4397,10 +4397,148 @@ verdict toward KILL.
   high-IoU AP far harder than AP50, so if it dominated the floor this ratio would fall much further
   than 12%. That is *mild* evidence misalignment is not the main driver. Suggestive, not conclusive:
   the two arms also differ in the pixels, which is the point of the experiment.
-- **The clean test is the de-roll, then re-gate**: `calibration/flir.json`, ~1 day plus CPU-minutes,
-  against the cell's ~126 GPU-h. Cheaper than the thing it protects, and it runs on CPU. Deciding
-  it *before* the cell inverts the standing plan (de-roll only if the cell comes back weak or null),
-  which was written when the headroom was expected to be large. Left as a decision, not taken here.
+- **The clean test is the de-roll, then re-gate**: `calibration/flir.json`, CPU-minutes against
+  the cell's ~126 GPU-h. Cheaper than the thing it protects, and it runs on CPU. **Decided: do it
+  first**, which inverts the standing plan (de-roll only if the cell comes back weak or null) —
+  written when the headroom was expected to be large. Step 3b below.
+
+#### Step 3b — de-roll the thermal labels, then re-gate. **Built 2026-09-27, re-gate pending**
+
+- [x] **Step 3b (a)** — the de-roll. **Done 2026-09-27**, CPU only, 1.8 s for 5,142 label files.
+- [ ] **Step 3b (b)** — re-run the gate against the de-rolled floor. Server, minutes.
+
+**The order is deliberately reversed, and this is the reversal.** The standing decision was *de-roll
+only if the cell comes back weak or null* (blocker 1, and the sequence table's last row until now).
+That was written when the headroom was expected to be ~+0.7. At **+0.062 of margin** the cheap
+measurement has to come first: CPU-minutes against the ~126 GPU-h it gates.
+
+**The constant is now tracked here.** `calibration/flir.json`, a byte-for-byte transcription of the
+sibling repo's *accepted* constant at `git_sha 739796f` — `digest 210142740cdba163`, n = 1,013 FLIR
+val pairs, element-wise median of roma / superpoint-lightglue / eloftr, `spread_px 1.23`,
+`magnitude_px 9.3158`, measured at 640×512. Transcribed rather than read across the filesystem
+because **the sibling repo is not on the training server**. `tests/test_calibration.py` asserts the
+digest against a hardcoded literal, so a typo in one corner cannot pass as a calibration.
+
+**Every FLIR frame is exactly 640×512** — all 4,129 + 1,013 pairs, both modalities, counted. The
+constant therefore applies with no rescaling, and `ResidualCalibration.validate_for`'s shape guard
+is a real check rather than a formality: a 640×512 corner field applied at 1280×1024 is silently
+*half* the offset it claims to be.
+
+##### The direction was measured, and it is the inverse of what the source's wording says
+
+The sibling documents `corner_shift` as carrying a *reference* corner to where the *moving* modality
+lands (`cmreg/gt/calibration.py:67-69`), with `moving` defaulting to thermal
+(`cmreg/config/schema.py:330`). That reads as visible → thermal = `H`. It is not. Warping FLIR val's
+visible frame by `H(α)` — the published corner field scaled by α — and scoring it against the raw
+thermal frame over 60 pairs, under two criteria that share nothing with the matcher EPE the constant
+was estimated from:
+
+| α | mutual information | gradient NCC |
+| --- | --- | --- |
+| −1.50 | 0.6680 | 0.2911 |
+| **−1.00** | **0.6833** | **0.3346** |
+| −0.50 | 0.6644 | 0.2992 |
+| 0.00 (raw pair) | 0.6335 | 0.2558 |
+| +1.00 | 0.6070 | 0.2196 |
+
+Both criteria peak at **α = −1.0**, smoothly and unimodally; α = −1 improved mutual information on
+**59 of 60** pairs where α = +1 improved it on 8. So the visible → thermal point map is
+**`inv(H)`**, and applying `H` would have *doubled* the misalignment while looking exactly like a
+correction — a failure that produces a plausible number in either direction. Hence
+`visible_to_infrared()`, named for the direction it travels rather than for the reference/moving
+convention that made it ambiguous, and a test that pins the sign by asserting FLIR's bottom-left
+corner moves **left** by 13.76 px.
+
+**Two independent confirmations of the constant fell out of this.** Its displacement over a 17×17
+grid is median **5.21 px** / mean 5.52 / max 13.49, against roma's `epe_mean` of **5.90 px** from a
+completely different instrument. And α = −1.0 being the optimum to within the sweep's resolution
+says the published magnitude needs no refitting for our tree. The field is strongly x-dependent
+(left edge +13.5 px, right edge −12.0 px, centre ~0.8 px), which is exactly the
+roll/anisotropic-scale ambiguity the sibling cites as the reason a corner field is published and
+*not* "−1.18° of roll".
+
+##### How far it actually moves the boxes — measured on the written labels
+
+IoU between each plain-mirrored box and its de-rolled replacement, over the tree on disk:
+
+| split | metric | bicycle | car | dog | person | 3-class |
+| --- | --- | --- | --- | --- | --- | --- |
+| val | median IoU | 0.832 | 0.851 | 0.850 | **0.773** | **0.822** |
+| val | share below IoU 0.5 | 6.4% | 1.0% | 0.0% | **9.7%** | **5.4%** |
+| train | median IoU | 0.760 | 0.824 | 0.713 | 0.716 | 0.796 |
+| train | share below IoU 0.5 | 11.8% | 3.0% | 14.7% | 17.8% | 7.9% |
+
+`person` is hit hardest — and `person` carries the largest headroom (+0.2932). That is the specific
+risk this step exists to price.
+
+**Box counts reconcile exactly**: val 8,604 → 8,604, **zero dropped**, so the gate's floor loses
+nothing. Train dropped **one** box of 32,256 (0.003%) and the WARNING it is logged at is the guard
+working: `FLIR_04106.txt`'s last `person` is 6 px wide at x ∈ [0, 6], flush against the left edge,
+and the de-roll carries it to x ∈ [−13.8, −7.8]. Clamping leaves zero area, so it is dropped rather
+than written as a degenerate target — the rule `adapters/common.py::voc_to_yolo_lines` already
+follows. That pedestrian is genuinely outside the thermal camera's field of view; the offset *is*
+the reason.
+
+##### Pre-registered, before the re-gate runs
+
+1. **The band does not move.** `gate_table.py`'s `KILL_THRESHOLD = 0.15` and
+   `STRONG_THRESHOLD = 0.40` are not touched, re-read or reinterpreted.
+2. **The de-rolled headroom governs.** It is the less-flattering of the two measurements, so it
+   replaces +0.2123 as the number the cell decision is read off. Stated now, not after seeing it.
+3. **Expected direction:** better-placed boxes → the floor **rises** → the headroom **falls**,
+   concentrated in `person`.
+4. **Expected size: small.** AP50 needs only IoU ≥ 0.5, and a perfectly-placed thermal prediction
+   already scored a median **0.822** against the uncorrected label. So the de-roll can only convert
+   the **5.4%** of val boxes below that threshold plus those near the margin — a single-digit-point
+   floor rise, concentrated in `person`. The WEAK PASS most likely survives.
+5. **The refutation condition, named in advance:** if the 3-class floor rises above
+   **0.5066**, i.e. 0.6566 − 0.15 — a rise of **+0.0624** — the verdict flips to **KILL** and the
+   cell does not run. The ceiling cannot move, so this is a one-sided test.
+6. **The ceiling must reproduce at 0.5523 / 0.6566.** It reads visible images and visible labels,
+   which this step does not touch. A ceiling that moves means the pipeline changed rather than the
+   data, and invalidates the comparison rather than adding to it.
+
+**This does *not* fix the cell's own confound.** pix2pix trains against the paired visible frame
+with `l2: 1.0` + `lpips: 5.0`, and a systematic roll between input and target is satisfied by
+blurring. That needs the thermal *images* warped, not the labels, and it is a separate and much
+larger job. What step 3b buys is an honest floor, not an aligned training set.
+
+##### Commands
+
+Labels first, then the gate; the de-roll is CPU-only and takes seconds.
+
+```powershell
+uv run python scripts/mirror_thermal_labels.py --data dataset/processed/flir `
+    --calibration calibration/flir.json --force
+uv run python scripts/gate_table.py --data dataset/processed/flir/data.yaml `
+    --weights runs/reference-flir-yolo11s/weights/best.pt `
+    --primary-classes bicycle car person --calibration calibration/flir.json `
+    --out runs/gate-derolled --device cuda:0
+```
+
+`--force` is required because the tree is already plain-mirrored. The two runs stay side by side as
+`runs/gate/gate.csv` against `runs/gate-derolled/gate.csv`, both rows stamped with the calibration
+digest — a floor is only comparable to another floor measured against the same boxes, and the two
+label states are the same filenames in the same directory. Which state the tree holds is recorded in
+`{train,val}/infrared/LABELS_PROVENANCE.json`, written beside `labels/` rather than inside it
+because ultralytics globs that directory. Restoring the uncorrected labels is the same command
+without `--calibration`, which removes the marker too, so it can never outlive what it describes.
+
+**The local Mac tree is de-rolled as of 2026-09-27; the server's is not yet.** The marker is how to
+tell them apart.
+
+##### Also worth knowing
+
+`--box-transform` chooses between mapping all four box corners and re-bounding (`corners`, the
+default and the geometrically correct reading) and mapping only the centre (`centre`, which
+preserves width and height exactly). Under FLIR's roll the two differ by ~1 px on a box. Running
+both costs CPU-seconds and the pair agreeing is the cheapest available evidence that the choice does
+not carry the result, which is the only reason the second mode exists.
+
+The 4-point homography solve is **numpy-only, not `cv2.getPerspectiveTransform`**: opencv is not a
+declared dependency here, it arrives transitively through ultralytics, and a direct dependency to
+save twelve lines is not a trade worth making. `tests/test_calibration.py` asserts the solve against
+cv2 when cv2 happens to import and against analytic cases regardless.
 
 **Carried forward to step 5 — a host-RAM ceiling, found for the price of one hour.** The twelve-run
 cell was going to run two arms concurrently, one per card, and E3's configs carry

@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from t2o.data.budget import write_budget_manifest
+from t2o.data.calibration import load_calibration
 from t2o.data.manifest import DatasetManifest
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,10 @@ class Row:
     per_class_ap50: dict[str, float]
     weights: str
     data: str
+    # Which residual-misalignment constant the thermal labels were de-rolled by, or "" for the
+    # plain mirror. Stamped on both rows because a floor is only comparable to another floor
+    # measured against the same boxes, and the two states are the same filenames on disk.
+    calibration_digest: str
 
 
 def _primary_mean(per_class_ap50: dict[str, float], primary: Sequence[str]) -> float:
@@ -95,7 +100,12 @@ def _primary_mean(per_class_ap50: dict[str, float], primary: Sequence[str]) -> f
 
 
 def _score(
-    args: argparse.Namespace, data_yaml: Path, arm: str, val_pixels: str, primary: Sequence[str]
+    args: argparse.Namespace,
+    data_yaml: Path,
+    arm: str,
+    val_pixels: str,
+    primary: Sequence[str],
+    calibration_digest: str,
 ) -> Row:
     from t2o.metrics.task import evaluate_detector
 
@@ -117,6 +127,7 @@ def _score(
         per_class_ap50=dict(metrics.per_class_ap50),
         weights=str(args.weights),
         data=str(data_yaml),
+        calibration_digest=calibration_digest,
     )
 
 
@@ -144,11 +155,16 @@ def _write_csv(csv_path: Path, rows: Sequence[Row], class_names: Sequence[str]) 
     per_class = tuple(f"ap50_{name}" for name in class_names)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[*scalars, *per_class, "weights", "data"])
+        writer = csv.DictWriter(
+            handle, fieldnames=[*scalars, *per_class, "weights", "data", "calibration_digest"]
+        )
         writer.writeheader()
         for row in rows:
             writer.writerow(
-                {key: getattr(row, key) for key in (*scalars, "weights", "data")}
+                {
+                    key: getattr(row, key)
+                    for key in (*scalars, "weights", "data", "calibration_digest")
+                }
                 # An absent class stays blank, not 0.0 -- the distinction _primary_mean keeps.
                 | {f"ap50_{n}": row.per_class_ap50.get(n, "") for n in class_names}
             )
@@ -200,6 +216,13 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="the classes the verdict is read off; defaults to every class in the manifest",
     )
+    parser.add_argument(
+        "--calibration",
+        type=Path,
+        help="the residual-misalignment constant the thermal labels were de-rolled by "
+        "(scripts/mirror_thermal_labels.py --calibration). Recorded, not applied: this stamps "
+        "both rows with its digest so a floor is traceable to the boxes it was measured against",
+    )
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--device", help="'cpu', '0', or omit for auto")
@@ -226,9 +249,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     visible = write_budget_manifest(manifest, manifests / "visible", 1.0)
     thermal = write_budget_manifest(manifest, manifests / "thermal", 1.0, infrared=True)
 
+    digest = load_calibration(args.calibration).digest() if args.calibration else ""
     rows = [
-        _score(args, visible, "ceiling", "visible", primary),
-        _score(args, thermal, "floor", "thermal", primary),
+        _score(args, visible, "ceiling", "visible", primary, digest),
+        _score(args, thermal, "floor", "thermal", primary, digest),
     ]
     _write_csv(out / CSV_FILENAME, rows, manifest.class_names)
 
