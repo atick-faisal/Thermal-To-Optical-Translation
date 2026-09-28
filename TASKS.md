@@ -4149,7 +4149,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
 | 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
 | 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
-| 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — built 2026-09-27, re-gate pending | step 4 |
+| 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — done 2026-09-28, **WEAK PASS stands at +0.2066** | step 4 |
 
 - [x] **Step 0** — the free throughput measurement. **Done 2026-09-26.** A 4-stage pix2pix run is
       **10.18 h control / 10.75 h loop**, so the twelve-run cell is **~126 GPU-h**, not ~72 —
@@ -4348,6 +4348,11 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 
 #### GATE DECISION — FLIR-aligned, 2026-09-27: **WEAK PASS**, headroom **+0.2123**
 
+**Superseded in size, not in verdict, by step 3b.** These labels are the plain mirror, which
+inherits the dataset's ~5.9 px cross-modal residual and so depresses the floor. De-rolling them
+raised it to 0.4499 for a headroom of **+0.2066**, and that is the governing number — pre-registered
+as such before it was measured. The verdict below does not change. Step 3b's block has the detail.
+
 `runs/gate/flir/gate.csv`, one visible-trained judge (`reference-flir-yolo11s/weights/best.pt`,
 epoch 46), two validation passes over the same 1,013 scenes.
 
@@ -4402,12 +4407,12 @@ verdict toward KILL.
   first**, which inverts the standing plan (de-roll only if the cell comes back weak or null) —
   written when the headroom was expected to be large. Step 3b below.
 
-#### Step 3b — de-roll the thermal labels, then re-gate. **Built 2026-09-27, re-gate pending**
+#### Step 3b — de-roll the thermal labels, then re-gate. **Done 2026-09-28 — WEAK PASS, +0.2066**
 
 - [x] **Step 3b (a)** — the de-roll. **Done 2026-09-27**, CPU only, 1.8 s for 5,142 label files.
-- [ ] **Step 3b (b)** — re-run the gate against the de-rolled floor. Server, minutes. **The
-  first attempt on 2026-09-27 was invalid** — it scored a stale ultralytics label cache; see
-  below.
+- [x] **Step 3b (b)** — the re-gate. **Done 2026-09-28**: 3-class floor **0.4499**, headroom
+  **+0.2066**, the WEAK PASS unchanged. The first attempt on 2026-09-27 was invalid — it
+  scored a stale ultralytics label cache; see below.
 
 ##### The first re-gate was invalid — ultralytics scored a stale label cache
 
@@ -4547,6 +4552,50 @@ the reason.
    which this step does not touch. A ceiling that moves means the pipeline changed rather than the
    data, and invalidates the comparison rather than adding to it.
 
+##### The result — measured 2026-09-28. **WEAK PASS stands, headroom +0.2066**
+
+`runs/gate-derolled/gate.csv`, same judge, same images, thermal labels de-rolled by
+`210142740cdba163`:
+
+| arm | mAP50 | mAP50 (3-class) | mAP50-95 | bicycle | car | dog | person |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ceiling (visible) | 0.5523 | **0.6566** | 0.2767 | 0.4922 | 0.8176 | 0.2396 | 0.6599 |
+| floor (thermal, de-rolled) | 0.3435 | **0.4499** | 0.1514 | 0.3674 | 0.6051 | 0.0242 | 0.3772 |
+
+**Headroom +0.2066** on the 3-class mAP50 (+0.2088 all-class), against a kill line of 0.15 — a
+margin of **+0.0566**. The pre-registered refutation condition needed the floor above **0.5066**; it
+came in at **0.4499**, 0.0567 short. **The verdict is unchanged: WEAK PASS, and step 4 proceeds.**
+
+What the de-roll actually moved, against step 3's floor:
+
+| | bicycle | car | **person** | dog | 3-class | recall |
+| --- | --- | --- | --- | --- | --- | --- |
+| step 3 (plain mirror) | 0.3627 | 0.6033 | 0.3667 | 0.0260 | 0.4442 | 0.2832 |
+| step 3b (de-rolled) | 0.3674 | 0.6051 | **0.3772** | 0.0242 | **0.4499** | 0.2912 |
+| delta | +0.0047 | +0.0018 | **+0.0106** | −0.0018 | **+0.0057** | +0.0080 |
+
+**All three pre-registered readings land.** (1) The ceiling reproduced *bit-identically* —
+0.5523263239785735 / 0.6565721600344453, every digit — so the pipeline did not move; and because the
+floor did move, that identity is now a consistency check rather than a cache artefact. (2) The floor
+rose, as predicted, so the direction of the correction is confirmed a third time, independently of
+the α sweep and of the matcher EPE. (3) **`person` is where it happened**: +0.0106, six times car's
+move and **62%** of the total 3-class rise, exactly the class whose labels the audit said move most
+(median IoU 0.773, 9.7% below 0.5). `dog` fell by 0.0018 on 13 instances, which is noise at that
+count.
+
+**The size was over-predicted, and that is the finding.** Item 4 above said a single-digit-point
+rise; the actual rise is **0.57 of a point**. Label misalignment accounts for **2.7%** of the
+measured headroom — blocker 1 is now priced rather than feared, and it was never load-bearing. The
+reason is visible in the recall column: the thermal floor sits at **0.29 recall against 0.51
+precision**, so what the judge loses on thermal frames is overwhelmingly *objects it cannot see at
+all*, not boxes it places a few pixels off. A 5 px label correction can only rescue detections
+already sitting near the IoU 0.5 margin, and at a median IoU of 0.822 between the two label sets
+there were few of those.
+
+**So the floor is honest and the gap is real.** +0.2066 is a genuine modality gap on a public
+dataset, not an artefact of borrowing visible-frame boxes. It is still well under the custom set's
++0.733, which remains the thing E9 exists to report.
+
 **This does *not* fix the cell's own confound.** pix2pix trains against the paired visible frame
 with `l2: 1.0` + `lpips: 5.0`, and a systematic roll between input and target is satisfied by
 blurring. That needs the thermal *images* warped, not the labels, and it is a separate and much
@@ -4579,10 +4628,9 @@ one, which the mirror never touches and which is legitimately current — its la
 Removing it anyway is what turns "the ceiling reproduced at 0.5523 / 0.6566" into a real end-to-end
 check of the pipeline rather than a check that a pickle can be unpickled twice.
 
-**Both trees are de-rolled as of 2026-09-27**, but the server's was written by the pre-fix mirror,
-so its `val/infrared/labels.cache` is still the stale one and the mirror must be re-run there before
-the gate. `{train,val}/infrared/LABELS_PROVENANCE.json` is what records which label state a tree
-holds; the gate now refuses to start unless it matches `--calibration`.
+**Both trees are de-rolled and both caches were cleared before the 2026-09-28 run.**
+`{train,val}/infrared/LABELS_PROVENANCE.json` is what records which label state a tree holds; the
+gate now refuses to start unless it matches `--calibration`.
 
 ##### Also worth knowing
 
