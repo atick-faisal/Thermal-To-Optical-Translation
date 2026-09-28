@@ -4934,11 +4934,12 @@ writes the same fixed corpus every stage — 600 train and the whole val — in 
 well as this one, and the detector fine-tune is a fixed 50 epochs over it. So the +20% comes from
 somewhere else and remains unexplained, which is precisely why it is carried as an upper bound.
 
-**4. Host RAM is ~45 GB per run, and it — not VRAM — decides concurrency.** GPU peak was
-**3.42 GB**, so two runs on one card is nowhere near the VRAM limit and step 2's ≳1.3 GiB
+**4. Host RAM is ~45 GB per run, and it — not VRAM — decides concurrency.** Step 2's ≳1.3 GiB
 per-process lower bound was off by ~35×. Two concurrent runs need ~90 GB resident, so the decision
-turns on the box's total memory. **The lever is `runtime.workers: 16`**, which the E3 configs
-already document as result-neutral and outside `config_hash` since M1.2 step 2b — augmentation
+turns on the box's total memory. **The 3.42 GB GPU figure first recorded here was wrong and is
+withdrawn** — see the correction under step 5's concurrency budget below. **The lever is
+`runtime.workers: 16`**, which the E3 configs already document as result-neutral and outside
+`config_hash` since M1.2 step 2b — augmentation
 draws from a per-sample generator keyed on `(seed, epoch, index)`, never the ambient RNG. Lowering
 it to buy concurrency changes throughput and nothing measured.
 
@@ -4960,14 +4961,37 @@ Step 4 finding 4 left this open. Steps 2, 2b and the probe have now fenced it fr
 | measured | value | where |
 | --- | --- | --- |
 | the box | **128 GiB RAM, 64 logical CPUs** | step 2, `TotalVisibleMemorySize` |
-| GPU peak, one loop run | **3.42 GB** of 40 | step 4 (b) |
+| GPU peak, one loop run, translator epochs | **22.59 GiB reserved** (14.91 allocated) of 39.70 | step 5 run 1 |
 | host peak, one loop run, translator epochs, `workers 16` | **~45 GB** | step 4 (b) |
 | host peak, one detector run, 4,129 images, `--workers 8` | **~24 GB** across 24 processes, ≈1 GB each | step 2b |
 | two detector runs at `workers 16` | **crashed** — 96 loader processes, 128 GiB exhausted | step 2 |
 
 The crash's implied ≳1.3 GB per process and step 2b's measured ≈1 GB agree, which is what makes
-this arithmetic rather than extrapolation. **VRAM is irrelevant**: 3.42 GB of 40 leaves room for
-ten runs on one card, and the constraint is entirely host RAM and CPU.
+this arithmetic rather than extrapolation.
+
+**Correction — VRAM is not irrelevant, and the 3.42 GB recorded in step 4 finding 4 was not the
+translator peak.** Step 5's run 1 logs **22.59 GiB reserved, 14.91 GiB allocated of 39.70** at
+epoch 9 (`trainer.py:228`, and `reserved` is the number that decides — see `_peak_memory`'s
+docstring and the ~1150 GPU-h M2a spent learning it). `nvidia-smi` agrees at 23 GB of 40. So
+**3.42 GB was sampled at a moment that was not a translator step** — most likely during the
+boundary, where the heaviest thing on the card is a `yolo11n` fine-tune at batch 16. Nothing
+changed between the probe and this run: same config, same `batch_size: 8`, and VRAM per step does
+not depend on `epochs_per_stage`.
+
+**What that does and does not change.** It does not touch the two-up plan, which puts one run on
+each card — 22.6 of 39.7 GiB leaves ample margin. It does rule out **two runs on one card**, which
+would need ~45 GiB of a 40 GiB card, so the fallback if two-up fails is genuinely one run at a
+time and not two crammed onto `cuda:0`.
+
+**The same correction probably rescues the host-RAM numbers, which otherwise disagree 3×.** Run 1
+sits at **7–14 GB** host during translator epochs, sawtoothing because neither loader sets
+`persistent_workers` (`trainer.py:178`, `:194`): each epoch spawns 16 train workers, tears them
+down, spawns 16 val workers, tears those down — the two pools never coexist, which is exactly the
+ultralytics behaviour step 2 blames for its crash, absent. The probe's ~45 GB is 3× that, and the
+probe ran `--epochs 3`: ~2 minutes of translator against ~18 minutes of boundary, so that sample
+almost certainly landed in the boundary too. **Read as one story: ~7–14 GB during translator
+epochs, ~45 GB at the boundary.** That is inference from sampling odds, not a measurement, and the
+rule below is what turns it into one.
 
 **The unmeasured term is the detector stage *inside* a loop run, and it is the peak.** The probe's
 ~45 GB was sampled during translator epochs; the reading during C's detector stage was missed.
@@ -4982,7 +5006,9 @@ almost unchanged.
 
 1. Run 1 of the twelve goes **solo, at the config's `workers: 16`**, unchanged.
 2. Sample during its **stage-0 detector fine-tune**, not during the translator epochs — that is
-   the only unmeasured term, and the one that took the box down before.
+   the only unmeasured term, and the one that took the box down before. It starts **~1.3 h in**
+   (100 epochs x 43.5 s, then export + zero-shot + FID at ~406 s), and the console announces it by
+   switching from `t2o.engine.trainer: epoch N` to ultralytics' box/cls/dfl table.
    `Get-Process python | Measure-Object WorkingSet64 -Sum`
 3. **Under ~50 GB** → launch run 2 on `cuda:1` and the cell runs two-up.
    **Over ~50 GB** → both runs drop to `t2o loop --workers 8` (24 detector processes each, 48
