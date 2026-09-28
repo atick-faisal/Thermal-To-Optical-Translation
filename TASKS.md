@@ -4147,6 +4147,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | done — 79 lines + 5 tests | step 3 |
 | 2 | train the FLIR judge (`yolo11s`, 100 ep); the in-loop `yolo11n` deferred to step 5 | **1.43 h measured** — done 2026-09-27; `best.pt` is **epoch 46**, not 100 | step 3 |
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
+| 2b | the in-loop `yolo11n` (FLIR visible, seed 0) | **1.36 h clean / 2.29 h wall** — done 2026-09-28; `best.pt` is **epoch 63**; one epoch stalled 56 min | step 5 |
 | 4 | the corpus-cap seam + a per-epoch clock + the FLIR throughput probe | ~150 lines + 12 tests (not the ~20 estimated) + ~1 GPU-h — **done** | step 5 |
 | 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **77–103 GPU-h**, measured by step 4 (b); a floor (solo, stage 0 only, +20%/stage carried) | criterion 2 |
 | 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — done 2026-09-28, **WEAK PASS stands at +0.2066** | step 4 |
@@ -4310,6 +4311,68 @@ enough that the kill-test remains the only real gate, which is the point of sequ
       **No append corruption.** `time` is monotone across all 100 rows at a steady 52.3 s/epoch to
       row 46 and 50.6 s/epoch after, which is one continuous run — the `exist_ok` / mode-`"a"` trap
       above did not fire, so the wall clock above is real.
+
+- [x] **Step 2b** — the in-loop detector. **Done 2026-09-28.** Deferred out of step 2 and bought
+      here, once step 3's WEAK PASS made it worth buying. (Local numbering — not M1.2's step 2b at
+      line 1751, which is the `workers` fix.)
+
+      ```powershell
+      uv run t2o train-detector --data dataset/processed/flir/data.yaml `
+          --init-weights yolo11n.pt --epochs 100 --seed 0 --workers 8 `
+          --out runs/inloop-flir-yolo11n --device cuda:0
+      ```
+
+      | row | epoch | `time` | mAP50 | mAP50-95 | precision | recall |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | best (`best.pt`) | **63** | 6353.56 s | **0.5028** | **0.2417** | 0.6901 | 0.4537 |
+      | last | 100 | 8234.91 s = 2.29 h | 0.4884 | 0.2287 | 0.8035 | 0.4335 |
+
+      **The 2.29 h is not what this run cost. One epoch ate 0.93 h of it.** Epoch 9's `time` delta
+      is **3,370.8 s against a 48.8 s median** — 69× — and all ninety-nine others fall inside
+      43.4–87.9 s. Drop that single row and the run is **4,881 s = 1.36 h**, which is the figure
+      step 5 budgets against.
+
+      **It was a pause, not slow compute.** Epoch 9's train losses (1.74816 / 1.07415 / 1.20188)
+      sit exactly on the trend between epochs 8 and 10, and its mAP50 of 0.4143 was the run's best
+      so far. Nothing retried or thrashed: the process stopped advancing for 56 minutes, then
+      resumed at full speed. The cause is not recorded and is unrecoverable now. What it is **not**
+      is step 2's `exist_ok` / mode-`"a"` append trap — `time` is monotone across all 100 rows and
+      exactly one is anomalous, where an append would restart the column.
+
+      **Step 4 (a)'s lesson, arriving one step early.** A wall-clock-only reading prices this run
+      at 2.29 h and carries a **68% error** into step 5's twelve-run projection. The per-epoch
+      column caught it in one pass, and `EpochStats.seconds` now gives the translator side the same
+      protection. So **step 5 reads medians, not totals** — one stall of this size hiding among 48
+      stage boundaries would otherwise be indistinguishable from real cost, and step 0's +20%
+      per-stage growth is exactly the kind of term a few stalls could fabricate.
+
+      **`best.pt` is epoch 63, not 100 — the judge's pattern again, and milder.** The last 37
+      epochs cost 0.50 h clean and gave back −2.9% mAP50 / −5.4% mAP50-95, against the judge's
+      −8.1% / −10.1% over its last 54. Harmless for the same reason: everything downstream loads
+      `weights/best.pt`.
+
+      **The estimate here was low, and saying so is the point of step 0.** This step was priced at
+      ~0.6–0.9 h; clean, it is **1.36 h**. What line 3958 got right is "cheaper than the judge" —
+      **48.8 s/epoch against the judge's 52.3**, the correct direction for `yolo11n` against
+      `yolo11s`, and the cheapest available evidence that nothing pathological touched the other
+      ninety-nine epochs.
+
+      **Invariant 7 holds structurally, and the margin is smaller than it looks.**
+
+      | | judge | in-loop |
+      | --- | --- | --- |
+      | run | `runs/reference-flir-yolo11s` | `runs/inloop-flir-yolo11n` |
+      | architecture / seed | `yolo11s` / **1** | `yolo11n` / **0** |
+      | `best.pt` | epoch 46, mAP50 **0.5525** | epoch 63, mAP50 **0.5028** |
+
+      Different architecture *and* different seed, so `engine/loop.py`'s "in-loop is not the judge"
+      warning stays a real separation rather than a nominal one. But **their 0.0497 gap is below
+      M1.2's measured 0.059 mAP50 noise floor**, so "the judge is the stronger detector" is not
+      something this pair demonstrates. It does not need to be — the invariant asks the judge to be
+      a *different* model, not a better one.
+
+      Step 5's two paths are now on disk: `--in-loop-weights` and `--eval-init-weights` both take
+      `runs/inloop-flir-yolo11n/weights/best.pt`, and `--reference-weights` stays the judge.
 
 - [x] **Step 3** — the kill-test. **Done 2026-09-27: headroom +0.2123, WEAK PASS.** Driver built
       2026-09-26.
@@ -4889,6 +4952,54 @@ gap is therefore entirely detector-side nondeterminism, and it sits just under M
 the custom set. C's 0.3494 lands *between* the two controls, which is the cleanest available
 demonstration that none of these three mAPs is reportable: `yolo11n.pt` is standing in for step
 2b's untrained FLIR-visible judge, and the translator has seen three epochs.
+
+##### Step 5's concurrency budget — what is measured, and the one term that is not
+
+Step 4 finding 4 left this open. Steps 2, 2b and the probe have now fenced it from three sides.
+
+| measured | value | where |
+| --- | --- | --- |
+| the box | **128 GiB RAM, 64 logical CPUs** | step 2, `TotalVisibleMemorySize` |
+| GPU peak, one loop run | **3.42 GB** of 40 | step 4 (b) |
+| host peak, one loop run, translator epochs, `workers 16` | **~45 GB** | step 4 (b) |
+| host peak, one detector run, 4,129 images, `--workers 8` | **~24 GB** across 24 processes, ≈1 GB each | step 2b |
+| two detector runs at `workers 16` | **crashed** — 96 loader processes, 128 GiB exhausted | step 2 |
+
+The crash's implied ≳1.3 GB per process and step 2b's measured ≈1 GB agree, which is what makes
+this arithmetic rather than extrapolation. **VRAM is irrelevant**: 3.42 GB of 40 leaves room for
+ten runs on one card, and the constraint is entirely host RAM and CPU.
+
+**The unmeasured term is the detector stage *inside* a loop run, and it is the peak.** The probe's
+~45 GB was sampled during translator epochs; the reading during C's detector stage was missed.
+`engine/loop.py:245` hands `config.runtime.workers` straight to `train_detector`, and the E3
+configs carry `workers: 16` — so **each loop run reaches step 2's exact crash configuration four
+times**, once per stage, and two concurrent runs would reproduce it process for process. The
+corpus is smaller (600 exported images against 4,129) but the mosaic buffer is not:
+`min(ni, batch*8, 1000)` = **128 decoded images either way**, so the per-worker cost carries over
+almost unchanged.
+
+**The launch rule, pre-registered.**
+
+1. Run 1 of the twelve goes **solo, at the config's `workers: 16`**, unchanged.
+2. Sample during its **stage-0 detector fine-tune**, not during the translator epochs — that is
+   the only unmeasured term, and the one that took the box down before.
+   `Get-Process python | Measure-Object WorkingSet64 -Sum`
+3. **Under ~50 GB** → launch run 2 on `cuda:1` and the cell runs two-up.
+   **Over ~50 GB** → both runs drop to `t2o loop --workers 8` (24 detector processes each, 48
+   across two, against the 96 that crashed) and the sample is retaken.
+4. If two-up still will not hold at `workers 8`, the cell runs **one at a time** and the wall clock
+   doubles to ~6–9 days. That is the honest fallback, and step 2 already established which half of
+   the fix is load-bearing: one run at a time, with the worker count as margin.
+
+**`--workers` is free to move.** `cli.py:256` maps it to `runtime.workers`, which has been
+result-neutral and outside `config_hash` since M1.2 step 2b — augmentation draws from a per-sample
+generator keyed on `(seed, epoch, index)`, never the ambient RNG. Lowering it buys concurrency and
+changes nothing measured. **`--batch` is not**, and is not to be touched to fit two runs in.
+
+**One caveat the 77–103 GPU-h projection does not carry.** It was measured solo. Two-up shares 64
+logical CPUs between 96 loader processes and slows both runs by an unmeasured amount, so two cards
+buy less than 2× — step 0's ~126 h was itself measured two-up, which is part of why it sits above
+this projection.
 
 ## M4 — Phase 4: Harden
 
