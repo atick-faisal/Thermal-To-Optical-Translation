@@ -4147,8 +4147,8 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | done — 79 lines + 5 tests | step 3 |
 | 2 | train the FLIR judge (`yolo11s`, 100 ep); the in-loop `yolo11n` deferred to step 5 | **1.43 h measured** — done 2026-09-27; `best.pt` is **epoch 46**, not 100 | step 3 |
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
-| 4 | the corpus-cap seam + a per-epoch clock + the FLIR throughput probe | ~150 lines + 12 tests (not the ~20 estimated) + ~1 GPU-h | step 5 |
-| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
+| 4 | the corpus-cap seam + a per-epoch clock + the FLIR throughput probe | ~150 lines + 12 tests (not the ~20 estimated) + ~1 GPU-h — **done** | step 5 |
+| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **77–103 GPU-h**, measured by step 4 (b); a floor (solo, stage 0 only, +20%/stage carried) | criterion 2 |
 | 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — done 2026-09-28, **WEAK PASS stands at +0.2066** | step 4 |
 
 - [x] **Step 0** — the free throughput measurement. **Done 2026-09-26.** A 4-stage pix2pix run is
@@ -4662,8 +4662,10 @@ it.
 
 - [x] **Step 4 (a)** — the seam. **Done 2026-09-28.** ~150 lines across six files, 12 new
       tests; suite **511 passed / 4 skipped**, ruff and pyright clean.
-- [ ] **Step 4 (b)** — the probe. Server, ~1 GPU-h, three runs. Commands and the table to
-      fill in are below.
+- [x] **Step 4 (b)** — the probe. **Done 2026-09-28.** Three runs on one card, solo. The
+      cell projects to **77–103 GPU-h**, below step 0's ~126 h and well below the ~180 h the
+      uncapped-val arithmetic feared. `--val-loss-images 153` is confirmed for step 5;
+      host RAM, not VRAM, is the concurrency constraint. Results below.
 
 ##### Why this is ~150 lines and not the ~20 the table promised
 
@@ -4801,11 +4803,11 @@ Get-Process python | Measure-Object WorkingSet64 -Sum
 
 ##### The probe — what to read off, and the table to fill
 
-| probe | `epochs[*].seconds` median | stage wall clock | boundary = stage − 3·seconds |
-| --- | --- | --- | --- |
-| A — control, val 1,013 | | | |
-| B — control, val 153 | | | |
-| C — loop λ=3, val 153 | | | |
+| probe | median `seconds` | run span | boundary | of which detector | rest |
+| --- | --- | --- | --- | --- | --- |
+| A — control, val 1,013 | 55.077 s | 1,284.2 s | 1,116.9 s | 700.4 s | 416.5 s |
+| B — control, val 153 | 43.524 s | 1,191.2 s | 1,059.2 s | 653.6 s | 405.6 s |
+| C — loop λ=3, val 153 | 51.156 s | 1,384.5 s | 1,229.3 s | 812.9 s | 416.4 s |
 
 1. **A − B** is the cost of FLIR's full val pass. If it is the ~30–40% the arithmetic above
 predicts, `--val-loss-images 153` goes into step 5's command and the cell stays near 126 GPU-h. If
@@ -4815,6 +4817,78 @@ total** is `4 × (100·t_epoch + t_boundary)`, with step 0's measured ~20%-per-s
 as a caveat on the total rather than fitted as a term. 4. **The host-RAM sum** decides whether
 step 5 runs two cards concurrently or one at a time.
 
+##### Step 4 (b)'s result — measured, 2026-09-28
+
+Three runs on **one card, solo**. Every number here is measured. Epoch seconds come off the new
+`EpochStats.seconds`; the detector term off ultralytics' own cumulative `time` column at epoch 50;
+the run span off mtimes, where **`config.yaml` is the run's start, not its end** —
+`engine/loop.py:145` snapshots it before the first epoch, and `metrics.json` is written last. The
+boundary is the interval between `stage0/translator_last.pt` and `metrics.json`.
+
+**0. The new clock is complete, which is the first thing the probe checks.** Run start to
+`translator_last.pt` exceeds the sum of the three `seconds` by **1.56–2.13 s** across the three
+runs — Trainer construction, the pair check over the whole 4,129-image split, and the checkpoint
+write. `EpochStats.seconds` therefore accounts for ~99% of in-stage translator time, so step 5 can
+be priced from `metrics.json` alone and will never need step 0's mtime archaeology again.
+
+**1. A − B = 11.553 s/epoch. FLIR's full 1,013-image val pass is 21.0% of an epoch, not the
+30–40% predicted.** The arithmetic over-predicted, but the direction held and the knob pays for
+itself — **15.4 GPU-h saved** across the twelve runs. `--val-loss-images 153` goes into step 5's
+command.
+
+**2. C − B = 7.632 s/epoch, +17.5% per coupled epoch — and the surcharge is flat in λ, not
+proportional to it.** `build_detection_loss` returns `None` only at weight 0; at λ = 1, 2 and 3 the
+in-loop detector's forward and backward are the identical graph and only the scalar multiplier
+differs. So the λ=3 probe prices stages 1, 2 **and** 3, and the loop arm projects without the
+lighter weights ever being run. Per complete run that is **+10.4%** — stage 0 is λ=0 in both arms
+and the four boundaries are shared — against the custom cell's measured **+6.8%**. ~1.5×, which is
+FLIR's box density showing up exactly where the plan predicted it would.
+
+**3. The boundary is 1,135 s a stage, and it is a real measurement rather than a residual.**
+Subtracting the detector's own `time` leaves export + zero-shot + FID at **416.5 / 405.6 / 416.4 s**
+across three runs — a ±1.3% spread, which is what it should be, since that work is identical in all
+three (1,613 images exported, the same 1,013-image val scored). The detector term is the noisy part
+at 653.6–812.9 s, ±11%, and it is the same fixed 50-epoch job every time, so that spread is machine
+contention.
+
+| quantity | val capped at 153 | val left at 1,013 |
+| --- | --- | --- |
+| control run, flat stages | 6.10 h | 7.38 h |
+| loop run, flat stages | 6.73 h | 8.02 h |
+| **twelve-run cell, flat** | **77.0 GPU-h** | 92.4 GPU-h |
+| twelve-run cell, +20%/stage carried | **103.3 GPU-h** | 124.0 GPU-h |
+
+**Row 5 moves from ~126 GPU-h to a band of 77–103 GPU-h, and the ~180 h fear is dead.** Two
+caveats travel with that band and neither is fitted away. Only **stage 0** was probed, so step 0's
++20%-per-stage growth is *carried* rather than measured on FLIR. And **the probe ran solo while
+step 0's 126 h was measured two-up** — the `e3b-*` campaign went six-deep on each of two cards, so
+every interval it timed carried contention these three runs never saw. Read 77–103 GPU-h as a
+floor, not a forecast.
+
+**3b. The probe rules out step 0's stated explanation for that growth.** Step 0 floated "the
+adapted detector's fine-tune set grows with each stage's export". It does not: `export_translated`
+writes the same fixed corpus every stage — 600 train and the whole val — in the custom cell as
+well as this one, and the detector fine-tune is a fixed 50 epochs over it. So the +20% comes from
+somewhere else and remains unexplained, which is precisely why it is carried as an upper bound.
+
+**4. Host RAM is ~45 GB per run, and it — not VRAM — decides concurrency.** GPU peak was
+**3.42 GB**, so two runs on one card is nowhere near the VRAM limit and step 2's ≳1.3 GiB
+per-process lower bound was off by ~35×. Two concurrent runs need ~90 GB resident, so the decision
+turns on the box's total memory. **The lever is `runtime.workers: 16`**, which the E3 configs
+already document as result-neutral and outside `config_hash` since M1.2 step 2b — augmentation
+draws from a per-sample generator keyed on `(seed, epoch, index)`, never the ambient RNG. Lowering
+it to buy concurrency changes throughput and nothing measured.
+
+**5. A free second estimate of the noise floor, and the evidence the val cap is inert.** A and B
+are the same experiment at the same seed, differing only by `val_loss_images` — which by
+construction reaches no exported split, and which `engine/trainer.py:193` records cannot perturb
+the trained translator either, because the val loader "neither shuffles nor augments, so no worker
+there consumes a random number". Their detector mAP50s are **0.3073** and **0.3551**. That 0.048
+gap is therefore entirely detector-side nondeterminism, and it sits just under M1.2's measured
+**0.059** mAP50 noise floor — an independent second estimate of that floor, from FLIR rather than
+the custom set. C's 0.3494 lands *between* the two controls, which is the cleanest available
+demonstration that none of these three mAPs is reportable: `yolo11n.pt` is standing in for step
+2b's untrained FLIR-visible judge, and the translator has seen three epochs.
 
 ## M4 — Phase 4: Harden
 
