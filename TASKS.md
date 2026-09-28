@@ -5002,20 +5002,42 @@ corpus is smaller (600 exported images against 4,129) but the mosaic buffer is n
 `min(ni, batch*8, 1000)` = **128 decoded images either way**, so the per-worker cost carries over
 almost unchanged.
 
-**The launch rule, pre-registered.**
+**The launch rule was pre-registered, run solo, and it fired.** Measured on run 1
+(`e3f-control-s0`), stage-0 detector fine-tune, 2026-09-28 19:5x:
 
-1. Run 1 of the twelve goes **solo, at the config's `workers: 16`**, unchanged.
-2. Sample during its **stage-0 detector fine-tune**, not during the translator epochs — that is
-   the only unmeasured term, and the one that took the box down before. It starts **~1.3 h in**
-   (100 epochs x 43.5 s, then export + zero-shot + FID at ~406 s), and the console announces it by
-   switching from `t2o.engine.trainer: epoch N` to ultralytics' box/cls/dfl table.
-   `Get-Process python | Measure-Object WorkingSet64 -Sum`
-3. **Under ~50 GB** → launch run 2 on `cuda:1` and the cell runs two-up.
-   **Over ~50 GB** → both runs drop to `t2o loop --workers 8` (24 detector processes each, 48
-   across two, against the 96 that crashed) and the sample is retaken.
-4. If two-up still will not hold at `workers 8`, the cell runs **one at a time** and the wall clock
-   doubles to ~6–9 days. That is the honest fallback, and step 2 already established which half of
-   the fix is load-bearing: one run at a time, with the worker count as margin.
+| phase | processes | host RAM |
+| --- | --- | --- |
+| translator epochs | 18 — main + wandb + 16 t2o workers | **14.5 GB**, sawtoothing to 3.2 GB |
+| between epochs | 2–3 — main + wandb only | 3.2 GB |
+| **stage-0 detector** | **50** — main + wandb + 16 train + 32 val | **52.4 GB** |
+
+50 is the number that decides it, not 52.4. It is `workers` + `workers * 2` capped at
+`os.cpu_count() // device_count()` = 32, both pools resident at once — **step 2's crash
+configuration exactly, and it recurs four times per run**, once per stage. Subtracting the 3.2 GB
+base leaves 48 workers in 49.2 GB, **≈1.03 GB each**, which lands between step 2b's measured ≈1 GB
+and the crash's implied ≳1.3 GB. The per-process cost is now a measurement from three independent
+runs rather than a bound.
+
+**Two-up at `workers 16` was therefore rejected without being attempted.** It reproduces *both* of
+step 2's failure conditions at once: ~105 GB of 128 GiB, and 100 processes on 64 logical CPUs
+(1.56x oversubscription, which is what hung `cuda:0` while the other run raised). The ~23 GB that
+would be left is Windows' whole working set.
+
+**Two-up at `workers 8` is what the cell runs.** 8 + 16 = 24 workers + 2 = **26 processes and
+~28 GB** per run; two-up is ~56 GB of 128 and 52 processes on 64 CPUs, both under 1.0. Step 2b
+measured **24 GB across 24 processes** for a standalone detector at `--workers 8`, so this is
+corroboration, not extrapolation.
+
+**The translator side pays nothing for it.** At `batch_size: 8` and 47 s over 600 images, the loop
+consumes **12.7 images/s**; 8 workers supply that at 1.6 images/s each, nowhere near binding. The
+cost of halving `workers` therefore falls only on the detector stage, which is ~11 minutes of a
+~96-minute stage.
+
+**Run 1 was stopped one stage in and resumed rather than restarted.** `trainer.py:236` checkpoints
+`translator_last.pt` every epoch and `loop.py:188` resumes the first unrecorded stage from it, so
+the granularity of the loss is one epoch. `--resume` is also safe on a fresh run dir
+(`_load_existing_results` returns `[]` when there is no `metrics.json`), so every run in the
+campaign carries it and the whole cell is restartable after any crash.
 
 **`--workers` is free to move.** `cli.py:256` maps it to `runtime.workers`, which has been
 result-neutral and outside `config_hash` since M1.2 step 2b — augmentation draws from a per-sample
