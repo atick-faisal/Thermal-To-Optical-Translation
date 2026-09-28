@@ -157,6 +157,40 @@ def test_export_translated_writes_both_splits_and_data_yaml(
         assert len(list((tmp_path / split / "labels").glob("*.txt"))) == count
 
 
+def test_export_caps_train_and_leaves_val_whole(
+    translator: StubTranslator,
+    dataset: TranslationPairDataset,
+    val_dataset: TranslationPairDataset,
+    dataset_root: Path,
+    tmp_path: Path,
+) -> None:
+    """`max_train_images` reaches the export, and `val_loss_images` deliberately does not.
+
+    Both halves have teeth. Capping train matters because the exported train split is what
+    the evaluation detector fine-tunes on -- exporting the whole split while the translator
+    trained on a cut would hand the run a larger detector budget than the experiment it is
+    matched against. Leaving val whole matters more: every reported number (zero-shot mAP,
+    FID, the detector's own val) is read off this split, so shrinking it here would quietly
+    change the denominator of every result while looking like tidying.
+    """
+    config = Config.load(
+        overrides={
+            "data": {
+                "manifest": str(dataset_root / "data.yaml"),
+                "max_train_images": 3,
+                "val_loss_images": 1,
+            },
+            "runtime": {"workers": 0},
+            "detector": {"evaluation": {"batch": 4}},
+        }
+    )
+    export_translated(translator, config, tmp_path)
+
+    assert len(list((tmp_path / "train" / "images").glob("*.png"))) == 3
+    assert len(list((tmp_path / "train" / "images").glob("*.png"))) < len(dataset)
+    assert len(list((tmp_path / "val" / "images").glob("*.png"))) == len(val_dataset)
+
+
 def test_generated_data_yaml_is_loadable_by_ultralytics(
     translator: StubTranslator, dataset_root: Path, tmp_path: Path
 ) -> None:

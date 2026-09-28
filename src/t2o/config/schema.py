@@ -63,12 +63,36 @@ class DataConfig(ConfigBase):
     # (int) seed for that subsample only, held separate from train.seed so an E8 sweep can
     # vary model initialisation without also redrawing which images are labelled.
     annotation_seed: int = 0
+    # (int|null) cap on the training corpus, null for the whole split. Distinct from
+    # annotation_fraction above, which gates annotations and never image count. Read
+    # everywhere the training corpus is (Trainer and export_translated alike) -- capping only
+    # one of the two would leave the evaluation detector fine-tuning on a larger set than the
+    # translator ever saw, which is a budget confound rather than a smaller experiment. M3 E9
+    # runs the FLIR cell at 600 to hold corpus size fixed at the custom set's.
+    max_train_images: int | None = None
+    # (int|null) subsample size for the per-epoch validation *loss* only -- the W&B curve and
+    # the translator_best.pt nothing downstream loads. Deliberately not named max_val_images:
+    # it never reaches the exported val split, so zero-shot mAP, FID and the detector's own
+    # val always read every val pair. Lower it when val is large enough that monitoring it
+    # every epoch costs real GPU time (FLIR's 1,013 against the custom set's 153).
+    val_loss_images: int | None = None
+    # (int) seed for both cuts above, held separate from train.seed for the same reason
+    # annotation_seed is: E3 sweeps train.seed across its six paired runs, and a corpus that
+    # redrew with it would make corpus identity a second difference between the seeds.
+    subset_seed: int = 0
 
     @field_validator("annotation_fraction")
     @classmethod
     def _fraction_in_unit_range(cls, value: float) -> float:
         if not 0.0 < value <= 1.0:
             raise ValueError("must be in (0, 1]; 0 would leave nothing to train on")
+        return value
+
+    @field_validator("max_train_images", "val_loss_images")
+    @classmethod
+    def _at_least_one_image(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("must be >= 1, or null for the whole split")
         return value
 
 

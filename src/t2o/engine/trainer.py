@@ -44,6 +44,7 @@ composition needs, matching how ``engine/loop.py`` reconstructs both fresh per s
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,6 +79,13 @@ class EpochStats:
     epoch: int
     train_losses: dict[str, float]
     val_loss: float
+    # Wall clock for [train epoch + val pass], so a campaign prices itself instead of being
+    # reconstructed from checkpoint mtimes afterwards -- which is what M3 E9 step 0 had to do
+    # for the whole pix2pix corpus, and the only reason step 2 was cheaper is that ultralytics
+    # writes a `time` column of its own. Defaulted rather than required: `engine.loop`
+    # rebuilds these with `EpochStats(**epoch)` from metrics.json, so a required field would
+    # make every run written before today unreadable and unresumable.
+    seconds: float = 0.0
 
 
 def resolve_device(device: str | None) -> torch.device:
@@ -142,13 +150,25 @@ class Trainer:
             # Augmentation runs off its own (seed, epoch, index) stream rather than the
             # ambient RNG, which is what keeps `runtime.workers` a pure throughput knob.
             augment_seed=config.train.seed,
+            # `engine/export.py` applies the same cap to the same split, so the evaluation
+            # detector fine-tunes on exactly the corpus the translator was trained on.
+            max_images=config.data.max_train_images,
+            subset_seed=config.data.subset_seed,
         )
         # No augmentation on val -- matches Clean-SeAFusion. Val loss never touches
         # cls/bboxes, so annotation_fraction is irrelevant here and left at its default.
+        #
+        # `val_loss_images` caps *this* dataset and nothing else. What it feeds is the logged
+        # val curve and `translator_best.pt`, which no loop, export or script ever loads --
+        # every reported number comes off `engine/export.py`'s own val pass, which is never
+        # capped. Subsampling here is therefore free, and it is worth it when val is large:
+        # this pass runs once per epoch, i.e. 400 times in a four-stage 100-epoch run.
         self.val_dataset = TranslationPairDataset(
             manifest.val_images,
             pairing=manifest.pairing,
             num_classes=manifest.nc,
+            max_images=config.data.val_loss_images,
+            subset_seed=config.data.subset_seed,
         )
 
         # Reseeded once per epoch in `train()`, so a given epoch index always shuffles the
@@ -191,11 +211,18 @@ class Trainer:
             # flips; reaches the workers because each epoch's iterator re-pickles the
             # dataset (see `TranslationPairDataset.set_epoch` on persistent_workers).
             self.train_dataset.set_epoch(epoch)
+            started = time.perf_counter()
             train_losses = self._train_epoch()
             val_loss = self._validate()
+            seconds = time.perf_counter() - started
             # Read before the `empty_cache()` below, which would flatten `reserved`.
             memory = self._peak_memory()
-            history.append(EpochStats(epoch=epoch, train_losses=train_losses, val_loss=val_loss))
+            history.append(
+                EpochStats(
+                    epoch=epoch, train_losses=train_losses, val_loss=val_loss, seconds=seconds
+                )
+            )
+            logger.info("epoch %d took %.1f s", epoch, seconds)
             if memory:
                 logger.info(
                     "epoch %d peak memory: %.2f GiB allocated, %.2f GiB reserved of %.2f GiB",
@@ -217,6 +244,7 @@ class Trainer:
                 metrics = {f"{prefix}train/{k}": v for k, v in train_losses.items()}
                 metrics[f"{prefix}val/pixel_l2"] = val_loss
                 metrics[f"{prefix}epoch"] = float(epoch)
+                metrics[f"{prefix}seconds"] = seconds
                 metrics.update({f"{prefix}memory/{key}": v for key, v in memory.items()})
                 self.tracker.log(metrics)
 

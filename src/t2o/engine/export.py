@@ -118,8 +118,20 @@ def export_translated(
         ("train", manifest.train_images),
         ("val", manifest.val_images),
     ):
+        # Train is capped, val never. The exported train split is what the evaluation detector
+        # fine-tunes on, so leaving it whole while the translator trained on a cut would hand
+        # this run a larger detector budget than the experiment it is matched against -- a
+        # confound, not a smaller experiment. The exported val split is where every reported
+        # number comes from (zero-shot mAP, FID, the detector's own val), so it stays whole
+        # whatever `val_loss_images` says about the per-epoch monitoring pass.
         dataset = TranslationPairDataset(
-            images_dir, pairing=manifest.pairing, hflip=0.0, crop=None, num_classes=manifest.nc
+            images_dir,
+            pairing=manifest.pairing,
+            hflip=0.0,
+            crop=None,
+            num_classes=manifest.nc,
+            max_images=config.data.max_train_images if split == "train" else None,
+            subset_seed=config.data.subset_seed,
         )
         export_split(
             translator,

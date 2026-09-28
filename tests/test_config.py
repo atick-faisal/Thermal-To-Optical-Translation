@@ -249,6 +249,15 @@ def test_hash_changes_when_a_scientific_value_changes() -> None:
     assert Config.load(overrides={"translator": translator}).config_hash() != baseline
     # The seed is part of experiment identity, which is why it lives under `train`.
     assert Config.load(overrides={"train": {"seed": 1}}).config_hash() != baseline
+    # Corpus size changes what is measured as surely as a learning rate does: M3 E9's FLIR
+    # cell is a different experiment from the same configuration on the full 4,129 pairs.
+    assert Config.load(overrides={"data": {"max_train_images": 600}}).config_hash() != baseline
+
+
+def test_an_image_cap_below_one_is_rejected() -> None:
+    for field in ("max_train_images", "val_loss_images"):
+        with pytest.raises(ConfigError, match=">= 1"):
+            Config.load(overrides={"data": {field: 0}})
 
 
 @pytest.mark.parametrize(

@@ -4147,7 +4147,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 1 | mirror FLIR `visible/labels` → `infrared/labels`, with a test | done — 79 lines + 5 tests | step 3 |
 | 2 | train the FLIR judge (`yolo11s`, 100 ep); the in-loop `yolo11n` deferred to step 5 | **1.43 h measured** — done 2026-09-27; `best.pt` is **epoch 46**, not 100 | step 3 |
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
-| 4 | the `DataConfig.max_train_images` seam + a 1-epoch FLIR throughput probe | ~20 lines + minutes | step 5 |
+| 4 | the corpus-cap seam + a per-epoch clock + the FLIR throughput probe | ~150 lines + 12 tests (not the ~20 estimated) + ~1 GPU-h | step 5 |
 | 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **~126 GPU-h ≈ 2.6 days on two cards** (step 0, ±FLIR's own throughput from step 4) | criterion 2 |
 | 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — done 2026-09-28, **WEAK PASS stands at +0.2066** | step 4 |
 
@@ -4657,6 +4657,164 @@ with no extra GPU time. Take that number before committing ~126 GPU-h to a pair 
 die on day two. The budget it has to fit inside is now known: **128 GiB across both cards**, minus
 whatever the two translators hold, and step 2's own failure says a detector worker costs ≳1.3 GiB of
 it.
+
+#### Step 4 — the corpus-cap seam, a per-epoch clock, and the throughput probe
+
+- [x] **Step 4 (a)** — the seam. **Done 2026-09-28.** ~150 lines across six files, 12 new
+      tests; suite **511 passed / 4 skipped**, ruff and pyright clean.
+- [ ] **Step 4 (b)** — the probe. Server, ~1 GPU-h, three runs. Commands and the table to
+      fill in are below.
+
+##### Why this is ~150 lines and not the ~20 the table promised
+
+The table's estimate was written before two things were traced, and both change the step. Recorded
+rather than absorbed, because step 0's whole lesson is about estimates that were never measured.
+
+##### Finding 1 — FLIR's val split is 6.6× the custom set's, and the loop hits it 400 times a run
+
+The custom set is **600 train / 153 val** (PLAN.md:393); FLIR-aligned is **4,129 / 1,013**.
+Capping train alone matches the training corpus and leaves the val side 6.6× larger — and
+`Trainer.train()` calls `self._validate()` **every epoch**, so a four-stage run at
+`epochs_per_stage: 100` makes **400 full val passes**.
+
+Weighting a train step at ~3× a val step (backward, the discriminator, LPIPS), one epoch costs
+`3·600 + 153 = 1953` units on the custom set against `3·600 + 1013 = 2813` on FLIR — **~1.44×** on
+the term that dominates a run. That would put the "cost-matched" cell nearer **~180 GPU-h ≈ 3.7
+days**, not the 126 h / 2.6 days the table carries. **This is arithmetic, not a measurement**,
+which is exactly what the probe is for — and it is why row 5's figure is left alone until the
+probe reports.
+
+**What that val pass feeds is nothing.** `translator_best.pt` is written by `trainer.py` and read
+by **no loop, no export and no script**: `run_loop` warm-starts from the live translator instance
+and resumes from `translator_last.pt`. The val loss is a W&B curve and a checkpoint nobody loads.
+So it can be subsampled without touching a single reported number — provided the cut is kept
+structurally separate from the val split the *metrics* read, which is what the field naming below
+is for.
+
+##### Finding 2 — nothing in this repo recorded a per-epoch wall clock
+
+`EpochStats` carried `epoch`, `train_losses`, `val_loss` and no duration; the tracker logged no
+time; `metrics.json` had no timestamps. That is precisely why step 0 had to reconstruct pix2pix's
+per-stage cost from 72 `translator_last.pt` mtimes across 24 runs, and why step 2 was cheaper only
+because *ultralytics* writes a cumulative `time` column of its own.
+
+A throughput probe with no epoch clock reports one wall clock per run, translator epochs and
+boundary work fused — and separating them is the entire point. `EpochStats.seconds` now carries
+it, logged at INFO, tracked to W&B, and written into `metrics.json`, so **step 5's campaign prices
+itself** instead of needing the same archaeology again.
+
+Two details worth knowing. The field is **defaulted, not required**: `engine/loop.py` rebuilds
+every entry with `EpochStats(**epoch)`, so a required field would make each run written before
+today unresumable — the same concern as the `.get`-not-`[...]` comment beside it. And
+`tests/test_loop.py::_without_timings` strips it before the determinism assertions, because a wall
+clock is **provenance, not a measurement**: the same status `runtime` already has in
+`Config.config_hash`.
+
+##### What the seam is
+
+| field | caps | read by |
+| --- | --- | --- |
+| `data.max_train_images` | the training corpus | `Trainer.train_dataset` **and** the export |
+| `data.val_loss_images` | the per-epoch val *loss* only | `Trainer.val_dataset`, nothing else |
+| `data.subset_seed` | which images either cut draws | both |
+
+`annotation_fraction` could not serve: it gates **annotations, not image count** — every image
+stays in the split and only the boxes are withheld. The new cut goes through
+`data/dataset.py::capped_subset`, which draws through the existing `annotated_subset` rather than
+shuffling again, so a budget manifest and this cut select **identical** images at one `(count,
+seed)`. A cap larger than the split **raises**: silently training on 400 when the config says 600
+would confound the one variable the knob exists to pin.
+
+**`val_loss_images` is deliberately not called `max_val_images`.** It never reaches the exported
+val split, so zero-shot mAP, FID and the detector's own val always read every val pair — the same
+1,013 the gate table scored. `tests/test_export.py::test_export_caps_train_and_leaves_val_whole`
+is the assertion that stops someone tidying that asymmetry away and quietly shrinking the
+denominator of every reported number.
+
+**And `max_train_images` reaches the export, not just the trainer.** The exported train split is
+what the evaluation detector fine-tunes on; exporting all 4,129 while the translator trained on
+600 would hand the FLIR cell a 6.9× larger detector budget than the custom cell it is matched
+against. That is a confound, not a smaller experiment.
+
+**`subset_seed` is held separate from `train.seed`**, for the same reason `annotation_seed` is.
+The cell sweeps `train.seed` 0..5; a corpus that redrew with it would make corpus identity a
+second difference between the seeds, on top of the one being measured. All twelve runs must see
+the same 600 images.
+
+**`config_hash` changes for every existing config.** Correct — corpus size changes what is
+measured — and there is precedent at the `workers` move recorded above. No test pins a hash
+literal, and a resume mismatch **warns** rather than raising, so nothing already on disk breaks.
+
+##### No new experiment configs
+
+The FLIR cell runs `experiments/e3_pix2pix_{control,loop}.yaml` with CLI overrides, exactly as the
+custom campaign already does with `--data`/`--in-loop-weights`/`--eval-init-weights`. That keeps
+`test_control_and_loop_configs_differ_only_by_design` guarding one pair rather than two, and
+`Config.snapshot` still records the fully resolved config per run.
+
+##### The probe — commands
+
+Prices one complete stage: a translator epoch, the export, the zero-shot pass, FID, and a 50-epoch
+detector fine-tune. **Three epochs, not one**, so `seconds` gives a median instead of a single
+startup-contaminated sample.
+
+```powershell
+$FLIR  = "dataset/processed/flir/data.yaml"
+$JUDGE = "runs/reference-flir-yolo11s/weights/best.pt"
+
+# A -- control, val loss over FLIR's full 1,013
+uv run t2o loop --config experiments/e3_pix2pix_control.yaml `
+    --data $FLIR --max-train-images 600 `
+    --in-loop-weights yolo11n.pt --eval-init-weights yolo11n.pt --reference-weights $JUDGE `
+    --epochs 3 --task-weights 0.0 --seed 0 --name flir-probe-control --device cuda:0
+
+# B -- identical but for the val-loss cut, at the custom set's 153
+uv run t2o loop --config experiments/e3_pix2pix_control.yaml `
+    --data $FLIR --max-train-images 600 --val-loss-images 153 `
+    --in-loop-weights yolo11n.pt --eval-init-weights yolo11n.pt --reference-weights $JUDGE `
+    --epochs 3 --task-weights 0.0 --seed 0 --name flir-probe-val153 --device cuda:0
+
+# C -- the coupled arm at the ramp's HEAVIEST weight, not its lightest
+uv run t2o loop --config experiments/e3_pix2pix_loop.yaml `
+    --data $FLIR --max-train-images 600 --val-loss-images 153 `
+    --in-loop-weights yolo11n.pt --eval-init-weights yolo11n.pt --reference-weights $JUDGE `
+    --epochs 3 --task-weights 3.0 --seed 0 --name flir-probe-loop --device cuda:0
+```
+
+`--task-weights 3.0` for C on purpose. FLIR's box density is far above the custom set's — 24,732
+cars and 13,094 people across the corpus — and the coupling term runs `v8DetectionLoss` over every
+one of them, so the surcharge is priced at its **maximum** rather than carried over as the custom
+cell's measured +6.8%.
+
+**`yolo11n.pt` for the in-loop and bootstrap weights makes these three runs unreportable as
+results.** Step 2b's FLIR-visible `yolo11n` does not exist yet. The probe measures seconds, and
+seconds do not depend on which checkpoint was loaded — but **no mAP may be read off
+`runs/flir-probe-*`**, and none of it is a gate number.
+
+**Take the host-RAM peak during C's detector stage.** It is the open measurement left over from
+step 2, and it still stands in for step 5's concurrency decision as a ≳1.3 GiB per-process *lower
+bound* rather than a figure:
+
+```powershell
+Get-Process python | Measure-Object WorkingSet64 -Sum
+```
+
+##### The probe — what to read off, and the table to fill
+
+| probe | `epochs[*].seconds` median | stage wall clock | boundary = stage − 3·seconds |
+| --- | --- | --- | --- |
+| A — control, val 1,013 | | | |
+| B — control, val 153 | | | |
+| C — loop λ=3, val 153 | | | |
+
+1. **A − B** is the cost of FLIR's full val pass. If it is the ~30–40% the arithmetic above
+predicts, `--val-loss-images 153` goes into step 5's command and the cell stays near 126 GPU-h. If
+it is small, the prediction was wrong, the knob stays `None`, and *that* is the finding. 2. **C −
+B** is the coupling surcharge at λ=3, against the custom cell's measured +6.8%. 3. **The run
+total** is `4 × (100·t_epoch + t_boundary)`, with step 0's measured ~20%-per-stage growth carried
+as a caveat on the total rather than fitted as a term. 4. **The host-RAM sum** decides whether
+step 5 runs two cards concurrently or one at a time.
+
 
 ## M4 — Phase 4: Harden
 

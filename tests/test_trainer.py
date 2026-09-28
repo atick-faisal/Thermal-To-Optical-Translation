@@ -67,6 +67,53 @@ def test_train_returns_epoch_stats_per_epoch(data_yaml: Path, tmp_path: Path) ->
         assert math.isfinite(stats.val_loss)
 
 
+def test_every_epoch_records_its_own_wall_clock(data_yaml: Path, tmp_path: Path) -> None:
+    """Without this a campaign can only be priced from checkpoint mtimes afterwards.
+
+    Which is exactly what M3 E9 step 0 had to do across 24 runs to discover that the standing
+    "~6 h per 4-stage run" estimate was 1.7x low.
+    """
+    manifest = DatasetManifest.load(data_yaml)
+    trainer = Trainer(_config(), manifest, StubTranslator(hidden_channels=4), tmp_path / "run")
+
+    history = trainer.train()
+
+    assert all(stats.seconds > 0.0 for stats in history)
+
+
+def test_the_val_loss_cap_leaves_the_training_corpus_alone(data_yaml: Path, tmp_path: Path) -> None:
+    """`val_loss_images` is a monitoring knob and must never reach the training side.
+
+    It is also why the field is not called `max_val_images`: the split it subsamples is the
+    per-epoch loss pass, never the val split `engine/export.py` reads every metric off.
+    """
+    manifest = DatasetManifest.load(data_yaml)
+    config = _config()
+    config = config.model_copy(
+        update={"data": config.data.model_copy(update={"val_loss_images": 1})}
+    )
+    trainer = Trainer(config, manifest, StubTranslator(hidden_channels=4), tmp_path / "run")
+
+    assert len(trainer.val_dataset) == 1
+    assert len(trainer.train_dataset) == len(
+        Trainer(
+            _config(), manifest, StubTranslator(hidden_channels=4), tmp_path / "plain"
+        ).train_dataset
+    )
+
+
+def test_the_training_corpus_cap_leaves_the_val_pass_alone(data_yaml: Path, tmp_path: Path) -> None:
+    manifest = DatasetManifest.load(data_yaml)
+    config = _config()
+    config = config.model_copy(
+        update={"data": config.data.model_copy(update={"max_train_images": 3})}
+    )
+    trainer = Trainer(config, manifest, StubTranslator(hidden_channels=4), tmp_path / "run")
+
+    assert len(trainer.train_dataset) == 3
+    assert len(trainer.val_dataset) == len(list(manifest.val_images.glob("*.jpg")))
+
+
 def test_checkpoints_are_written(data_yaml: Path, tmp_path: Path) -> None:
     manifest = DatasetManifest.load(data_yaml)
     run_dir = tmp_path / "run"

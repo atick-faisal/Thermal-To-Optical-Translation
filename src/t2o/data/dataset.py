@@ -153,6 +153,33 @@ def annotated_subset(paths: list[Path], fraction: float, seed: int) -> frozenset
     return frozenset(ordered[:keep])
 
 
+def capped_subset(paths: list[Path], max_images: int | None, seed: int) -> list[Path]:
+    """The first ``max_images`` of a seeded shuffle of ``paths``, sorted; all of them if null.
+
+    A *corpus* cut, unlike :func:`annotated_subset` immediately above, which leaves every image
+    in the split and only decides which ones carry boxes. This one decides how many images the
+    run sees at all -- what ``DataConfig.max_train_images`` is for, and the reason
+    ``annotation_fraction`` could not serve: it gates annotations, never image count.
+
+    Drawn through ``annotated_subset`` rather than with a second shuffle of its own, so a
+    budget manifest (:mod:`t2o.data.budget`, which is fraction-based for the same reason) and
+    this cut select **identical** images at one ``(count, seed)``. ``round(fraction * len)``
+    recovers the count exactly.
+
+    Raises when ``max_images`` exceeds the split. The whole point of the knob is to hold corpus
+    size fixed -- M3 E9 runs the FLIR cell at 600 to match the custom set's 600 -- so quietly
+    returning 400 would confound the one variable it exists to pin.
+    """
+    if max_images is None or max_images == len(paths):
+        return paths
+    if max_images > len(paths):
+        raise ValueError(
+            f"max_images={max_images} exceeds the {len(paths)} image(s) available. Corpus "
+            "size is being held fixed; silently training on fewer would confound it."
+        )
+    return sorted(annotated_subset(paths, max_images / len(paths), seed))
+
+
 class TranslationPairDataset(Dataset[TranslationSample]):
     """Visible/infrared pairs from a directory of visible images.
 
@@ -170,6 +197,8 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         annotation_fraction: float = 1.0,
         annotation_seed: int = 0,
         augment_seed: int = 0,
+        max_images: int | None = None,
+        subset_seed: int = 0,
     ) -> None:
         self.pairing = pairing or Pairing()
         self.hflip = hflip
@@ -187,7 +216,13 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         if not self.visible_paths:
             raise FileNotFoundError(f"no images found in {self.images_dir}")
 
+        # Pairing is checked over the *whole* split before the cut below -- a few thousand
+        # `is_file()` calls that catch a damaged tree, including in images this run will not
+        # read. The class-id check after it is the expensive one (it opens every label file),
+        # so it sees only the corpus that will actually be trained on.
         self.pairing.validate_pairs(self.visible_paths)
+        available = len(self.visible_paths)
+        self.visible_paths = capped_subset(self.visible_paths, max_images, subset_seed)
         if num_classes is not None:
             self._validate_class_ids(num_classes)
 
@@ -196,9 +231,10 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         self._annotated = annotated_subset(self.visible_paths, annotation_fraction, annotation_seed)
 
         logger.info(
-            "%s: %d paired samples, %d annotated",
+            "%s: %d paired samples%s, %d annotated",
             self.images_dir,
             len(self.visible_paths),
+            f" (capped from {available})" if len(self.visible_paths) != available else "",
             len(self._annotated),
         )
 

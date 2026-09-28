@@ -23,7 +23,13 @@ import pytest
 import torch
 
 from t2o.config import Config
-from t2o.engine.loop import _resolve_reference_weights, record_faithfulness, run_loop
+from t2o.engine.loop import (
+    METRICS_FILENAME,
+    _load_existing_results,
+    _resolve_reference_weights,
+    record_faithfulness,
+    run_loop,
+)
 from t2o.metrics.faithfulness import FaithfulnessMetrics
 from t2o.translators import StubTranslator, build_translator
 
@@ -109,6 +115,21 @@ def test_full_loop_fine_tunes_a_detector_every_stage(
         assert "lpips" in entry["fidelity"]
 
 
+def _without_timings(run_dir: Path) -> list[dict[str, object]]:
+    """A run's `metrics.json` with every epoch's wall clock dropped.
+
+    `EpochStats.seconds` is provenance, not a measurement the experiment makes -- the same
+    status `runtime` has in `Config.config_hash`, which excludes it wholly so that one
+    experiment run twice agrees. Two identical runs must agree on every number below and
+    cannot agree on how long they took, so the determinism assertions compare the rest.
+    """
+    entries = json.loads((run_dir / "metrics.json").read_text())
+    for entry in entries:
+        for epoch in entry["epochs"]:
+            epoch.pop("seconds", None)
+    return entries
+
+
 def test_resume_on_a_fresh_run_dir_behaves_like_a_normal_run(
     data_yaml: Path, detector_weights: Path, tmp_path: Path
 ) -> None:
@@ -162,9 +183,7 @@ def test_resume_skips_completed_stages_and_restores_warm_started_weights(
     for key, value in unbroken_translator.state_dict().items():
         assert torch.equal(value, resumed_translator.state_dict()[key])
 
-    unbroken_metrics = json.loads((tmp_path / "unbroken" / "metrics.json").read_text())
-    resumed_metrics = json.loads((tmp_path / "resumed" / "metrics.json").read_text())
-    assert unbroken_metrics == resumed_metrics
+    assert _without_timings(tmp_path / "unbroken") == _without_timings(tmp_path / "resumed")
 
 
 def test_running_the_same_config_and_seed_twice_yields_identical_metrics(
@@ -178,9 +197,7 @@ def test_running_the_same_config_and_seed_twice_yields_identical_metrics(
     translator_b = build_translator(config)
     run_loop(config, translator_b, run_dir=tmp_path / "b", train_detector_stages=False)
 
-    metrics_a = json.loads((tmp_path / "a" / "metrics.json").read_text())
-    metrics_b = json.loads((tmp_path / "b" / "metrics.json").read_text())
-    assert metrics_a == metrics_b
+    assert _without_timings(tmp_path / "a") == _without_timings(tmp_path / "b")
     for key, value in translator_a.state_dict().items():
         assert torch.equal(value, translator_b.state_dict()[key])
 
@@ -203,9 +220,7 @@ def test_a_run_is_unaffected_by_the_ambient_rng_state_it_inherits(
     torch.rand(3)  # ...and a different amount before the second
     run_loop(config, translator_b, run_dir=tmp_path / "b", train_detector_stages=False)
 
-    assert json.loads((tmp_path / "a" / "metrics.json").read_text()) == json.loads(
-        (tmp_path / "b" / "metrics.json").read_text()
-    )
+    assert _without_timings(tmp_path / "a") == _without_timings(tmp_path / "b")
     for key, value in translator_a.state_dict().items():
         assert torch.equal(value, translator_b.state_dict()[key])
 
@@ -390,3 +405,30 @@ def test_recorded_faithfulness_survives_a_resume(
         "missed_object_rate": 0.25,
         "detection_consistency": 0.75,
     }
+
+
+def test_a_metrics_json_without_epoch_seconds_still_loads(tmp_path: Path) -> None:
+    """Every run finished before `EpochStats.seconds` existed must still resume and aggregate.
+
+    That is the whole reason the field carries a default instead of being required: the loop
+    rebuilds each entry with `EpochStats(**epoch)`, so a required field would raise a TypeError
+    part-way through a resumed server run. Same concern as the `.get`-not-`[...]` comment on
+    `zero_shot`/`fidelity` directly above it in `_stage_result_from_json`.
+    """
+    (tmp_path / METRICS_FILENAME).write_text(
+        json.dumps(
+            [
+                {
+                    "stage": 0,
+                    "task_weight": 0.0,
+                    "epochs": [{"epoch": 0, "train_losses": {"loss_l2": 1.0}, "val_loss": 1.0}],
+                    "detector": None,
+                }
+            ]
+        )
+    )
+
+    (result,) = _load_existing_results(tmp_path)
+
+    assert result.stage == 0
+    assert result.epochs[0].seconds == 0.0

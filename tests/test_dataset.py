@@ -353,3 +353,58 @@ def test_annotation_fraction_out_of_range_is_rejected(dataset_root: Path) -> Non
         TranslationPairDataset(_images(dataset_root), annotation_fraction=0.0)
     with pytest.raises(ValueError, match="annotation_fraction"):
         TranslationPairDataset(_images(dataset_root), annotation_fraction=1.5)
+
+
+# --------------------------------------------------------------------------- corpus cap
+
+
+def test_max_images_caps_the_corpus_exactly(dataset_root: Path) -> None:
+    capped = TranslationPairDataset(_images(dataset_root), max_images=3)
+    assert len(capped) == 3
+    assert set(capped.visible_paths) <= set(
+        TranslationPairDataset(_images(dataset_root)).visible_paths
+    )
+
+
+def test_max_images_none_is_the_whole_split(dataset_root: Path) -> None:
+    capped = TranslationPairDataset(_images(dataset_root), max_images=None)
+    plain = TranslationPairDataset(_images(dataset_root))
+    assert capped.visible_paths == plain.visible_paths
+
+
+def test_the_capped_corpus_is_the_same_images_for_one_seed(dataset_root: Path) -> None:
+    """The twelve E3 runs sweep `train.seed`, and every one must see the same corpus.
+
+    That is why `subset_seed` is a field of its own rather than derived from `train.seed`
+    (`config/schema.py::DataConfig`) -- a corpus that redrew per run would make corpus
+    identity a second difference between the seeds, on top of the one being measured.
+    """
+    a = TranslationPairDataset(_images(dataset_root), max_images=3, subset_seed=1)
+    b = TranslationPairDataset(_images(dataset_root), max_images=3, subset_seed=1)
+    assert a.visible_paths == b.visible_paths
+
+
+def test_a_different_subset_seed_draws_different_images(dataset_root: Path) -> None:
+    seeds = {
+        tuple(
+            TranslationPairDataset(_images(dataset_root), max_images=3, subset_seed=s).visible_paths
+        )
+        for s in range(6)
+    }
+    assert len(seeds) > 1
+
+
+def test_a_cap_larger_than_the_split_is_refused(dataset_root: Path) -> None:
+    """Silently returning fewer would break the one thing the knob exists to hold fixed."""
+    with pytest.raises(ValueError, match="exceeds"):
+        TranslationPairDataset(_images(dataset_root), max_images=N_TRAIN + 1)
+
+
+def test_annotation_fraction_applies_within_the_cap(dataset_root: Path) -> None:
+    """Annotations are a fraction of the corpus this run trains on, not of the whole split."""
+    capped = TranslationPairDataset(
+        _images(dataset_root), max_images=4, annotation_fraction=0.5, annotation_seed=1
+    )
+    assert len(capped) == 4
+    assert len(capped._annotated) == 2
+    assert set(capped._annotated) <= set(capped.visible_paths)

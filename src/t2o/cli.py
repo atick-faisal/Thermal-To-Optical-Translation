@@ -45,6 +45,8 @@ _OVERRIDES: dict[str, tuple[str, ...]] = {
     "wandb": ("runtime", "wandb"),
     "data": ("data", "manifest"),
     "annotation_fraction": ("data", "annotation_fraction"),
+    "max_train_images": ("data", "max_train_images"),
+    "val_loss_images": ("data", "val_loss_images"),
     "epochs": ("train", "epochs_per_stage"),
     "batch_size": ("train", "batch_size"),
     "lr": ("train", "lr"),
@@ -240,6 +242,14 @@ def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
         help="the dataset's data.yaml; it declares root, splits, nc, names and modality tokens",
     )
     parser.add_argument("--annotation-fraction", type=float, help="E8 low-annotation fraction")
+    parser.add_argument(
+        "--max-train-images", type=int, help="cap the training corpus; omit for the whole split"
+    )
+    parser.add_argument(
+        "--val-loss-images",
+        type=int,
+        help="cap the per-epoch val *loss* sample only; the exported val split stays whole",
+    )
     parser.add_argument("--epochs", type=int, help="translator epochs per stage")
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--lr", type=float)
