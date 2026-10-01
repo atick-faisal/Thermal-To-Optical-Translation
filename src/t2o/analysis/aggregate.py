@@ -42,6 +42,7 @@ import yaml
 
 from t2o.config.schema import CONFIG_FILENAME
 from t2o.engine.loop import METRICS_FILENAME
+from t2o.metrics.task import PrimaryClassError, primary_mean
 
 logger = logging.getLogger(__name__)
 
@@ -346,6 +347,50 @@ def bootstrap_ci(
     return float(low), float(high)
 
 
+# The three keys `add_primary_mean` writes beside a section's own scalars. `primary_n_classes`
+# is there to be read: it turns "the mean is over the same classes everywhere" from an
+# assumption into a column that `t2o aggregate` prints and a reader can check.
+PRIMARY_AP50 = "primary_map50"
+PRIMARY_AP50_95 = "primary_map50_95"
+PRIMARY_N_CLASSES = "primary_n_classes"
+
+
+def add_primary_mean(runs: Sequence[RunRecord], primary: Sequence[str]) -> None:
+    """Derive a class-subset mAP into every stage record that carries per-class AP.
+
+    Written into the loaded records rather than computed in the caller so the *whole* pinned
+    pipeline -- arm summaries, the paired sign-flip test, the trajectory sensitivity analysis
+    and `tidy_rows` -- applies to the derived endpoint for free. Recomputing the paired block
+    outside this module would duplicate the statistics and, worse, leave the primary endpoint
+    without the trajectory contrast, which is the pre-registered rule for reading a stage-0
+    draw that is not level.
+
+    Why a subset at all: on FLIR the 4-class mean carries `dog` at full weight on 13 val
+    instances, so the cell pre-registers bicycle/car/person as primary with dog stated
+    separately (TASKS.md M3 E9). The mean itself is `metrics.task.primary_mean`, the same
+    function `scripts/gate_table.py` scores the kill-test with -- the gain and the headroom it
+    is read against are then the same arithmetic.
+
+    Mutates the records in place. They are freshly parsed JSON owned by this call's
+    `load_run`, and nothing else holds a reference to them.
+    """
+    for run in runs:
+        for stage in run.stages:
+            for section in stage.values():
+                if not isinstance(section, dict) or "per_class_ap50" not in section:
+                    continue
+                try:
+                    section[PRIMARY_AP50] = primary_mean(section["per_class_ap50"], primary)
+                    section[PRIMARY_AP50_95] = primary_mean(section["per_class_ap50_95"], primary)
+                except PrimaryClassError as error:
+                    raise AggregationError(
+                        f"{run.path} stage {stage.get('stage')}: {error}"
+                    ) from error
+                section[PRIMARY_N_CLASSES] = float(
+                    sum(1 for name in primary if name in section["per_class_ap50"])
+                )
+
+
 def common_stages(runs: Sequence[RunRecord]) -> tuple[int, ...]:
     """Stage indices present in *every* run -- the only ones a paired test is defined on."""
     if not runs:
@@ -362,6 +407,7 @@ def aggregate(
     stages: Sequence[int] | None = None,
     resamples: int = 10000,
     seed: int = 0,
+    primary_classes: Sequence[str] | None = None,
 ) -> AggregateReport:
     """Load every run, summarise each arm, and run the paired test at every stage.
 
@@ -375,10 +421,15 @@ def aggregate(
     out level the two contrasts agree; when it does not, the trajectory is the one that still
     means what the rule intended. See that class for why it is a sensitivity analysis rather
     than a second endpoint.
+
+    ``primary_classes`` derives a class-subset mAP into every record first, reachable as
+    ``<section>.primary_map50`` -- see :func:`add_primary_mean`.
     """
     runs = tuple(load_run(run_dir) for run_dir in run_dirs)
     if not runs:
         raise AggregationError("no run directories given")
+    if primary_classes:
+        add_primary_mean(runs, primary_classes)
     pairs = pair_runs(runs)
 
     stage_indices = tuple(stages) if stages is not None else common_stages(runs)

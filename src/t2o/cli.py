@@ -218,6 +218,16 @@ def build_parser() -> argparse.ArgumentParser:
         "regardless, so stage 0's null control is always printed beside it. A stage the "
         "runs do not all reach is an error, not a silent fallback",
     )
+    # Same spelling as scripts/gate_table.py's flag, so the kill-test and the campaign state
+    # their primary class set the same way -- the gain and the headroom it is read against are
+    # then arithmetic over the same classes.
+    aggregate.add_argument(
+        "--primary-classes",
+        nargs="+",
+        help="derive a class-subset mAP over these class names, reachable as "
+        "zero_shot.primary_map50 / .primary_map50_95, plus zero_shot.primary_n_classes. For "
+        "FLIR: bicycle car person, leaving dog's 13 val instances out of the headline",
+    )
     aggregate.add_argument("--csv", type=Path, help="also write the tidy per-run rows here")
     aggregate.add_argument("--resamples", type=int, default=10000, help="bootstrap resamples")
     aggregate.add_argument("--seed", type=int, default=0, help="bootstrap seed")
@@ -569,6 +579,7 @@ def _run_aggregate(args: argparse.Namespace) -> int:
         metrics=args.metric,
         resamples=args.resamples,
         seed=args.seed,
+        primary_classes=args.primary_classes,
     )
     headline = args.stage if args.stage is not None else report.stages[-1]
     # The computed stages are the intersection across every matched run, so one crashed run

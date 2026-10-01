@@ -8,6 +8,7 @@ the CLI and, like `test_task.py`'s own end-to-end case, calls ultralytics' real 
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -546,6 +547,7 @@ def _write_e3_run(
     weights: list[float],
     map50: float,
     stages: tuple[int, ...] = (0,),
+    per_class_ap50: dict[str, float] | None = None,
 ) -> None:
     """A minimal run directory, mirroring what `run_loop` + `Config.snapshot` leave behind.
 
@@ -567,8 +569,8 @@ def _write_e3_run(
                         "recall": 0.8,
                         "map50": map50,
                         "map50_95": map50 * 0.7,
-                        "per_class_ap50": {},
-                        "per_class_ap50_95": {},
+                        "per_class_ap50": per_class_ap50 or {},
+                        "per_class_ap50_95": per_class_ap50 or {},
                     },
                     "fidelity": None,
                 }
@@ -607,6 +609,45 @@ def test_main_aggregate_expands_a_glob_and_writes_the_csv(tmp_path: Path) -> Non
     assert exit_code == 0
     rows = csv_path.read_text().splitlines()
     assert len(rows) == 1 + 4 * 1 * 2  # header + runs x stages x metrics
+
+
+def test_main_aggregate_derives_the_primary_class_mean(tmp_path: Path) -> None:
+    """`--primary-classes bicycle car person` is how the FLIR cell states its headline.
+
+    `dog` is given a wild value no 3-class mean may contain, so a csv row carrying it would
+    prove the subset was ignored.
+    """
+    classes = {"bicycle": 0.30, "car": 0.60, "person": 0.90, "dog": 0.02}
+    for seed in (0, 1):
+        _write_e3_run(tmp_path, f"e3f-control-s{seed}", seed, [0.0], 0.70, per_class_ap50=classes)
+        _write_e3_run(tmp_path, f"e3f-loop-s{seed}", seed, [1.0], 0.80, per_class_ap50=classes)
+    csv_path = tmp_path / "e3f.csv"
+
+    exit_code = main(
+        [
+            "aggregate",
+            "--runs",
+            f"{tmp_path}/e3f-*",
+            "--primary-classes",
+            "bicycle",
+            "car",
+            "person",
+            "--metric",
+            "zero_shot.primary_map50",
+            "zero_shot.primary_n_classes",
+            "--csv",
+            str(csv_path),
+            "--resamples",
+            "100",
+        ]
+    )
+
+    assert exit_code == 0
+    rows = list(csv.DictReader(csv_path.read_text().splitlines()))
+    primary = [float(row["value"]) for row in rows if row["metric"] == "zero_shot.primary_map50"]
+    assert primary == pytest.approx([0.60] * 4)  # (0.30 + 0.60 + 0.90) / 3, dog left out
+    counts = {float(row["value"]) for row in rows if row["metric"] == "zero_shot.primary_n_classes"}
+    assert counts == {3.0}
 
 
 def test_main_aggregate_refuses_a_stage_the_runs_do_not_all_reach(tmp_path: Path) -> None:

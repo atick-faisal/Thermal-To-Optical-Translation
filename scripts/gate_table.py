@@ -51,6 +51,7 @@ from t2o.data.calibration import load_calibration
 from t2o.data.manifest import DatasetManifest
 from t2o.data.mirror import read_label_provenance
 from t2o.data.pairing import LABELS_SEGMENT
+from t2o.metrics.task import PrimaryClassError, primary_mean
 
 logger = logging.getLogger(__name__)
 
@@ -85,20 +86,17 @@ class Row:
 
 
 def _primary_mean(per_class_ap50: dict[str, float], primary: Sequence[str]) -> float:
-    """Mean AP50 over `primary`, skipping classes with no ground truth in the split.
+    """`metrics.task.primary_mean`, with its error turned into a CLI exit.
 
-    `metrics.task._extract_per_class_ap` omits a zero-instance class entirely rather than
-    reporting 0.0, because "the detector missed every instance" and "there was nothing to detect"
-    are different facts. Intersecting keeps this a mean over what was actually scored instead of
-    one diluted by an absence.
+    The arithmetic lives in the library because the campaign aggregator reads the same mean
+    (`analysis/aggregate.py::add_primary_mean`), and a headline computed two ways is a headline
+    that can disagree with itself. This wrapper exists only to keep the gate's failure a clean
+    message rather than a traceback.
     """
-    scored = [per_class_ap50[name] for name in primary if name in per_class_ap50]
-    if not scored:
-        raise SystemExit(
-            f"none of the primary classes {list(primary)} were scored -- the split has no "
-            f"instances of any of them (it scored {sorted(per_class_ap50)})"
-        )
-    return sum(scored) / len(scored)
+    try:
+        return primary_mean(per_class_ap50, primary)
+    except PrimaryClassError as error:
+        raise SystemExit(str(error)) from error
 
 
 def _score(

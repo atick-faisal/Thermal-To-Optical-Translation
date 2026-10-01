@@ -16,6 +16,7 @@ to agree by convention.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,34 @@ _RESULT_KEYS = {
 }
 # The equivalent attributes on the Metric object, used when results_dict is unavailable.
 _BOX_ATTRS = {"precision": "mp", "recall": "mr", "map50": "map50", "map50_95": "map"}
+
+
+class PrimaryClassError(ValueError):
+    """Raised when none of the requested primary classes was scored in a split."""
+
+
+def primary_mean(per_class_ap: Mapping[str, float], primary: Sequence[str]) -> float:
+    """Mean AP over `primary`, skipping classes with no ground truth in the split.
+
+    `_extract_per_class_ap` omits a zero-instance class entirely rather than reporting 0.0,
+    because "the detector missed every instance" and "there was nothing to detect" are
+    different facts. Intersecting keeps this a mean over what was actually scored instead of
+    one diluted by an absence -- and it divides by the number of classes *scored*, not by
+    `len(primary)`, so an absent class neither contributes 0.0 nor shrinks the denominator.
+
+    This exists because a 4-class mean is the wrong headline on FLIR: `dog` has 13 instances
+    in the val split against `car`'s 4,124, yet carries 25% of a 4-class mean, and an AP50
+    swing of 0.4 on 13 instances -- entirely ordinary -- moves that mean by 0.1 (TASKS.md
+    M3 E9). Lives here rather than in a script because both the gate table and the campaign
+    aggregator read it, and `scripts/` imports `t2o`, never the other way round.
+    """
+    scored = [per_class_ap[name] for name in primary if name in per_class_ap]
+    if not scored:
+        raise PrimaryClassError(
+            f"none of the primary classes {list(primary)} were scored -- the split has no "
+            f"instances of any of them (it scored {sorted(per_class_ap)})"
+        )
+    return sum(scored) / len(scored)
 
 
 def _extract_metrics(results: Any) -> dict[str, float]:

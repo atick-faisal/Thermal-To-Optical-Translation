@@ -25,6 +25,7 @@ import pytest
 from t2o.analysis.aggregate import (
     AggregationError,
     Arm,
+    add_primary_mean,
     aggregate,
     bootstrap_ci,
     common_stages,
@@ -35,6 +36,7 @@ from t2o.analysis.aggregate import (
     tidy_rows,
     write_csv,
 )
+from t2o.metrics.task import PrimaryClassError, primary_mean
 
 
 def _write_run(
@@ -45,6 +47,7 @@ def _write_run(
     map50_per_stage: list[float],
     lpips_per_stage: list[float] | None = None,
     false_object_per_stage: dict[int, float] | None = None,
+    per_class_ap50: dict[int, dict[str, float]] | None = None,
 ) -> Path:
     """Write a minimal but real-shaped run directory: metrics.json + config.yaml."""
     run_dir = root / name
@@ -70,8 +73,19 @@ def _write_run(
                     "recall": 0.8,
                     "map50": map50,
                     "map50_95": map50 * 0.7,
-                    "per_class_ap50": {"Switch": map50 * 0.6, "Pole": 0.95},
-                    "per_class_ap50_95": {"Switch": map50 * 0.4, "Pole": 0.7},
+                    # Overridable per stage so a class that went unscored in *one* stage can
+                    # be constructed exactly -- ultralytics omits a zero-instance class, and
+                    # that absence is what the primary-class mean has to handle.
+                    "per_class_ap50": (
+                        {"Switch": map50 * 0.6, "Pole": 0.95}
+                        if per_class_ap50 is None or index not in per_class_ap50
+                        else per_class_ap50[index]
+                    ),
+                    "per_class_ap50_95": (
+                        {"Switch": map50 * 0.4, "Pole": 0.7}
+                        if per_class_ap50 is None or index not in per_class_ap50
+                        else {name: ap * 0.7 for name, ap in per_class_ap50[index].items()}
+                    ),
                 },
                 "fidelity": {
                     "psnr": 15.5,
@@ -618,3 +632,89 @@ def test_tidy_rows_omit_cells_a_metric_was_never_recorded_in(tmp_path: Path) -> 
     assert by_metric["zero_shot.map50"] == {0, 1}
     assert by_metric["faithfulness.false_object_rate"] == {1}
     assert len([r for r in rows if r["metric"] == "faithfulness.false_object_rate"]) == 12
+
+
+# --- the primary-class mean (TASKS.md M3 E9: 3-class headline, dog stated separately) ---
+
+
+def test_primary_mean_averages_only_the_named_classes() -> None:
+    assert primary_mean({"a": 0.2, "b": 0.4, "c": 1.0}, ["a", "b"]) == pytest.approx(0.3)
+
+
+def test_primary_mean_divides_by_the_classes_actually_scored() -> None:
+    """An unscored class must not contribute 0.0, nor sit in the denominator.
+
+    This is the whole reason the mean is not `sum(...) / len(primary)`: ultralytics omits a
+    class with no ground-truth instances, and treating that absence as a zero would report a
+    detector as having failed at something the split never asked of it.
+    """
+    assert primary_mean({"a": 0.2, "b": 0.4}, ["a", "b", "absent"]) == pytest.approx(0.3)
+
+
+def test_primary_mean_refuses_when_no_primary_class_was_scored() -> None:
+    with pytest.raises(PrimaryClassError, match="none of the primary classes"):
+        primary_mean({"other": 0.5}, ["a", "b"])
+
+
+def test_the_primary_mean_reaches_the_paired_block_and_the_trajectory(tmp_path: Path) -> None:
+    """The reason the mean is injected into the records instead of computed by the caller.
+
+    `zero_shot.map50` here is deliberately *not* the primary mean -- the fixture's Pole is a
+    flat 0.95 -- so a paired block that moved with the primary metric can only have come from
+    the derived key, not from the headline mAP leaking through.
+    """
+    paths = _campaign(tmp_path, [0, 1, 2], [0.80, 0.81, 0.82])
+
+    report = aggregate(
+        paths, metrics=["zero_shot.primary_map50"], primary_classes=["Switch", "Pole"]
+    )
+
+    assert report.metrics == ("zero_shot.primary_map50",)
+    # Switch is map50 * 0.6 and Pole a flat 0.95, so seed 0's stage-1 loop value is
+    # (0.80 * 0.6 + 0.95) / 2 = 0.715 against the control's (0.72 * 0.6 + 0.95) / 2 = 0.691.
+    stage1 = next(result for result in report.paired if result.stage == 1)
+    assert stage1.differences[0] == pytest.approx(0.0240)
+    assert stage1.n == 3
+    # The trajectory block is the half a caller-side computation would have lost.
+    assert [result.stage for result in report.trajectory] == [1]
+
+
+def test_the_primary_mean_is_absent_unless_asked_for(tmp_path: Path) -> None:
+    paths = _campaign(tmp_path, [0, 1, 2], [0.80, 0.81, 0.82])
+
+    with pytest.raises(AggregationError, match="primary_map50"):
+        aggregate(paths, metrics=["zero_shot.primary_map50"])
+
+
+def test_primary_n_classes_records_how_many_were_scored(tmp_path: Path) -> None:
+    """The column exists to be checked, not trusted.
+
+    A stage where one primary went unscored still produces a mean -- correctly, over what was
+    there -- so the only way a reader can tell that the headline changed denominator partway
+    through a campaign is for the count to travel beside it.
+    """
+    run = load_run(
+        _write_run(
+            tmp_path,
+            "r",
+            0,
+            [0.0, 1.0],
+            [0.70, 0.80],
+            per_class_ap50={1: {"Switch": 0.5}},
+        )
+    )
+
+    add_primary_mean([run], ["Switch", "Pole"])
+
+    assert run.stages[0]["zero_shot"]["primary_n_classes"] == 2.0
+    assert run.stages[1]["zero_shot"]["primary_n_classes"] == 1.0
+    assert run.stages[1]["zero_shot"]["primary_map50"] == pytest.approx(0.5)
+
+
+def test_an_unscorable_stage_names_the_run_and_the_stage(tmp_path: Path) -> None:
+    run = load_run(
+        _write_run(tmp_path, "r", 0, [0.0, 1.0], [0.70, 0.80], per_class_ap50={1: {"dog": 0.1}})
+    )
+
+    with pytest.raises(AggregationError, match=r"stage 1: none of the primary classes"):
+        add_primary_mean([run], ["Switch", "Pole"])
