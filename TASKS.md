@@ -3620,11 +3620,12 @@ Observation B does not survive per-run. The endpoint, C2 and the sd direction al
 - [ ] Full baseline suite (`RESEARCH_FINDINGS.md` §8)
 - [x] E8 low-annotation sweep — **run**. Crossover at `N ≈ 150` annotated thermal images;
       direct thermal wins above it. Arm A is also the first real §8 baseline row. See below.
-- [ ] E9 cross-dataset generalisation — **priced; steps 0, 1 and 3's driver done. The kill-test
-      waits on one detector training (step 2), which crashed on host RAM and is being relaunched
-      one card at a time.** FLIR-aligned, gated on a minutes-long
-      kill-test that decides whether the cell is worth running at all. The cell's own cost is now a
-      measurement: **~126 GPU-h**, not ~72. See below.
+- [ ] E9 cross-dataset generalisation — **steps 0–4 and 3b all done; the twelve-run cell RAN
+      2026-10-01 and its readout is pending** (step 5 below). FLIR-aligned. The kill-test it was
+      gated on passed weakly at **+0.2066** 3-class headroom against the custom set's +0.733, which
+      is the thing this cell exists to report. The cell's cost was re-measured by step 4 (b) at
+      **77–103 GPU-h**, a floor rather than a forecast — not the ~126 GPU-h first recorded here,
+      and not the ~72 before that.
 - [ ] E10 faithfulness stress tests
 - [ ] E4 coupling comparison: cascaded vs bilevel-**reimplemented** (TarDAL's released code
       severs the generator gradient — see PLAN.md §11)
@@ -4149,7 +4150,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
 | 2b | the in-loop `yolo11n` (FLIR visible, seed 0) | **1.36 h clean / 2.29 h wall** — done 2026-09-28; `best.pt` is **epoch 63**; one epoch stalled 56 min | step 5 |
 | 4 | the corpus-cap seam + a per-epoch clock + the FLIR throughput probe | ~150 lines + 12 tests (not the ~20 estimated) + ~1 GPU-h — **done** | step 5 |
-| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **77–103 GPU-h**, measured by step 4 (b); a floor (solo, stage 0 only, +20%/stage carried) | criterion 2 |
+| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **77–103 GPU-h**, measured by step 4 (b); a floor (solo, stage 0 only, +20%/stage carried) — **ran 2026-10-01, readout pending** | criterion 2 |
 | 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — done 2026-09-28, **WEAK PASS stands at +0.2066** | step 4 |
 
 - [x] **Step 0** — the free throughput measurement. **Done 2026-09-26.** A 4-stage pix2pix run is
@@ -5048,6 +5049,100 @@ changes nothing measured. **`--batch` is not**, and is not to be touched to fit 
 logical CPUs between 96 loader processes and slows both runs by an unmeasured amount, so two cards
 buy less than 2× — step 0's ~126 h was itself measured two-up, which is part of why it sits above
 this projection.
+
+#### Step 5 — the twelve-run FLIR cell (server). **Ran; the readout is pending**
+
+The campaign completed on 2026-10-01. **It was launched without its command written down** —
+nothing above this line records one, and `e3f-control-s0` at the concurrency-budget table was the
+only trace of the run names in the whole repo. That is the gap this section closes, and it is why
+`scripts/campaign_report.py`'s third block exists: the twelve `config.yaml` snapshots are now the
+only record of what was actually asked for, so the report prints every key that differs across
+them, and the fully resolved config of one run beside it. Treat the printed flag set as the
+reproducible launch, not the reconstruction below.
+
+What the pre-registration fixed, and what the report must therefore confirm rather than discover:
+`--max-train-images 600` (the matched corpus), `--val-loss-images 153` (step 4 (b), 15.4 GPU-h
+saved), `--workers 8` two-up with one run per card, each *pair* on one card by seed,
+`--in-loop-weights` and `--eval-init-weights` both `runs/inloop-flir-yolo11n/weights/best.pt`,
+`--reference-weights runs/reference-flir-yolo11s/weights/best.pt`, `--resume` on every run, and
+the ramp left to `experiments/e3_pix2pix_loop.yaml` rather than overridden.
+
+##### The endpoint, fixed before the numbers were read
+
+**3-class mAP50 (bicycle / car / person) is the primary**, dog stated separately, 4-class
+`zero_shot.map50` reported beside it. This follows the dog rule pre-registered for this cell —
+13 val instances carrying 25% of a 4-class mean, where one detection moves it by ~0.1, the width
+of the kill-test's whole decision band — and it puts the gain on the scale of the **+0.2066**
+headroom the cell is read against, which is itself a 3-class number.
+
+`t2o aggregate` could not express it: `metric_value` resolves one dotted leaf and nothing averaged
+across keys. `--primary-classes` now derives `zero_shot.primary_map50` into each record *before*
+aggregating, so the arm summaries, the sign-flip test, the trajectory contrast and the tidy CSV all
+apply to the subset endpoint — and the mean is `metrics/task.py::primary_mean`, the same function
+`scripts/gate_table.py` scored the headroom with. `zero_shot.primary_n_classes` travels beside it:
+std 0.0000 at every stage is the check that the denominator never moved.
+
+**C2 was added here, declared before any mAP was read.** It was not pre-registered for E9 — both
+earlier cells ran a faithfulness pass and this one had no plan for it. Adding a metric before the
+numbers are known is legitimate; after would not be. The exports are also only safe while the run
+dirs survive, so the pass runs in the same sitting.
+
+##### Commands
+
+```powershell
+$FLIR  = "dataset/processed/flir/data.yaml"
+$JUDGE = "runs/reference-flir-yolo11s/weights/best.pt"
+
+# 1. Pre-flight. ultralytics honours `path:` literally while t2o's loader falls through a
+#    stale one, and everything below reaches ultralytics (step 1's sharper statement).
+Get-Content $FLIR -TotalCount 2
+
+# 2. C2 over the twelve stage-3 exports, scored with the REFERENCE judge, never the in-loop
+#    one. --write-back lands the rates in metrics.json so the paired test is the same one the
+#    headline rests on, rather than twelve numbers to eyeball.
+foreach ($arm in 'control','loop') { foreach ($s in 0,1,2,3,4,5) {
+  uv run t2o faithfulness --translated "runs/e3f-$arm-s$s/stage3/translated" `
+    --data $FLIR --weights $JUDGE --write-back --device cuda:0
+} }
+
+# 3. The report. ~500 lines; redirect, open, paste back whole.
+uv run python scripts/campaign_report.py --runs 'runs/e3f-*' --stage 3 `
+    --primary-classes bicycle car person --data $FLIR > runs/e3f-report-2026-10-01.txt
+```
+
+Also wanted, from the W&B UI: the **Runtime** column for the twelve runs, and the campaign's
+`--group` if it is visible — neither was recorded. `metrics.json` gives clean compute time;
+Runtime gives wall time including stalls, and step 2b's 1.36 h clean against 2.29 h wall is why
+both are read.
+
+##### Read in this order, and stop if either fails
+
+1. **completeness** — 12 runs, every run reached stage 3. `aggregate` computes on the stages
+   shared by *every* run, so one stump collapses them to `[0]`; that produced a plausible, wrong
+   table once (M2a step 5). `--stage` is now fatal on a stage the runs do not share, and the
+   report omits it rather than aborting when the campaign is short, so this line is the guard.
+2. **config variance** — nothing unexpected varying, and no pair split across cards.
+
+##### What the report closes that this cell carried rather than measured
+
+- **The realised dose.** `grad_scale: 0.15` was calibrated on the custom set and separately on
+  turbo. FLIR's box density is far above both (24,732 cars, 13,094 people), and step 4 (b) priced
+  the coupling surcharge at +17.5% per coupled epoch against the custom cell's +6.8% — so the
+  achieved detection share may well land outside the 20–30% band. Record it; do not chase it.
+- **The +20%-per-stage growth**, carried from step 0 as an upper bound and never explained. These
+  are the first FLIR runs to reach stages 1–3, so the report's per-stage training times measure it.
+- **Two-up contention**, which the 77–103 GPU-h floor explicitly did not carry. The campaign's
+  median epoch against the probe's solo 43.524 s (control) / 51.156 s (loop) is the cost of
+  sharing 64 logical CPUs, and the report prints the ratio.
+
+##### The caveat that travels with whatever the result is
+
+The de-roll corrected the **labels**, which bought an honest floor. The 5.90 px roll still sits
+between pix2pix's input and its `l2: 1.0` + `lpips: 5.0` supervision target, and a generator's only
+way to satisfy a systematic roll is to blur. Warping the thermal *images* is a separate and much
+larger job. **This confound exists on the public cell and nowhere else**, so it is stated with the
+number rather than left for a reviewer — and a weak or null result is reportable either way:
++0.2066 against the custom set's +0.733 is what E9 exists to report.
 
 ## M4 — Phase 4: Harden
 
