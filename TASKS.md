@@ -3906,7 +3906,11 @@ GPU-hours**. Arms C and D are `t2o evaluate` calls on existing exports — minut
       a few hundred boxes. A dataset where thermal is *moderately* legible could behave
       differently in both directions. If it does, the right response may be to **loosen the
       criterion to admit a public dataset** rather than to record a conditional pass here.
-      Decide once there is a second dataset to decide with — not before.
+      Decide once there is a second dataset to decide with — not before. **The second dataset
+      now exists (E9 step 5, 2026-10-01); the decision is still open.** Its crux is that
+      step's finding 2: on FLIR the loop beats the control by +0.351 but only reaches the
+      raw-thermal floor, so "loop beats control" holds on two datasets and "translation beats
+      thermal" holds on one.
 
 ### E9 — the public-dataset cell (FLIR-aligned): the three blockers, priced
 
@@ -4150,7 +4154,7 @@ enough that the kill-test remains the only real gate, which is the point of sequ
 | 3 | **kill-test** — the FLIR gate table, floor against ceiling | minutes — done 2026-09-27: headroom **+0.2123**, **WEAK PASS** | *everything* |
 | 2b | the in-loop `yolo11n` (FLIR visible, seed 0) | **1.36 h clean / 2.29 h wall** — done 2026-09-28; `best.pt` is **epoch 63**; one epoch stalled 56 min | step 5 |
 | 4 | the corpus-cap seam + a per-epoch clock + the FLIR throughput probe | ~150 lines + 12 tests (not the ~20 estimated) + ~1 GPU-h — **done** | step 5 |
-| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **77–103 GPU-h**, measured by step 4 (b); a floor (solo, stage 0 only, +20%/stage carried) — **ran 2026-10-01, readout pending** | criterion 2 |
+| 5 | the twelve-run FLIR E3 cell at 600 matched pairs | **77–103 GPU-h**, measured by step 4 (b); a floor (solo, stage 0 only, +20%/stage carried) — **done 2026-10-01: loop +0.351 over control, p = .031; loop 0.4415 against the 0.4499 floor** | criterion 2 |
 | 3b | **de-roll** the thermal labels via `calibration/flir.json`, then re-gate | ~330 lines + CPU-minutes — done 2026-09-28, **WEAK PASS stands at +0.2066** | step 4 |
 
 - [x] **Step 0** — the free throughput measurement. **Done 2026-09-26.** A 4-stage pix2pix run is
@@ -5050,7 +5054,7 @@ logical CPUs between 96 loader processes and slows both runs by an unmeasured am
 buy less than 2× — step 0's ~126 h was itself measured two-up, which is part of why it sits above
 this projection.
 
-#### Step 5 — the twelve-run FLIR cell (server). **Ran; the readout is pending**
+#### Step 5 — the twelve-run FLIR cell (server). **Done 2026-10-01 — loop +0.351 over control (p = .031), at the floor**
 
 The campaign completed on 2026-10-01. **It was launched without its command written down** —
 nothing above this line records one, and `e3f-control-s0` at the concurrency-budget table was the
@@ -5154,6 +5158,8 @@ produced a valid report with blank faithfulness columns either way.
 
 ##### What the report closes that this cell carried rather than measured
 
+All three are closed by findings 9–10 of the result below.
+
 - **The realised dose.** `grad_scale: 0.15` was calibrated on the custom set and separately on
   turbo. FLIR's box density is far above both (24,732 cars, 13,094 people), and step 4 (b) priced
   the coupling surcharge at +17.5% per coupled epoch against the custom cell's +6.8% — so the
@@ -5172,6 +5178,160 @@ way to satisfy a systematic roll is to blur. Warping the thermal *images* is a s
 larger job. **This confound exists on the public cell and nowhere else**, so it is stated with the
 number rather than left for a reviewer — and a weak or null result is reportable either way:
 +0.2066 against the custom set's +0.733 is what E9 exists to report.
+
+##### The result — read 2026-10-01. **Loop beats control by +0.351, and lands on the floor**
+
+From `runs/e3f-report-2026-10-01.txt` (server, gitignored), generated at `7a3ca94`. The per-run ×
+per-stage rows are tracked at **`docs/results/e3f-tidy.csv`** — the report's block 4 verbatim, 48
+rows; it carries no path columns, so unlike E8's nothing was dropped.
+
+**Both stop-checks passed.** 12 runs, every run reached stage 3. Nothing varied across the
+campaign except `task_weights`, `seed`, `name` and `device`, and every pair shares a card (s0–s2 on
+`cuda:0`, s3–s5 on `cuda:1`). `primary_n_classes` is 3.0000 ± 0 at every stage. **This is the
+reproducible launch** the section above said was never written down: the report's resolved config
+confirms every pre-registered flag — 600 train images, 153 val-loss images, 8 workers, both
+`yolo11n` paths, the `yolo11s` reference, the stock ramp.
+
+Per-arm mean ± sd, 3-class mAP50 (the primary), with the gate's two anchors for scale:
+
+| arm | stage 0 | stage 1 | stage 2 | stage 3 |
+| --- | --- | --- | --- | --- |
+| control | 0.0722 ± .0535 | 0.0710 ± .0572 | 0.0940 ± .0472 | 0.0902 ± .0941 |
+| loop | 0.0987 ± .0158 | 0.3736 ± .0486 | 0.4220 ± .0224 | **0.4415 ± .0251** |
+| *floor — the judge on raw de-rolled thermal (step 3b)* | | | | *0.4499* |
+| *ceiling — the judge on visible* | | | | *0.6566* |
+
+Paired loop − control, exact two-sided sign-flip over 2⁶ assignments, bootstrap CI descriptive only:
+
+| metric | stage 0 (null) | stage 1 | stage 2 | **stage 3 (headline)** |
+| --- | --- | --- | --- | --- |
+| **3-class mAP50** | +0.0266, p=.281, [−.005, +.061] | +0.3026, p=.031 | +0.3281, p=.031 | **+0.3512, p=.031, [+.292, +.405]** |
+| 4-class `zero_shot.map50` | +0.0199, p=.281 | +0.2342, p=.031 | +0.2506, p=.031 | +0.2686, p=.031, [+.229, +.306] |
+| `zero_shot.map50_95` | +0.0103, p=.250 | +0.1118, p=.031 | +0.1218, p=.031 | +0.1299, p=.031, [+.111, +.148] |
+| `detector.map50` | +0.1055, p=.344 | +0.0988, p=.031 | +0.1012, p=.031 | +0.0986, p=.031, [+.079, +.117] |
+| `fidelity.lpips` | −0.1792, **p=.031** | −0.0482, p=.406 | −0.0656, p=.062 | −0.0764, p=.094, [−.129, −.026] |
+| `fidelity.ssim` | +0.1338, **p=.031** | +0.0681, p=.156 | +0.1303, p=.062 | +0.1635, p=.031, [+.066, +.268] |
+
+**1. The pre-registered endpoint is positive at the sign-flip floor, and the null control held.**
++0.3512 at p = 0.0312 = 2/2⁶, all six pairs the same sign; the stage-0 null is +0.0266 (p = .281),
+so stage 3 is **13× the null** — "clearly larger" with no judgement call, unlike e3b's 1.3×. It is
+monotone in dose (+0.027 → +0.303 → +0.328 → +0.351), and the trajectory contrast, which the
+stage-0 draw cannot touch, agrees: **+0.3247, p = .031, [+.266, +.385]** (a sensitivity analysis,
+never the endpoint). The smallest per-pair difference is +0.228, 4.7× FLIR's own 0.048 noise floor.
+This is 6.9× e3b's +0.0512 — and finding 2 is why that ratio must not be quoted as a bigger win.
+
+**2. The loop lands on the floor; the control lands far below it. This is the finding that
+governs every sentence written about this cell.** The floor is the same judge on the same 1,013
+val frames with the same de-rolled labels, fed raw thermal — what doing no translation at all
+scores. Stage-3 loop is **0.4415 against 0.4499, −0.008**, inside the noise floor; only 2 of 6
+seeds (s0 0.477, s1 0.467) clear it. The control is **−0.360** below it, and no control row at any
+stage ever reaches it (best: 0.249, s0 stage 3). Even stage 0 — plain pix2pix in both arms — sits
+at 0.07–0.10. As fractions of the gate headroom:
+
+| | control, stage 3 | loop, stage 3 |
+| --- | --- | --- |
+| custom set (e3b, all-class; floor 0.1887, ceiling 0.9213, headroom +0.733) | **+83%** | **+90%** |
+| FLIR (3-class; floor 0.4499, ceiling 0.6566, headroom +0.2066) | **−174%** | **−4%** |
+
+So on the custom set translation buys most of the headroom and the loop adds to it; **on FLIR, pix2pix
+at 600 pairs destroys detectable content and the loop restores it to roughly what raw thermal already
+had.** The defensible sentence is *"the detector loss prevents a 0.36 mAP50 loss that plain
+translation incurs"* — never *"translation with the loop improves detection on FLIR"*, which this
+cell does not show.
+
+**3. Per class, the floor comparison splits — and bicycle is where the loss lives.**
+
+| class | floor | loop, stage 3 | loop − floor | loop − control |
+| --- | --- | --- | --- | --- |
+| car | 0.6051 | 0.6956 | **+0.0905** | +0.4947 |
+| person | 0.3772 | 0.4173 | **+0.0401** | +0.3849 |
+| bicycle | 0.3674 | 0.2116 | **−0.1558** | +0.1741 |
+| dog (13 instances, not in the headline) | 0.0242 | 0.0208 | −0.0034 | +0.0207, p=.031 — noise, as pre-registered |
+
+Car and person — the large, warm, thermally legible classes — **do clear the floor**, so the loop
+arm does buy something real there. Bicycle loses 42% of its floor score. The pre-registration called
+bicycle the weak class (+0.1295 headroom) and person the strongest (+0.2932); bicycle is confirmed,
+person is not — car carries the gain. **Hypothesis, untested:** bicycles are thin structures, and the
+5.90 px roll between pix2pix's input and its `l2` + `lpips` target is exactly what a generator
+satisfies by blurring (the caveat above). Warping the thermal images is the test, and it is the
+separate, much larger job that caveat already names.
+
+**4. The control arm collapses; the loop arm never does.** Calling a row collapsed at a 3-class
+mAP50 below 0.02, the control has **7 of 24** stage-rows collapsed (s1 stage 1; s3 stages 2–3, where
+SSIM falls to 0.016 and FID rises to 413; s4 stages 0–1, LPIPS 1.009 at stage 0; s5 stages 0 and 3) and
+the loop **0 of 24**, its stage-3 sd 0.025 against the control's 0.094. The paired effect does not
+rest on the collapses: **the worst loop seed (0.414) beats the best control seed (0.249)**, and
+dropping the two pairs whose control ends collapsed (s3, s5) leaves +0.312. But it means the plain
+baseline fails criterion 4's "no collapse" on this dataset, and part of what the loop measurably does
+here is **stabilise GAN training**. e3b's finding 8 had the loop arm 2.4× tighter than the control
+at stage 3; here it is 3.7×, on a second dataset.
+
+**5. Stage 0 collapses by draw, not by arm.** Stage 0 runs the identical computation in both arms
+(e3b finding 6), yet `control-s4` collapsed there and `loop-s4` — same seed, same card — did not; 2
+of 6 control seeds against 0 of 6 loop is Fisher p ≈ 0.45. Training is not bit-reproducible across
+arms on this hardware, which is known; what is new is that the non-reproducibility reaches all the
+way to **collapse-or-not**, so a single-seed FLIR pix2pix number would be close to meaningless.
+
+**6. The fidelity null failed, and that is why no fidelity claim is made from this cell.** At
+stage 0, where the arms are λ-inert, LPIPS, SSIM and FID all favour the loop at p = .031. The six
+LPIPS pair-differences are −0.001, −0.020, −0.036, −0.095, −0.594, −0.330: one is a tie, one nearly, and the
+magnitude is the two control seeds of finding 5. The sign-flip test counts a −0.001 as a vote, so
+this is the test's known weakness on a heavy tail, not a code path — but it means stage-3 fidelity
+cannot be read alone. **The trajectory contrast is null for every fidelity metric** (LPIPS +0.103,
+p = .406; FID +24.6, p = .875; SSIM +0.030, p = .688; PSNR −1.44, p = .594). Net: **no
+λ-attributable fidelity cost and no λ-attributable fidelity gain** — unlike e3b's finding 9, where
+the loop traded about a third of the control's LPIPS improvement.
+
+**7. `detector.map50` is not a λ effect.** The fine-tuned evaluation detector scores the loop
++0.0986 at stage 3 (p = .031), but the stage-0 null is **+0.1055** and the trajectory difference is
+**−0.0070, p = 1.000**. The whole stage-3 gap was already there at λ = 0 — it is finding 5's draw,
+inherited. Fine-tuning a detector on the translations absorbs whatever the loop changed; only the
+zero-shot judge sees it.
+
+**8. C2 favours the loop on all three rates, and the worst loop seed beats the best control on
+each.** Stage 3, reference judge, never the in-loop one:
+
+| rate | control | loop | paired | worst loop vs best control |
+| --- | --- | --- | --- | --- |
+| false-object (primary) | 0.5198 ± .2752 | 0.1874 ± .0209 | **−0.3324, p=.031** | 0.221 vs 0.242 |
+| missed-object | 0.9229 ± .0824 | 0.5671 ± .0330 | −0.3558, p=.031 | 0.600 vs 0.786 |
+| detection consistency | 0.0725 ± .0776 | 0.3792 ± .0320 | +0.3068, p=.031 | 0.346 vs 0.202 |
+
+C2 was measured at stage 3 only, so it has **no stage-0 null** and cannot separate λ from finding 5's
+draw on its own — the worst-vs-best column is what carries it. And **"low" is not met**: the loop
+arm still misses 57% of the labelled objects, and 19% of its detections are false objects. Criterion 5 cannot be claimed from this cell.
+
+**9. The dose landed in the band.** Detection share 12.4 / 17.7 / **21.1%** against e3b's 10.0 /
+16.1 / 19.8% — inside 20–30% at stage 3, which step 4 (b)'s +17.5% coupling surcharge had put in
+doubt. Raw detection loss (`loss_det / grad_scale`) falls 3.58 → 2.85 → 2.27 across stages 1–3,
+**−37%**, against e3b's −28%. `loss_gan` rises 1.82 → 2.30 (+27%) in the control and
+1.77 → 2.06 (+17%) in the loop, against e3b's +10.6% — the loop arm is the *less* adversarially
+strained one here, consistent with finding 4. Not re-tuned; recorded.
+
+**10. Cost: the per-stage growth is ×2.03 and is the dominant term, not two-up contention.**
+Median epoch roughly doubles from stage 0 (~50 s) to stage 3 (~101–112 s) **in the control arm
+too**, which never constructs a detector — so it is not coupling. Step 0 measured ~+20%/stage on
+the custom set; this is ~+27%/stage compounded and still unexplained. The report's "two-up ×1.64"
+compares an all-stage campaign median against a **stage-0-only** solo probe, so it folds the growth
+in: at stage 0 alone the control ran 50.5 s against the probe's 43.524 s, **×1.16**, which is the
+contention figure. Measured translator training is **102.3 run-hours** (control 49.0, loop 53.3;
+per run 8.4–9.1 h, `control-s0` 7.0); stage boundaries 0–2 add 0.43–0.99 h each. The full total is
+**not recoverable from this report** — see the open items.
+
+##### Open items from the readout
+
+- [ ] **`campaign_report.py`'s wall clock is wrong after a `--write-back`.** `_wall_clock` takes
+      `metrics.json`'s mtime as a run's end (`scripts/campaign_report.py:290`), and
+      `t2o faithfulness --write-back` rewrote all twelve on 2026-10-01 — so the `TOTAL span` and
+      stage-3 `bound_h` columns measure time-since-launch, not run time (spans 13.8–63.0 h, in launch
+      order per card). Ignore both columns in this report; fix the end mark.
+- [ ] **`control-s0` stage 1 ran 95 epochs, not 100** (block 2; block 7's `95-100`). Every other
+      stage of every run has 100. Probably a resume boundary; unexplained. Too small to move the
+      headline (`control-s0` is the *best* control), but it is a completeness defect on record.
+- [ ] **Still wanted from W&B:** the Runtime column for the twelve runs (now the only source for
+      the true total, given the first item) and the campaign `--group` — the resolved config
+      prints `runtime.group: e3-pix2pix-flir600`, which should match.
+- [ ] **The ×2.03 per-stage growth**, now measured on two datasets and in an arm with no detector.
 
 ## M4 — Phase 4: Harden
 
