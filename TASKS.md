@@ -5316,20 +5316,25 @@ compares an all-stage campaign median against a **stage-0-only** solo probe, so 
 in: at stage 0 alone the control ran 50.5 s against the probe's 43.524 s, **×1.16**, which is the
 contention figure. Measured translator training is **102.3 run-hours** (control 49.0, loop 53.3;
 per run 8.4–9.1 h, `control-s0` 7.0); stage boundaries 0–2 add 0.43–0.99 h each. The full total is
-**not recoverable from this report** — see the open items.
+**not readable from this report** — see the first open item, which makes it recoverable.
 
 ##### Open items from the readout
 
-- [ ] **`campaign_report.py`'s wall clock is wrong after a `--write-back`.** `_wall_clock` takes
-      `metrics.json`'s mtime as a run's end (`scripts/campaign_report.py:290`), and
-      `t2o faithfulness --write-back` rewrote all twelve on 2026-10-01 — so the `TOTAL span` and
-      stage-3 `bound_h` columns measure time-since-launch, not run time (spans 13.8–63.0 h, in launch
-      order per card). Ignore both columns in this report; fix the end mark.
+- [x] **`campaign_report.py`'s wall clock is wrong after a `--write-back`.** `_wall_clock` took
+      `metrics.json`'s mtime as a run's end, and `t2o faithfulness --write-back` rewrote all
+      twelve on 2026-10-01 — so the `TOTAL span` and stage-3 `bound_h` columns measure
+      time-since-launch, not run time (spans 13.8–63.0 h, in launch order per card). Ignore both
+      columns in this report. **Fixed:** the end is now the newest file under the last stage's
+      directory (`_run_end`) — the detector fine-tune's final write, seconds before
+      `metrics.json`, and a directory `t2o faithfulness` only reads. The test pins
+      `metrics.json` 100 h late and asserts the 4.50 h span; the old code printed 100.00 h.
+      **The twelve runs' true spans are recoverable**: re-running command 3 after a `git pull`
+      reprints block 5 correctly, since nothing has written into a stage directory since.
 - [ ] **`control-s0` stage 1 ran 95 epochs, not 100** (block 2; block 7's `95-100`). Every other
       stage of every run has 100. Probably a resume boundary; unexplained. Too small to move the
       headline (`control-s0` is the *best* control), but it is a completeness defect on record.
-- [ ] **Still wanted from W&B:** the Runtime column for the twelve runs (now the only source for
-      the true total, given the first item) and the campaign `--group` — the resolved config
+- [ ] **Still wanted from W&B:** the Runtime column for the twelve runs (wall time including
+      stalls, beside the fixed report's span) and the campaign `--group` — the resolved config
       prints `runtime.group: e3-pix2pix-flir600`, which should match.
 - [ ] **The ×2.03 per-stage growth**, now measured on two datasets and in an arm with no detector.
 

@@ -10,6 +10,7 @@ all; it cost ~80 GPU-hours.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -177,3 +178,35 @@ def test_a_metric_only_some_stages_carry_is_a_blank_cell_not_a_crash(
     rows = [line for line in out.splitlines() if line.startswith("e3f-control-s0,")]
     assert rows[0].endswith(",,,")  # stage 0 has no faithfulness block
     assert not rows[3].endswith(",,,")  # stage 3 does
+
+
+def test_the_wall_clock_ignores_a_metrics_json_rewritten_by_write_back(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """E9 step 5's report read `metrics.json`'s mtime as each run's end, after `t2o faithfulness
+    --write-back` had rewritten all twelve that morning -- so every span was time-since-launch.
+    The end must come from the run's own last write, whatever happens to `metrics.json` later."""
+    _campaign(tmp_path)
+    hour = 3600.0
+    for run_dir in tmp_path.iterdir():
+        os.utime(run_dir / "config.yaml", (0.0, 0.0))
+        for stage in range(4):
+            mark = (stage + 1) * hour
+            os.utime(run_dir / f"stage{stage}" / "translator_last.pt", (mark, mark))
+        # The last stage's detector fine-tune: the run's real final write, half an hour after
+        # its translator finished.
+        (run_dir / "stage3" / "detector").mkdir()
+        (run_dir / "stage3" / "detector" / "results.csv").write_text("epoch\n")
+        os.utime(run_dir / "stage3" / "detector" / "results.csv", (4.5 * hour, 4.5 * hour))
+        os.utime(run_dir / "stage3" / "detector", (4.5 * hour, 4.5 * hour))
+        os.utime(run_dir / "stage3", (4.5 * hour, 4.5 * hour))
+        # The write-back, days later.
+        os.utime(run_dir / "metrics.json", (100 * hour, 100 * hour))
+
+    assert main(["--runs", f"{tmp_path}/e3f-*"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    total = next(line for line in lines if line.startswith("e3f-control-s0") and "TOTAL" in line)
+    assert "span 4.50 h" in total
+    stage3 = next(line for line in lines if line.split()[:2] == ["e3f-control-s0", "3"])
+    assert stage3.split()[-1] == "0.50"  # the stage-3 boundary: the fine-tune, not the write-back

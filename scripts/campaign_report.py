@@ -263,6 +263,23 @@ def _wide_table(runs: Sequence[RunRecord], metrics: Sequence[str]) -> None:
             print(",".join(cells))
 
 
+def _run_end(run: RunRecord) -> float:
+    """When the run finished: the newest file under its last stage's directory.
+
+    Not `metrics.json`'s mtime, though `run_loop` writes that file last. `t2o faithfulness
+    --write-back` rewrites it after the fact, which is what turned E9 step 5's twelve spans
+    into time-since-launch (13.8-63.0 h, in launch order per card). The last stage's
+    directory is written up to the end of its detector fine-tune -- seconds before
+    `metrics.json` -- and `t2o faithfulness` only reads from it. `metrics.json` remains the
+    fallback for a run whose stage directories were pruned.
+    """
+    last = max(int(record["stage"]) for record in run.stages)
+    return max(
+        (path.stat().st_mtime for path in (run.path / f"stage{last}").rglob("*")),
+        default=(run.path / "metrics.json").stat().st_mtime,
+    )
+
+
 def _wall_clock(runs: Sequence[RunRecord]) -> None:
     """Training time from the measured per-epoch clock; boundaries from mtimes.
 
@@ -287,7 +304,7 @@ def _wall_clock(runs: Sequence[RunRecord]) -> None:
         times = {
             stage: path.stat().st_mtime for stage, path in sorted(marks.items()) if path.is_file()
         }
-        end = (run.path / "metrics.json").stat().st_mtime
+        end = _run_end(run)
         stage_train: dict[int, float] = {}
         for record in run.stages:
             stage = int(record["stage"])
@@ -295,7 +312,7 @@ def _wall_clock(runs: Sequence[RunRecord]) -> None:
             stage_train[stage] = sum(seconds)
             per_arm_epoch_seconds[run.arm].extend(second for second in seconds if second > 0)
             # The boundary that FOLLOWS this stage: next checkpoint, less that stage's own
-            # measured training. The last one runs to metrics.json, written after everything.
+            # measured training. The last one runs to the run's end (`_run_end`).
             nxt = stage + 1
             if stage in times:
                 after = times.get(nxt, end if nxt not in stage_train else None)
@@ -314,7 +331,9 @@ def _wall_clock(runs: Sequence[RunRecord]) -> None:
         if stage_train.get(0) and stage_train.get(max(stage_train)):
             growth.append(stage_train[max(stage_train)] / stage_train[0])
         span = (end - (run.path / "config.yaml").stat().st_mtime) / SECONDS_PER_HOUR
-        print(f"{run.name:28} {'TOTAL':>5} span {span:.2f} h (config.yaml -> metrics.json)")
+        print(
+            f"{run.name:28} {'TOTAL':>5} span {span:.2f} h (config.yaml -> last stage's last file)"
+        )
 
     print("\ntwo-up contention -- campaign median epoch vs step 4 (b)'s SOLO probe:")
     for arm, seconds in per_arm_epoch_seconds.items():
