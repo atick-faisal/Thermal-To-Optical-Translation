@@ -205,8 +205,13 @@ def test_the_wall_clock_ignores_a_metrics_json_rewritten_by_write_back(
 
     assert main(["--runs", f"{tmp_path}/e3f-*"]) == 0
 
-    lines = capsys.readouterr().out.splitlines()
+    out = capsys.readouterr().out
+    lines = out[out.index("5. WALL CLOCK") :].splitlines()
     total = next(line for line in lines if line.startswith("e3f-control-s0") and "TOTAL" in line)
     assert "span 4.50 h" in total
     stage3 = next(line for line in lines if line.split()[:2] == ["e3f-control-s0", "3"])
     assert stage3.split()[-1] == "0.50"  # the stage-3 boundary: the fine-tune, not the write-back
+    # Stages 0-2: an hour between checkpoints, less the next stage's 80 s of training. The
+    # same report once forgot that subtraction and printed 1.00, a stage of training too many.
+    stage0 = next(line for line in lines if line.split()[:2] == ["e3f-control-s0", "0"])
+    assert stage0.split()[-1] == "0.98"

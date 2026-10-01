@@ -5314,9 +5314,17 @@ too**, which never constructs a detector — so it is not coupling. Step 0 measu
 the custom set; this is ~+27%/stage compounded and still unexplained. The report's "two-up ×1.64"
 compares an all-stage campaign median against a **stage-0-only** solo probe, so it folds the growth
 in: at stage 0 alone the control ran 50.5 s against the probe's 43.524 s, **×1.16**, which is the
-contention figure. Measured translator training is **102.3 run-hours** (control 49.0, loop 53.3;
-per run 8.4–9.1 h, `control-s0` 7.0); stage boundaries 0–2 add 0.43–0.99 h each. The full total is
-**not readable from this report** — see the first open item, which makes it recoverable.
+contention figure.
+
+**The campaign cost ~116.8 GPU-h** (one run per card, so run-hours are GPU-hours), from the re-run
+block 5 after both wall-clock fixes below. A run is **9.51–9.61 h control, 9.94–10.44 h loop**;
+`control-s0`'s span runs from its resume (6.52 h), so it is counted as training plus boundaries,
+8.46 h. Of that, **102.3 h is translator training** (88%). Every stage boundary — export,
+zero-shot, FID and the 50-epoch fine-tune together — is **0.27–0.35 h and flat across stages**, so
+the ×2.03 growth is translator training alone. The arithmetic closes: training plus four boundaries
+reproduces every other run's span to within 0.02 h. Against the **77–103 GPU-h** estimate, which
+was declared a floor, it is 13% over the top. Both overrun terms are ones the estimate said it did
+not carry: two-up contention (×1.16) and per-stage growth beyond its assumed +20%/stage.
 
 ##### Open items from the readout
 
@@ -5330,9 +5338,19 @@ per run 8.4–9.1 h, `control-s0` 7.0); stage boundaries 0–2 add 0.43–0.99 h
       `metrics.json` 100 h late and asserts the 4.50 h span; the old code printed 100.00 h.
       **The twelve runs' true spans are recoverable**: re-running command 3 after a `git pull`
       reprints block 5 correctly, since nothing has written into a stage directory since.
-- [ ] **`control-s0` stage 1 ran 95 epochs, not 100** (block 2; block 7's `95-100`). Every other
-      stage of every run has 100. Probably a resume boundary; unexplained. Too small to move the
-      headline (`control-s0` is the *best* control), but it is a completeness defect on record.
+      **The re-run exposed a second bug, also fixed.** Stages 0–2's `bound_h` subtracted the
+      *next* stage's training from a dict filled inside the same loop, so the lookup was always
+      0 and each boundary carried a whole stage of training: 2.1–3.4 h printed against ~0.3 h
+      real (control-s1 stage 0: 2.13 = 0.28 + stage 1's 1.84). Only stage 3 — and the span —
+      were right. The test now pins a stage-0 boundary too; the old code printed 1.00 for 0.98.
+- [x] **`control-s0` stage 1 ran 95 epochs, not 100** (block 2; block 7's `95-100`). **Explained,
+      not a defect: it trained all 100.** The run was interrupted ~5 epochs into stage 1 and
+      resumed; `Trainer.resume` restarts at the checkpoint's epoch + 1 and `train` records only
+      the epochs it runs, so the first ~5 have no `EpochStats`. Two other traces agree: its span
+      (6.52 h) is the remaining 95 epochs plus three stages almost exactly — `run_loop` re-snapshots
+      `config.yaml` on every launch, so a resumed run's span starts at the resume — and its
+      stage-0 boundary is 0.51 h against everyone else's ~0.30, the lost epochs plus a short
+      restart. Nothing here moves a metric: the record of loss and clock is short, not the run.
 - [ ] **Still wanted from W&B:** the Runtime column for the twelve runs (wall time including
       stalls, beside the fixed report's span) and the campaign `--group` — the resolved config
       prints `runtime.group: e3-pix2pix-flir600`, which should match.

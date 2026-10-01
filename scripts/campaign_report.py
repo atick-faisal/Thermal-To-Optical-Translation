@@ -305,11 +305,19 @@ def _wall_clock(runs: Sequence[RunRecord]) -> None:
             stage: path.stat().st_mtime for stage, path in sorted(marks.items()) if path.is_file()
         }
         end = _run_end(run)
-        stage_train: dict[int, float] = {}
+        epoch_seconds = {
+            int(record["stage"]): [
+                float(epoch.get("seconds", 0.0)) for epoch in record.get("epochs") or []
+            ]
+            for record in run.stages
+        }
+        # Filled before the loop below, not inside it: each boundary subtracts the NEXT stage's
+        # training, and building this as it went made that lookup 0 for every stage but the
+        # last -- E9 step 5's bound_h carried a whole stage of training (2.1-3.4 h for ~0.3 h).
+        stage_train = {stage: sum(seconds) for stage, seconds in epoch_seconds.items()}
         for record in run.stages:
             stage = int(record["stage"])
-            seconds = [float(epoch.get("seconds", 0.0)) for epoch in record.get("epochs") or []]
-            stage_train[stage] = sum(seconds)
+            seconds = epoch_seconds[stage]
             per_arm_epoch_seconds[run.arm].extend(second for second in seconds if second > 0)
             # The boundary that FOLLOWS this stage: next checkpoint, less that stage's own
             # measured training. The last one runs to the run's end (`_run_end`).
