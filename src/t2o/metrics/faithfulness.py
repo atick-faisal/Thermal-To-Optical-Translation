@@ -201,6 +201,7 @@ def evaluate_faithfulness(
     iou_threshold: float = 0.5,
     conf_threshold: float = 0.25,
     imgsz: int = 640,
+    batch: int = 16,
     device: str | None = None,
 ) -> FaithfulnessMetrics:
     """Score one translated export against the real visible frames it was translated from.
@@ -245,29 +246,50 @@ def evaluate_faithfulness(
     model = YOLO(str(weights))
 
     def detect(paths: list[Path]) -> list[Detections]:
-        """One streamed pass, converted to `Detections` as it goes.
+        """One pass in chunks of `batch`, converted to `Detections` as it goes.
 
-        Converting inside the loop rather than collecting `Results` is what keeps this
-        bounded: a `Results` object retains the decoded source image, so materialising a
-        600-image split would hold hundreds of MB to read a handful of boxes out of each.
+        **Chunked here because a list source is never streamed.** A `list` reaches
+        ultralytics' `check_source` (`data/build.py`), which hands it to `autocast_list` --
+        decoding every element up front -- and then to `LoadPilAndNumpy`, whose
+        `bs = len(im0)` makes the whole split *one* batch. `batch=` is passed only to the
+        other branch, `LoadImagesAndVideos`, so it is silently ignored on this one, and
+        `stream=True` yields a generator over a single iteration. The custom set's 153-image
+        val split fit in one batch on a 40 GiB card, which is why both earlier C2 campaigns
+        passed; FLIR's 1,013 tried to allocate 9.89 GiB in one backbone concat and raised
+        (TASKS.md M3 E9 step 5).
+
+        Converting inside the loop still matters for a second, independent reason: a
+        `Results` object retains the decoded source image, so collecting them would hold
+        hundreds of MB to read a handful of boxes out of each.
+
+        `rect=False` is ultralytics' own default, pinned because it is what makes a chunk
+        boundary invisible. It leaves `pre_transform`'s `auto` false, so every image is
+        letterboxed to a fixed square `imgsz` independently of its neighbours and NMS is
+        per-image -- the batching below cannot move a number, and these rates stay comparable
+        to the ones e3b and e3t were scored with (PLAN.md invariant 1).
 
         The two passes are also deliberately **sequential, not zipped**. `YOLO.predict`
         reuses one `self.predictor` across calls, so starting a second stream while the
-        first is still being consumed resets state underneath it.
+        first is still being consumed resets state underneath it -- which is also why each
+        chunk's generator is drained before the next one starts.
         """
-        return [
-            detections_from_result(result, conf_threshold)
-            for result in model.predict(
-                paths,
-                imgsz=imgsz,
-                device=device,
-                verbose=False,
-                stream=True,
-                # Filtered here too, so ultralytics never pays NMS on boxes that
-                # `detections_from_result` is about to discard anyway.
-                conf=conf_threshold,
+        detections: list[Detections] = []
+        for start in range(0, len(paths), batch):
+            detections.extend(
+                detections_from_result(result, conf_threshold)
+                for result in model.predict(
+                    paths[start : start + batch],
+                    imgsz=imgsz,
+                    device=device,
+                    rect=False,
+                    verbose=False,
+                    stream=True,
+                    # Filtered here too, so ultralytics never pays NMS on boxes that
+                    # `detections_from_result` is about to discard anyway.
+                    conf=conf_threshold,
+                )
             )
-        ]
+        return detections
 
     translated_detections = detect(translated_paths)
     visible_detections = detect(visible_paths)

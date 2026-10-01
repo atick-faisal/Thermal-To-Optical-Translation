@@ -336,11 +336,13 @@ class _FakeResult:
         self.boxes = boxes
 
 
-def _fake_yolo(by_path: dict[str, _FakeBoxes]) -> type:
+def _fake_yolo(by_path: dict[str, _FakeBoxes], calls: list[int] | None = None) -> type:
     """A stand-in YOLO whose `predict` replays hand-written detections per image path.
 
     Keyed on the file *stem* so one table serves both the .jpg source frames and the .png
-    export written from them.
+    export written from them. `calls` collects the size of each `predict` call, which is the
+    only observable the chunking tests below have: the real failure was one call holding a
+    whole split, and every rate it returned was still correct.
     """
 
     class _FakeYOLO:
@@ -348,6 +350,8 @@ def _fake_yolo(by_path: dict[str, _FakeBoxes]) -> type:
             self.weights = weights
 
         def predict(self, paths: list[Path], **_: Any) -> Iterator[_FakeResult]:
+            if calls is not None:
+                calls.append(len(paths))
             for path in paths:
                 yield _FakeResult(by_path[Path(path).stem])
 
@@ -426,6 +430,54 @@ def test_a_translation_the_detector_sees_nothing_in_reads_as_a_full_missed_objec
     # No predictions at all, so nothing invented -- the empty-denominator best case.
     assert metrics.false_object_rate == pytest.approx(0.0)
     # Nothing on the real photo either (the same stub answers both passes), so vacuous.
+    assert metrics.detection_consistency == pytest.approx(1.0)
+
+
+def test_the_detector_pass_is_chunked_and_the_chunking_changes_no_rate(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The E9 step 5 regression: a list source makes ultralytics batch the whole split.
+
+    `autocast_list` -> `LoadPilAndNumpy` sets `bs = len(im0)` and ignores `batch=`, so 1,013
+    FLIR val frames became one batch and OOM'd a 40 GiB card. Nothing in the returned rates
+    showed it, so the chunk sizes are what is asserted -- and asserted alongside equality with
+    the unchunked rates, because `rect=False` letterboxes each image
+    independently and a chunk boundary must therefore be invisible.
+    """
+    translated, visible, pairing = export_pair
+    boxes = _FakeBoxes([0], _CENTRE_BOX, [0.9])
+
+    whole: list[int] = []
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({"a": boxes, "b": boxes}, whole))
+    unchunked = evaluate_faithfulness(translated, visible, "w.pt", pairing=pairing, batch=2)
+
+    chunked_calls: list[int] = []
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({"a": boxes, "b": boxes}, chunked_calls))
+    chunked = evaluate_faithfulness(translated, visible, "w.pt", pairing=pairing, batch=1)
+
+    assert whole == [2, 2]  # one call per pass
+    assert chunked_calls == [1, 1, 1, 1]  # two calls per pass, one frame each
+    assert chunked == unchunked
+
+
+def test_a_final_short_chunk_still_scores_every_frame(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three frames at `batch=2`: the remainder must be its own call, not dropped."""
+    translated, visible, pairing = export_pair
+    Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)).save(visible / "c.jpg")
+    Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)).save(translated / "c.png")
+    pairing.label_path(visible / "c.jpg").write_text("0 0.5 0.5 0.4 0.4\n")
+
+    calls: list[int] = []
+    boxes = _FakeBoxes([0], _CENTRE_BOX, [0.9])
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo(dict.fromkeys("abc", boxes), calls))
+
+    metrics = evaluate_faithfulness(translated, visible, "w.pt", pairing=pairing, batch=2)
+
+    assert calls == [2, 1, 2, 1]
+    # All three frames reached the evaluator: a dropped one would leave a missed object.
+    assert metrics.missed_object_rate == pytest.approx(0.0)
     assert metrics.detection_consistency == pytest.approx(1.0)
 
 

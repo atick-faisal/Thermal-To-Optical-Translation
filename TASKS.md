@@ -5100,6 +5100,7 @@ Get-Content $FLIR -TotalCount 2
 # 2. C2 over the twelve stage-3 exports, scored with the REFERENCE judge, never the in-loop
 #    one. --write-back lands the rates in metrics.json so the paired test is the same one the
 #    headline rests on, rather than twelve numbers to eyeball.
+#    Needs the --batch fix below; the command itself is unchanged, 16 is the default.
 foreach ($arm in 'control','loop') { foreach ($s in 0,1,2,3,4,5) {
   uv run t2o faithfulness --translated "runs/e3f-$arm-s$s/stage3/translated" `
     --data $FLIR --weights $JUDGE --write-back --device cuda:0
@@ -5114,6 +5115,34 @@ Also wanted, from the W&B UI: the **Runtime** column for the twelve runs, and th
 `--group` if it is visible — neither was recorded. `metrics.json` gives clean compute time;
 Runtime gives wall time including stalls, and step 2b's 1.36 h clean against 2.29 h wall is why
 both are read.
+
+##### Command 2 OOM'd on the first attempt — `t2o faithfulness` never streamed a list
+
+`torch.OutOfMemoryError: Tried to allocate 9.89 GiB` in a YOLO backbone concat, on a card
+already holding 37.4 GiB of this one process's tensors. **A bug, not a tuning problem**, and
+`evaluate_faithfulness`'s own docstring claimed the opposite.
+
+`model.predict` was handed a `list[Path]`, which in ultralytics takes a different route from a
+path or a directory: `check_source` sends a list through `autocast_list` — decoding every
+element up front — and then to `LoadPilAndNumpy`, whose `bs = len(im0)`. `batch=` is passed
+only to the *other* branch, `LoadImagesAndVideos`, so it is silently dropped here, and
+`stream=True` yields a generator over a single iteration. **The whole split was always one
+batch.**
+
+Which is why it surfaced on this cell and no earlier one: the custom set's val split is **153
+images** and fit; FLIR's is **1,013** (step 1's count), 6.6× larger, and its input tensor alone
+is 4.9 GiB. `evaluate_detector` was never affected — it goes through `model.val(batch=16)`.
+
+**The two earlier cells' C2 numbers stand.** `rect` is false by ultralytics' own default, so
+`pre_transform` letterboxes every image to a fixed square `imgsz` independently of its
+neighbours and NMS is per-image: a chunk boundary cannot move a rate. The fix pins `rect=False`
+rather than inheriting it, so that stays true across an ultralytics bump (PLAN.md invariant 1),
+and the test asserts the **chunk sizes** — the failure returned perfectly correct rates right
+up until the card ran out, so nothing else would catch a reversion.
+
+Nothing wrote back before the crash: the traceback is in the *second* detector pass and
+`record_faithfulness` runs after both. All twelve are a clean re-run, and command 3 would have
+produced a valid report with blank faithfulness columns either way.
 
 ##### Read in this order, and stop if either fails
 

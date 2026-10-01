@@ -151,6 +151,10 @@ def build_parser() -> argparse.ArgumentParser:
     faithfulness.add_argument("--iou-threshold", type=float, default=0.5)
     faithfulness.add_argument("--conf-threshold", type=float, default=0.25)
     faithfulness.add_argument("--imgsz", type=int, default=640)
+    # Must be passed through: ultralytics drops its own `batch=` for a list source and makes
+    # the whole split one batch, which is how FLIR's 1,013-image val split OOM'd a 40 GiB card
+    # (`metrics/faithfulness.py::evaluate_faithfulness`). Lower it to share a card.
+    faithfulness.add_argument("--batch", type=int, default=16)
     faithfulness.add_argument("--device", help="null/auto, 'cpu', or 'cuda:0'")
     faithfulness.add_argument(
         "--write-back",
@@ -490,6 +494,7 @@ def _run_faithfulness(args: argparse.Namespace) -> int:
         iou_threshold=args.iou_threshold,
         conf_threshold=args.conf_threshold,
         imgsz=args.imgsz,
+        batch=args.batch,
         device=args.device,
     )
     logger.info("  false-object rate       %.4f  (LOWER better)", metrics.false_object_rate)
