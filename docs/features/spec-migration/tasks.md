@@ -6,7 +6,7 @@
 | SPEC-MIGRATION-02 | Scaffold `docs/experiments/index.md` from `~/.claude/templates/experiments-index.md`, seeded so the first run is `001` and the first finding `F01` | small | sonnet | done | Q5; blocks -03..-19 |
 | SPEC-MIGRATION-03 | Record `001` — E1 reference bracket (M0.10 + M1's re-measure, `TASKS.md:970-1047`) | moderate | opus | done | needs -02; `Log:` per Q6 |
 | SPEC-MIGRATION-04 | Record `002` — M1 Phase 1 go/no-go (`TASKS.md:1048-1365`) | moderate | opus | done | needs -02 |
-| SPEC-MIGRATION-05 | Record `003` — M1.1 fidelity on M1's runs (`TASKS.md:1366-1510`) | moderate | opus | pending | needs -02 |
+| SPEC-MIGRATION-05 | Record `003` — M1.1 fidelity on M1's runs (`TASKS.md:1366-1510`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-06 | Record `004` — M1.2 design + step 1, the `yolo11s` judge (`TASKS.md:1511-1680`) | moderate | opus | pending | needs -02 |
 | SPEC-MIGRATION-07 | Record `005` — M1.2 steps 5–6, E3 pix2pix at `grad_scale: 1.0e-2` (`TASKS.md:1966-2119`) | moderate | opus | pending | needs -02 |
 | SPEC-MIGRATION-08 | Record `006` — M1.2 step 7, the dose at 2.3% (`TASKS.md:2120-2223`) | moderate | opus | pending | needs -02 |
