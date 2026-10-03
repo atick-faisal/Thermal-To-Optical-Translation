@@ -12,6 +12,7 @@
 | [006](006-m1-2-dose-limited.md) | 2026-08-19 | M1.2 step 7: `scripts/loss_share.py` over E3's six loop runs' saved `metrics.json` — the detection term's share of the objective per stage | M1.2 | Windows server, CPU read (zero GPU cost) | detection term 0.9 / 1.7 / 2.3% of the objective at `grad_scale: 1.0e-2` — E3's null is dose-limited | F25, F26, F27, F28, F29 |
 | [007](007-m1-2-e3-pix2pix-positive.md) | 2026-08-23 | M1.2 step 8: one-seed dose probe at `grad_scale: 0.15`, then E3 pix2pix re-run at that dose — all-zero control vs λ_det [0,1,2,3] loop, six paired seeds, judged by `yolo11s` | M1.2 | Windows server, 2× A100 | stage-3 paired zero-shot mAP50 +0.0512 (p = .031, the n = 6 sign-flip floor) against a −0.0397 stage-0 null — positive | F30, F31, F32, F33, F34, F35, F36, F37, F38, F39, F40, F41, F42, F43, F44, F45, F46, F47, F48 |
 | [008](008-m1-2-c2-faithfulness.md) | 2026-08-23 | M1.2 step 9: C2 faithfulness (`t2o faithfulness --write-back`) on record 007's twelve stage-3 exports, scored by the reference `yolo11s`, six paired seeds | M1.2 | Windows server, 2× A100 | stage-3 false-object rate −0.0289 loop vs control (p = .156) while mAP50 rose +0.0512 — no reward hacking | F49, F50, F51, F52, F53, F54 |
+| [009](009-m2a-turbo-probes.md) | 2026-08-25 | M2a step 4: turbo VRAM probe (one stage-3 epoch, batch 2, full frame) and two 25-epoch `--no-detector` `grad_scale` probes at 0.15 and 0.75, seed 0 | M2a | Windows server, 2× A100 | `grad_scale: 0.15` puts turbo's detection term at 16.6 / 22.9 / 24.5% of the objective — in band at pix2pix's value; batch 2 peaks at 34.14 GB | F55, F56, F57, F58, F59, F60, F61 |
 
 ## Findings
 
@@ -71,3 +72,10 @@
 | F52 | The loop arm is less variable on all three rates (sd ratio loop/control 0.69 / 0.52 / 0.41); untested, an observation to pre-register for turbo | 008 | open | |
 | F53 | F43's +0.0097 LPIPS gap is bounded from both sides — no training-loss cost, better object-level faithfulness — so `reward_target` stays null and the turbo hold is released | 008 | open | acts on F43 |
 | F54 | `t2o faithfulness` crashed on its first server image (CUDA predictions vs CPU ground truth); every test built CPU tensors, so the case was unreachable; fixed in cf72c9c | 008 | open | |
+| F55 | Batch 2 fits turbo at full frame: 34.14 GB peak at stage 3 with the `FrozenDetector` resident, ~5.8 GB headroom; the stage-boundary detector fine-tune is unmeasured | 009 | open | |
+| F56 | `grad_scale: 0.15` lands turbo in band: 16.6 / 22.9 / 24.5% at 25 epochs, projected ~21.6% at 100; band ≈ [0.11, 0.21]; stage-0 totals agree to 0.13% | 009 | open | |
+| F57 | The dose bites in loss space within 25 epochs: raw `loss_det` −5.2 / −9.0 / −13.1% at 0.75 vs 0.15, monotone in stage | 009 | open | |
+| F58 | The dose costs fidelity: weighted `loss_lpips` +6.9 / +11.0 / +3.7% at 5× the dose, against a 0.3% stage-0 null — no case for raising `grad_scale` | 009 | open | |
+| F59 | Turbo is lower than pix2pix on every objective term at stage 3 (total −34%; raw LPIPS 0.175 at 25 ep vs 0.298 at 100) — training loss, one seed, descriptive only | 009 | open | |
+| F60 | Turbo's objective is GAN-heavy: detection 24.5 / GAN 50.9 / LPIPS 24.1 / l2 0.5% vs pix2pix's 19.8 / 43.7 / 35.7 / 0.8% — composition differs by backbone at identical knobs | 009 | open | |
+| F61 | `loss_gan` +119% across stages reads as catch-up, not divergence: ends below pix2pix (1.8513 vs 2.3294) from half the stage-0 base; the 0.75 arm climbs alike | 009 | open | |
