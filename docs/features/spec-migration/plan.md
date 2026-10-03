@@ -216,39 +216,39 @@ Port them to the current project memory. Rewrite `biweekly-progress-updates` to 
 
 ### Q5: What form do the new finding numbers take?
 
-- [ ] Template form `F01`, `F02`, … allocated chronologically, each heading carrying its legacy label, e.g. `### F23 — … (legacy: M1.2 step 8 finding 7)` (recommended) — no F-number is cited anywhere yet, so there is nothing to preserve and no reason to deviate from the template; the label is the crosswalk, found by grep
+- [x] Template form `F01`, `F02`, … allocated chronologically, each heading carrying its legacy label, e.g. `### F23 — … (legacy: M1.2 step 8 finding 7)` (recommended) — no F-number is cited anywhere yet, so there is nothing to preserve and no reason to deviate from the template; the label is the crosswalk, found by grep
 - [ ] Unpadded `F1`, `F2`, … as the sister kept — matches the sister's ledger, but the sister only kept it because 98 numbers were already cited, which is not the case here
 - [ ] Numbers derived from the legacy IDs (e.g. `F-M1.2-8-7`) — self-describing, but breaks the ledger's single counter and its sort order
 
 ### Q6: What goes in a run record's `Log:` field when no log was saved?
 
-- [ ] `none saved — transcribed from TASKS.md <lines> @ pre-spec-migration`, or the `runs/*.txt` path where one exists (recommended) — honest about provenance, and the anchor is resolvable from any clone
+- [x] `none saved — transcribed from TASKS.md <lines> @ pre-spec-migration`, or the `runs/*.txt` path where one exists (recommended) — honest about provenance, and the anchor is resolvable from any clone
 - [ ] Delete the field, as a no-run record does — tidier, but it hides that a run did happen and leaves no pointer to the source text
 - [ ] Use the no-run record shape for every migrated record — no template deviation at all, but it strips wall clock, machine and W&B group from records that have them
 
 ### Q7: What is the unit of a record?
 
-- [ ] One per campaign or stage, splicing its steps, as in the inventory above (recommended) — the sister's Q1; a campaign is the unit that has a question, a design and findings, and it keeps chains like step 6 → step 7 → step 8 inside few records
+- [x] One per campaign or stage, splicing its steps, as in the inventory above (recommended) — the sister's Q1; a campaign is the unit that has a question, a design and findings, and it keeps chains like step 6 → step 7 → step 8 inside few records
 - [ ] One per `TASKS.md` step — strict "one run, one file", but mints records for build steps that ran nothing and splits findings that were reasoned about together
 
 ### Q8: How are the 188 code and config citations handled?
 
-- [ ] The legend only; no sweep (recommended) — the sister kept 209 such citations by design; § numbers are preserved, so every `PLAN.md §N` still resolves, and comment churn across 70 files buys nothing
+- [x] The legend only; no sweep (recommended) — the sister kept 209 such citations by design; § numbers are preserved, so every `PLAN.md §N` still resolves, and comment churn across 70 files buys nothing
 - [ ] Repoint every comment to its new path — no legend needed, but touches 70 files and still cannot reach the 90 commit subjects
 
 ### Q9: How are roadmap rows identified?
 
-- [ ] By their legacy section label, verbatim and never renumbered (`M2b`, `E4`, `M4`, `M2a step 2`, …) (recommended) — commit subjects and code comments already cite those labels
+- [x] By their legacy section label, verbatim and never renumbered (`M2b`, `E4`, `M4`, `M2a step 2`, …) (recommended) — commit subjects and code comments already cite those labels
 - [ ] New stable IDs (e.g. `R-01`) — uniform and short, but a third naming scheme that cites nothing that already exists
 
 ### Q10: Where do the 13 corrections owed to the paper go?
 
-- [ ] `docs/roadmap.md`, under `## Paper obligations` (recommended) — one place for everything still owed, beside the drafting criteria they serve
+- [x] `docs/roadmap.md`, under `## Paper obligations` (recommended) — one place for everything still owed, beside the drafting criteria they serve
 - [ ] A new `docs/paper-notes.md` — room to grow into a methods-section draft, at the cost of a fifth document to keep current
 
 ### Q11: What happens to `RESEARCH_FINDINGS.md`?
 
-- [ ] It stays at the root, frozen, and `docs/goal.md` takes over its north-star role (recommended) — it is the proposal of record, defines `E1`–`E10` and `C1`–`C4`, and its four code citations stay valid
+- [x] It stays at the root, frozen, and `docs/goal.md` takes over its north-star role (recommended) — it is the proposal of record, defines `E1`–`E10` and `C1`–`C4`, and its four code citations stay valid
 - [ ] Move it to `docs/research-proposal.md` — a clearer name next to `docs/experiments/`, but it breaks four citations and the README link for a rename
 
 ## Resolved
