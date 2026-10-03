@@ -1,7 +1,7 @@
 ---
 slug: spec-migration
 title: Spec-Workflow Migration
-status: draft
+status: planned
 created: 2026-10-02
 ---
 
@@ -39,7 +39,7 @@ the real gate**, exactly as the sister's `experiment-ledger/plan.md` established
 
 | Path | Holds |
 | --- | --- |
-| `docs/goal.md` | Problem, Success Criteria (the five drafting criteria), Non-Goals, Constraints. Written by `/project-init`, immutable afterwards. |
+| `docs/goal.md` | Problem, Success Criteria (the six drafting criteria), Non-Goals, Constraints. Written by `/project-init`, immutable afterwards. |
 | `CLAUDE.md` | `just verify`, footguns, the fixed `## Planning` section, and `@AGENTS.md`. |
 | `justfile` | non-fail-fast `verify` (lint, format, types, test) + `hooks`, as in `../Thermal-Image-Registration/justfile`, derived from `.pre-commit-config.yaml`. |
 | `AGENTS.md` | General Guidelines (kept verbatim), where the work lives, the experiment loop, server runs, the citation legend, conventions, house style, non-negotiables. |
@@ -161,10 +161,11 @@ so there is one copy. §1 and §16 point at `docs/goal.md` for the objective and
 
 All 31 open rows, verbatim, grouped under their legacy section labels (Q9) — `M2a step 2`,
 `M2a step 3`, `M2b`, `M3`, `E8`, `E9`, `M4` — and the 13 paper corrections as
-`## Paper obligations` (Q10). The five drafting criteria get a status line each that cites
-F-IDs rather than restating numbers. Row 3899's open decision travels with it whole: whether to
+`## Paper obligations` (Q10). The six drafting criteria in `docs/goal.md` get a status line each
+that cites F-IDs rather than restating numbers (Q12). Row 3899's open decision travels with it whole: whether to
 loosen criterion 1 to admit a public dataset, now that E9 says "loop beats control" holds on two
-datasets and "translation beats thermal" on one.
+datasets and "translation beats thermal" on one. It carries a note that `docs/goal.md`'s Margin
+and Consistency wording may have settled it, for the human to close (Q13).
 
 ### The citation legend (in `AGENTS.md`)
 
@@ -192,19 +193,20 @@ Nets 2 and 3 run before the deletion task, and the deletion task is blocked on t
 
 ### Sequencing
 
-1. `/project-init` lands `docs/goal.md`, `CLAUDE.md` and `justfile` **before** `tasks.md`:
+1. *Done in 5b37655.* `/project-init` lands `docs/goal.md`, `CLAUDE.md` and `justfile` **before** `tasks.md`:
    `/implement` gates on `just verify`, and this plan's Out of Scope must be re-checked against
    `goal.md`'s Non-Goals once they exist. Its `goal.md` sources are `RESEARCH_FINDINGS.md` §1,
    §10, §12, §13 and `PLAN.md` §2, §3, §9. The human writes the Non-Goals.
-2. `/feature-plan spec-migration` continues this feature: Q5–Q11 move to `## Resolved`, then
+2. `/feature-plan spec-migration` continues this feature: Q5–Q14 move to `## Resolved`, then
    `tasks.md`, `decisions.md` and `pitfalls.md` are written. That commit switches the guard on.
 3. Task order: fix `AGENTS.md`'s Working Order → ledger scaffold → records → finding census →
-   `docs/design.md` → `docs/roadmap.md` → `AGENTS.md` rewrite → `CLAUDE.md` import →
-   `README.md` links → coverage map and censuses → delete `PLAN.md` and `TASKS.md` → memory.
+   `docs/design.md` → `docs/roadmap.md` → `AGENTS.md` rewrite → `README.md` links →
+   coverage map and censuses → delete `PLAN.md` and `TASKS.md`. (The `CLAUDE.md` import
+   landed in 5b37655; memory is a post-merge chore, Q14.)
 4. Research is paused until the PR merges (Q3), so main stays at `e70760c` and nothing has to be
    re-migrated.
 
-### Memory housekeeping
+### Memory housekeeping (post-merge, no task row — Q14)
 
 Five memories sit orphaned at the project's former path,
 `~/.claude/projects/-Users-ai--GoogleDrive-Python-Thermal-To-Optical-Translation/memory/`.
@@ -213,6 +215,31 @@ Port them to the current project memory. Rewrite `biweekly-progress-updates` to 
 `dataset-rehost-deferred` — M0.9 closed 2026-09-19 with LLVIP and M3FD adapted on the server.
 
 ## Open Questions
+
+## Resolved
+
+### Q1: What happens to `PLAN.md` and `TASKS.md` once everything is migrated?
+
+- [x] Tag `pre-spec-migration` first, then delete both in the last task, after Nets 2–3 pass (recommended) — every byte stays recoverable with `git show`, and the root stops signalling the legacy workflow to agents
+- [ ] Move both to `docs/archive/` with an archived header — greppable on a fresh clone without git commands, but ~430 KB of stale text agents can mistake for current state
+- [ ] Keep both at the root, stamped archived — the sister's approach, forced on it by untracked files; here it contradicts the global rule that a root `PLAN.md`/`TASKS.md` means the legacy workflow
+
+### Q2: Where does `PLAN.md`'s live design go?
+
+- [x] `docs/design.md`, keeping the `§1`–`§16` numbering, results narrative replaced by pointers, §13 moved into `AGENTS.md` (recommended) — one move, and every `PLAN.md §N` citation resolves by a single legend rule
+- [ ] Split like the sister — §6/§7 to `docs/reference-implementations.md`, §13 to `AGENTS.md`, the rest to `docs/design.md`; more files, and the legend needs a row per section
+- [ ] Keep `PLAN.md` in place and strip only the results — least churn, but leaves a root `PLAN.md`
+
+### Q3: How does research proceed during the migration?
+
+- [x] Full pause until the PR merges (recommended by the human) — main stays at `e70760c`, so the branch never re-migrates new material
+- [ ] Pause, but allow server runs whose logs are saved to `logs/` and recorded after the ledger exists — keeps the GPUs busy, at the cost of records written against a half-built ledger
+- [ ] Continue on main in parallel — every new `TASKS.md` edit would have to be re-migrated and re-audited
+
+### Q4: One feature or two?
+
+- [x] One feature, `spec-migration` (recommended) — the whole scope is known up front, so one plan holds every decision, one coverage map and one audit
+- [ ] Two features like the sister, `experiment-ledger` then `plan-tasks-retirement` — shorter task tables and a proven precedent, but the sister split only because it found the second half later, and the checks would span two plans
 
 ### Q5: What form do the new finding numbers take?
 
@@ -251,30 +278,33 @@ Port them to the current project memory. Rewrite `biweekly-progress-updates` to 
 - [x] It stays at the root, frozen, and `docs/goal.md` takes over its north-star role (recommended) — it is the proposal of record, defines `E1`–`E10` and `C1`–`C4`, and its four code citations stay valid
 - [ ] Move it to `docs/research-proposal.md` — a clearer name next to `docs/experiments/`, but it breaks four citations and the README link for a rename
 
-## Resolved
+### Q12: Which drafting criteria do `docs/design.md §16` and the roadmap's status lines cite?
 
-### Q1: What happens to `PLAN.md` and `TASKS.md` once everything is migrated?
+`docs/goal.md` (5b37655) now has **six** criteria with new thresholds (Margin ≥ +2 mAP@50 on the
+held-out power-line test split; Consistency on ≥3 of 5 datasets against the no-loop control).
+`PLAN.md §16` and `RESEARCH_FINDINGS.md §10` still say five. This plan's End state table and
+"The roadmap" section say "the five drafting criteria".
 
-- [x] Tag `pre-spec-migration` first, then delete both in the last task, after Nets 2–3 pass (recommended) — every byte stays recoverable with `git show`, and the root stops signalling the legacy workflow to agents
-- [ ] Move both to `docs/archive/` with an archived header — greppable on a fresh clone without git commands, but ~430 KB of stale text agents can mistake for current state
-- [ ] Keep both at the root, stamped archived — the sister's approach, forced on it by untracked files; here it contradicts the global rule that a root `PLAN.md`/`TASKS.md` means the legacy workflow
+- [x] `goal.md`'s six; `§16` becomes a pointer to `goal.md`, and each roadmap status line cites F-IDs against the six (recommended) — `goal.md` is the north star, this plan already says `§16` points at it, and grading progress against retired criteria would mislead whoever reads the roadmap next
+- [ ] The legacy five from `RESEARCH_FINDINGS.md §10` — matches the migrated record word for word, but scores progress against criteria the project no longer uses
+- [ ] Both, side by side — a full crosswalk, at the cost of two scorecards to keep current
 
-### Q2: Where does `PLAN.md`'s live design go?
+### Q13: What happens to the deferred criterion-1 decision at `TASKS.md:3899`?
 
-- [x] `docs/design.md`, keeping the `§1`–`§16` numbering, results narrative replaced by pointers, §13 moved into `AGENTS.md` (recommended) — one move, and every `PLAN.md §N` citation resolves by a single legend rule
-- [ ] Split like the sister — §6/§7 to `docs/reference-implementations.md`, §13 to `AGENTS.md`, the rest to `docs/design.md`; more files, and the legend needs a row per section
-- [ ] Keep `PLAN.md` in place and strip only the results — least churn, but leaves a root `PLAN.md`
+The row holds back an edit to criterion 1 "until the public-dataset cell runs", on the reasoning
+that the custom set may be a bad case for the method. `goal.md` may already have answered it:
+Margin stays on the power-line split, public datasets count through Consistency, and "translation
+beats raw thermal" is no longer a criterion.
 
-### Q3: How does research proceed during the migration?
+- [x] Carry it verbatim into the roadmap, annotated "possibly settled by `docs/goal.md` Margin/Consistency — human to close" (recommended) — Net 3a wants every open row verbatim, and closing a research decision is not the migration's call
+- [ ] Drop it as superseded by `goal.md`, listed in Net 3a's dropped list with that reason — a cleaner roadmap, but the migration silently makes a research decision
+- [ ] Carry it verbatim with no annotation — faithful, but leaves a settled decision looking live
 
-- [x] Full pause until the PR merges (recommended by the human) — main stays at `e70760c`, so the branch never re-migrates new material
-- [ ] Pause, but allow server runs whose logs are saved to `logs/` and recorded after the ledger exists — keeps the GPUs busy, at the cost of records written against a half-built ledger
-- [ ] Continue on main in parallel — every new `TASKS.md` edit would have to be re-migrated and re-audited
+### Q14: The memory-housekeeping step writes under `~/.claude/`, which Out of Scope excludes. Which wins?
 
-### Q4: One feature or two?
-
-- [x] One feature, `spec-migration` (recommended) — the whole scope is known up front, so one plan holds every decision, one coverage map and one audit
-- [ ] Two features like the sister, `experiment-ledger` then `plan-tasks-retirement` — shorter task tables and a proven precedent, but the sister split only because it found the second half later, and the checks would span two plans
+- [x] Move it out of the feature: a post-merge chore with no task row (recommended) — it changes nothing in the repo, so a task row could never end in a commit, and the rewritten `biweekly-progress-updates` memory needs `docs/experiments/` and `docs/roadmap.md` to exist first anyway
+- [ ] Keep it as the last task and narrow Out of Scope to "templates, skills, guidelines" — keeps it tracked, but a row whose only output is outside git breaks the one-commit-per-task rhythm
+- [ ] Drop it entirely — the five memories stay orphaned at the old path, where no session will ever load them
 
 ## Out of Scope
 
