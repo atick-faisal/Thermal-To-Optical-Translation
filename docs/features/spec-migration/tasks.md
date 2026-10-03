@@ -8,7 +8,7 @@
 | SPEC-MIGRATION-04 | Record `002` — M1 Phase 1 go/no-go (`TASKS.md:1048-1365`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-05 | Record `003` — M1.1 fidelity on M1's runs (`TASKS.md:1366-1510`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-06 | Record `004` — M1.2 design + step 1, the `yolo11s` judge (`TASKS.md:1511-1680`) | moderate | opus | done | needs -02 |
-| SPEC-MIGRATION-07 | Record `005` — M1.2 steps 5–6, E3 pix2pix at `grad_scale: 1.0e-2` (`TASKS.md:1966-2119`) | moderate | opus | pending | needs -02 |
+| SPEC-MIGRATION-07 | Record `005` — M1.2 steps 5–6, E3 pix2pix at `grad_scale: 1.0e-2` (`TASKS.md:1966-2119`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-08 | Record `006` — M1.2 step 7, the dose at 2.3% (`TASKS.md:2120-2223`) | moderate | opus | pending | needs -02 |
 | SPEC-MIGRATION-09 | Record `007` — M1.2 step 8, probes + E3 pix2pix at 0.15 (`TASKS.md:2224-2613`) | complex | opus | pending | needs -02 |
 | SPEC-MIGRATION-10 | Record `008` — M1.2 step 9, C2 on step 8's exports (`TASKS.md:2614-2762`) | moderate | opus | pending | needs -02 |
