@@ -14,6 +14,7 @@
 | [008](008-m1-2-c2-faithfulness.md) | 2026-08-23 | M1.2 step 9: C2 faithfulness (`t2o faithfulness --write-back`) on record 007's twelve stage-3 exports, scored by the reference `yolo11s`, six paired seeds | M1.2 | Windows server, 2× A100 | stage-3 false-object rate −0.0289 loop vs control (p = .156) while mAP50 rose +0.0512 — no reward hacking | F49, F50, F51, F52, F53, F54 |
 | [009](009-m2a-turbo-probes.md) | 2026-08-25 | M2a step 4: turbo VRAM probe (one stage-3 epoch, batch 2, full frame) and two 25-epoch `--no-detector` `grad_scale` probes at 0.15 and 0.75, seed 0 | M2a | Windows server, 2× A100 | `grad_scale: 0.15` puts turbo's detection term at 16.6 / 22.9 / 24.5% of the objective — in band at pix2pix's value; batch 2 peaks at 34.14 GB | F55, F56, F57, F58, F59, F60, F61 |
 | [010](010-m2a-e3-turbo-replicates.md) | 2026-09-23 | M2a step 5: E3 pix2pix-turbo, all-zero control vs λ_det [0,1,2,3] loop at `grad_scale: 0.15`, cut from six paired seeds to three (0, 1, 3) after four OOM episodes, judged by `yolo11s`, plus C2 on the stage-3 exports | M2a | Windows server, 2× A100 | stage-3 paired zero-shot mAP50 +0.0306 (p = .250, the n = 3 floor, 3/3 seeds) against a level −0.0023 stage-0 null — E3 replicates on turbo | F62, F63, F64, F65, F66, F67, F68, F69, F70, F71, F72, F73, F74, F75, F76, F77, F78, F79, F80 |
+| [011](011-e8-annotation-sweep.md) | 2026-09-24 | E8: direct-thermal (A) vs translated-then-fine-tuned (B) `yolo11n` at N ∈ {10 … 600}, three seeds, against the reference judge's zero-annotation anchors A0 / C / D; C and D topped up to six translator seeds | M3 E8 | Windows server, 2× A100 | arm A passes annotation-free translation (C, 0.7975) at N ≈ 150 annotated thermal images, interval [114, 185]; direct thermal wins at N = 600, 0.9300 | F81, F82, F83, F84, F85, F86, F87, F88 |
 
 ## Findings
 
@@ -28,7 +29,7 @@
 | F07 | λ_det's gain is not causally established: stages are not budget-matched, and same-config runs differ by 17.6 FID | 003 | confirmed | acts on F04; F13, F47 |
 | F08 | Absolute fidelity is poor (PSNR ~15.5, FID ~90) yet detection reaches 0.87 mAP50, 94% of the visible ceiling | 003 | open | |
 | F09 | The custom set declares `nc: 5`, but `Connector` (index 0) has zero instances; 4 classes are reported, no mAP is diluted | 003 | open | |
-| F10 | An independent `yolo11s` judge confirms M1's gate: baseline 0.7851 vs 0.1552 floor, +0.630 mAP50, all four classes | 004 | open | acts on F03 |
+| F10 | An independent `yolo11s` judge confirms M1's gate: baseline 0.7851 vs 0.1552 floor, +0.630 mAP50, all four classes | 004 | open | acts on F03; F86 |
 | F11 | No evidence the old judge was trained on val: the train-only judge scores real visible 0.9364 vs the old 0.9213; M1's ceiling stands | 004 | open | |
 | F12 | Self-grading was real but small (~0.023 on λ>0 arms); λ_det's effect is not monotone (stage 2 0.8106 < stage 1 0.8244); the gain lives in Switch | 004 | superseded | acts on F04; F19, F21 |
 | F13 | The noise floor is 0.0591 mAP50, not 0.0129: stage 3 vs baseline +0.062 is ~1 noise draw, so at n = 1 λ_det's gain cannot be separated from run variance | 004 | confirmed | acts on F04, F07; F17 |
@@ -53,7 +54,7 @@
 | F32 | Two GPU runs at one seed do not reproduce, by design: the single-run loss-space floor is +3.4 / +3.6 / +11.8 / +7.1% (l2 / lpips / gan / total) | 007 | superseded | F44 |
 | F33 | Under 15× the weight, raw `L_det` does not detectably move at 25 epochs: −5.0 / +3.9 / +1.4%, all inside the floor | 007 | superseded | F37 |
 | F34 | The dose trades fidelity improvement: within-run `loss_lpips` falls 25.2% at `grad_scale` 0.01 vs 9.5% at 0.15 (withdrawn in the source) | 007 | refuted | F43 |
-| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | open | acts on F15, F25; F72 |
+| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | open | acts on F15, F25; F72, F87 |
 | F36 | Dose-response appeared: paired difference 0 → +0.0280 → +0.0357 → +0.0512, monotone in λ | 007 | open | acts on F19, F28; F77 |
 | F37 | Raw detection loss falls 2.56 → 2.12 → 1.84 across stages 1–3, stage 3 ~30% below the uncalibrated campaign's 2.61 | 007 | open | acts on F33 |
 | F38 | Achieved share at 100 epochs 10.0 / 16.1 / 19.8%, just under the 20–30% band; not re-tuned after seeing mAP | 007 | open | acts on F30 |
@@ -99,3 +100,11 @@
 | F78 | Turbo loss-space figures are weak at n = 3: resumed stages pool stumps, only stage 2 is clean in both arms, and control `loss_gan` spans 1.55–4.42 across seeds | 010 | open | |
 | F79 | The resume audit is balanced: ~2–3 degraded endpoint epochs on two control runs vs ~3 on one loop run, opposite pairs — M2a's caveat closed; `AdamW` now checkpointed (e210b13) | 010 | open | acts on F68 |
 | F80 | Reading (a) partially replicates: loop/control sd 0.71 / 0.40 / 0.54 / 0.25× on mAP50, LPIPS, missed, consistency, but 1.07× on false-object — 2-dof, a direction | 010 | open | acts on F42, F52 |
+| F81 | Annotation-free translation (C) is worth ≈150 annotated thermal images, interval [114, 185]; spending them inside the loop (D) raises it to ≈214 | 011 | open | |
+| F82 | Direct thermal wins at full annotation (0.9300 vs C 0.7975, D 0.8487): criterion 1 is measured, not met — +0.642 at N = 0, −0.133 at N = 600 | 011 | open | |
+| F83 | Translate-then-fine-tune (B) loses to thermal at every N ≥ 50, 3/3 seeds, by +0.032 to +0.059; translation's value is entirely annotation-free transfer | 011 | open | |
+| F84 | N = 10 is degenerate: both trained arms fall below A0's 0.155 floor at precision ≈0.01 — never read as "what 10 images buy" | 011 | open | |
+| F85 | A's sd collapses ±0.082 → ±0.010 from N = 50 to 600; n = 3 floors p at 0.25, so the curve reports sign consistency (3/3 at N ≥ 50), never significance | 011 | open | |
+| F86 | A0's 0.1552 reproduces the clean-judge thermal floor to four decimals, and C / D land on its λ=0 / stage-3 rows — nothing drifted between campaigns | 011 | open | acts on F10 |
+| F87 | D − C at n = 6 reproduces E3's +0.0512 (6/6, p = .031) to every digit — the same computation, a reproduction never counted as second evidence | 011 | open | acts on F35 |
+| F88 | The crossover's width is C's translator-seed spread, not A's resolution: n = 3 → 6 nearly halved C's sem and narrowed [111, 214] to [114, 185]; infilling A not worth it | 011 | open | |
