@@ -145,7 +145,10 @@ Inherited from the sister's `## Resolved`: one record per stage (their Q1), the 
 findings from writing code (Q2), the finding status vocabulary, and the two-cell rule for acting
 on an earlier finding. Records are lifted verbatim; the Results block is the distilled tables
 already in `TASKS.md` (the sister's record `001` precedent), never a console block reconstructed
-from memory.
+from memory. Header fields `TASKS.md` does not state — the command, wall clock, W&B group, and
+the SHA the run executed at — read `not recorded`, never reconstructed from the code; `git_sha`
+may name the commit that recorded the result (`not recorded — results committed in 7297601`),
+and `Date` is that commit's date unless the source names the run's own.
 
 ### `PLAN.md` → `docs/design.md`
 
