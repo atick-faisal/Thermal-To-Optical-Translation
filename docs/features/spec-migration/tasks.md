@@ -13,7 +13,7 @@
 | SPEC-MIGRATION-09 | Record `007` — M1.2 step 8, probes + E3 pix2pix at 0.15 (`TASKS.md:2224-2613`) | complex | opus | done | needs -02 |
 | SPEC-MIGRATION-10 | Record `008` — M1.2 step 9, C2 on step 8's exports (`TASKS.md:2614-2762`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-11 | Record `009` — M2a step 4, turbo probes (`TASKS.md:2914-3071`) | moderate | opus | done | needs -02; steps 2–3's open rows go to the roadmap (-22) |
-| SPEC-MIGRATION-12 | Record `010` — M2a step 5, E3 turbo n = 3 (`TASKS.md:3072-3605`) | complex | opus | pending | needs -02 |
+| SPEC-MIGRATION-12 | Record `010` — M2a step 5, E3 turbo n = 3 (`TASKS.md:3072-3605`) | complex | opus | done | needs -02 |
 | SPEC-MIGRATION-13 | Record `011` — E8 annotation sweep + C/D top-up (`TASKS.md:3633-3914`) | complex | opus | pending | needs -02; row 3899 stays for the roadmap (Q13) |
 | SPEC-MIGRATION-14 | Record `012` — E9 pricing + step 0, pix2pix wall clock (`TASKS.md:3915-4146`) | moderate | opus | pending | needs -02 |
 | SPEC-MIGRATION-15 | Record `013` — E9 steps 1–3, FLIR judge + kill-test gate (`TASKS.md:4147-4477`) | complex | opus | pending | needs -02; check `runs/*` for a `Log:` path (Q6) |
