@@ -1,7 +1,7 @@
 ---
 slug: spec-migration
 title: Spec-Workflow Migration
-status: planned
+status: in-progress
 created: 2026-10-02
 ---
 
