@@ -8,10 +8,11 @@
 - No error handling for impossible scenarios.
 
 # Working Order
-1. Read [PLAN](PLAN.md) and [TASKS](TASKS.md) files. (These files always track the current state of the implementation and can be updated throughout the implementation process as needed).
-2. Check the current state of the codebase.
-3. Determine the immediate next step(s) to be implemented.
-4. Start implementation of that specific step(s). Not everything at once.
-5. Once a step is complete, verify and test the code using available tools.
-6. Once satisfied, mark the task as "done", make a commit following the gitemoji + conventional commit message standard and then stop.
-7. Let me verify and once I confirm verification start all over these steps.
+**The working loop lives in `CLAUDE.md` `## Planning`.** Read `docs/goal.md` first,
+then the feature's `docs/features/<slug>/` (`plan.md`, whose `## Resolved` is settled
+law, and `tasks.md`). Plan with `/feature-plan`, build one task with `/implement`,
+gate on `just verify`, commit with `/commit-task`. This file does not describe a
+second loop.
+
+`PLAN.md` and `TASKS.md` are frozen source material for the `spec-migration` feature
+until it deletes them. Read them; never add to them.
