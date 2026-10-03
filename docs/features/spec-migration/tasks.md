@@ -10,7 +10,7 @@
 | SPEC-MIGRATION-06 | Record `004` — M1.2 design + step 1, the `yolo11s` judge (`TASKS.md:1511-1680`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-07 | Record `005` — M1.2 steps 5–6, E3 pix2pix at `grad_scale: 1.0e-2` (`TASKS.md:1966-2119`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-08 | Record `006` — M1.2 step 7, the dose at 2.3% (`TASKS.md:2120-2223`) | moderate | opus | done | needs -02 |
-| SPEC-MIGRATION-09 | Record `007` — M1.2 step 8, probes + E3 pix2pix at 0.15 (`TASKS.md:2224-2613`) | complex | opus | pending | needs -02 |
+| SPEC-MIGRATION-09 | Record `007` — M1.2 step 8, probes + E3 pix2pix at 0.15 (`TASKS.md:2224-2613`) | complex | opus | done | needs -02 |
 | SPEC-MIGRATION-10 | Record `008` — M1.2 step 9, C2 on step 8's exports (`TASKS.md:2614-2762`) | moderate | opus | pending | needs -02 |
 | SPEC-MIGRATION-11 | Record `009` — M2a step 4, turbo probes (`TASKS.md:2914-3071`) | moderate | opus | pending | needs -02; steps 2–3's open rows go to the roadmap (-22) |
 | SPEC-MIGRATION-12 | Record `010` — M2a step 5, E3 turbo n = 3 (`TASKS.md:3072-3605`) | complex | opus | pending | needs -02 |
