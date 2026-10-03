@@ -9,6 +9,7 @@
 | [003](003-m1-1-fidelity.md) | 2026-08-13 | M1.1 fidelity (LPIPS/FID/KID/SSIM/PSNR) on M1's exported val splits, baseline + loop stages 0–3 | M1.1 | Windows server, 2× A100 | loop stages 0→3: FID 104.82 → 90.85 while zero-shot mAP50 0.7622 → 0.8696 — no reward hacking | F06, F07, F08, F09 |
 | [004](004-m1-2-yolo11s-judge.md) | 2026-08-13 | M1.2 step 1: independent `yolo11s` judge (visible train only) re-scores M1's raw-thermal, baseline, loop stages 0–3 and visible arms | M1.2 | Windows server, 2× A100 | same-config λ=0 arms differ by 0.0591 mAP50 under an honest judge (0.0129 under the in-loop one) | F10, F11, F12, F13, F14 |
 | [005](005-m1-2-e3-pix2pix-null.md) | 2026-08-19 | M1.2 steps 5–6: E3 pix2pix, all-zero control vs λ_det [0,1,2,3] loop at `grad_scale: 1.0e-2`, six paired seeds, judged by `yolo11s` | M1.2 | Windows server, 2× A100 | stage-3 paired zero-shot mAP50 +0.0070 (p = .656) against a −0.0063 stage-0 null — negative | F15, F16, F17, F18, F19, F20, F21, F22, F23, F24 |
+| [006](006-m1-2-dose-limited.md) | 2026-08-19 | M1.2 step 7: `scripts/loss_share.py` over E3's six loop runs' saved `metrics.json` — the detection term's share of the objective per stage | M1.2 | Windows server, CPU read (zero GPU cost) | detection term 0.9 / 1.7 / 2.3% of the objective at `grad_scale: 1.0e-2` — E3's null is dose-limited | F25, F26, F27, F28, F29 |
 
 ## Findings
 
@@ -32,9 +33,14 @@
 | F16 | The stage-0 null control behaved as a null (−0.0063, p = .875, CI straddling zero), so the campaign is a measurement, not a broken run | 005 | open | |
 | F17 | Step 1's n = 1 noise floor was right: stage 0's CI half-width implies a per-seed sd ≈ 0.053 | 005 | open | acts on F13 |
 | F18 | Six paired seeds resolve ±0.026: the claim is "no effect larger than ~+3 mAP50 points", not "no effect" | 005 | open | |
-| F19 | No dose-response in λ at `grad_scale: 1.0e-2`: paired difference 0 → +0.024 → +0.024 → +0.007, peaking at the smallest λ | 005 | open | acts on F12 |
+| F19 | No dose-response in λ at `grad_scale: 1.0e-2`: paired difference 0 → +0.024 → +0.024 → +0.007, peaking at the smallest λ | 005 | superseded | acts on F12; F28 |
 | F20 | λ_det is fidelity-neutral at n = 6: stage-3 LPIPS −0.0019, CI [−0.016, +0.011]; reward-hacking question closed | 005 | open | acts on F06 |
 | F21 | The Switch gain does not survive (stage-0 null +0.043 > stage-3 effect +0.032); no per-class claim is attainable at n = 6 | 005 | open | acts on F12 |
 | F22 | E8 is not an escape route: `annotation_fraction` gates only the loop arm's supervision, so lowering it makes E3's arms more alike | 005 | open | |
-| F23 | λ_det was never 1/2/3: `grad_scale` is applied before `task_weight`, so the effective ramp was 0.01/0.02/0.03 — dose and mechanism nulls are inseparable | 005 | open | |
+| F23 | λ_det was never 1/2/3: `grad_scale` is applied before `task_weight`, so the effective ramp was 0.01/0.02/0.03 — dose and mechanism nulls are inseparable | 005 | confirmed | F25 |
 | F24 | W&B's explicit `step=epoch` dropped stages 1–3's generator loss curves; `metrics.json` and every E3 number are unaffected (fixed in accfe56) | 005 | open | |
+| F25 | At `grad_scale: 1.0e-2` the detection term was 0.9 / 1.7 / 2.3% of the objective (~19× below LPIPS at stage 3): E3's null is dose-limited, not a mechanism result | 006 | open | acts on F23 |
+| F26 | PLAN.md §8 said to recalibrate the SeAFusion-scaled ramp for a detection loss; it never happened, and AlignProp's `loss_coeff` went into E3 unexamined | 006 | open | |
+| F27 | The objective is GAN (52%) + LPIPS (44%); l2 is 1.0%, so `LossConfig`'s "dominant" comment was false at these weights; only GAN rises across stages | 006 | open | |
+| F28 | Step 6's "no dose-response in λ" spanned shares of 0.9–2.3%: evidence that no dose was applied, not evidence against a dose-response | 006 | open | acts on F19 |
+| F29 | Candidate `grad_scale: 0.15`, extrapolated from a stable raw `L_det` (2.98 / 2.75 / 2.61) to a predicted ≈12 / 21 / 27% ramp; share is only a proxy for gradient influence | 006 | open | |
