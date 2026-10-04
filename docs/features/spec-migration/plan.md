@@ -188,6 +188,13 @@ becomes a one-line pointer to the record that holds it: the status paragraphs in
 `AGENTS.md` (loaded every session) and `docs/design.md §13` keeps only its heading and a pointer,
 so there is one copy. §1 and §16 point at `docs/goal.md` for the objective and the criteria.
 
+Inside those spots, a sentence a tracked file cites by `PLAN.md §N` stays verbatim: §1's "not a
+product" line (`src/t2o/cli.py:7`), §11's E3 design sentences (`tests/test_e3_experiments.py:4`,
+`experiments/e3_*.yaml:3`) and §16's `annotation_fraction` paragraph (`src/t2o/data/budget.py:6`).
+§1's C1–C4 table also stays, with one line under it: `goal.md` renumbers C2–C4, so legacy C2
+(faithfulness) is its C3, C3 (protocol) its C4, and C4 (when translation pays) its C2. Every
+record, `src/` and the experiment configs use the legacy numbers.
+
 ### The roadmap
 
 All 31 open rows, verbatim, grouped under their legacy section labels (Q9) — `M2a step 2`,
@@ -205,6 +212,9 @@ and Consistency wording may have settled it, for the human to close (Q13).
 | `PLAN.md §N` | `docs/design.md §N`; `§13` → `AGENTS.md` House style |
 | `TASKS.md M<x>[ step <n>][ finding <k>]`, commit subjects `(M3 E9)` | the record whose `Task:` names that section — grep the legacy label under `docs/experiments/`; open work → the same label in `docs/roadmap.md`; build narrative → `git show pre-spec-migration:TASKS.md` |
 | `RESEARCH_FINDINGS.md §N`, `E1`–`E10`, `C1`–`C4` | unchanged — the file stays (Q11); `E`/`C` are defined in its §7 and §1 |
+
+The `C1`–`C4` row carries the same crosswalk, since `goal.md` and the legacy files now number
+C2–C4 differently.
 
 ### Loss prevention
 
