@@ -208,3 +208,13 @@ as everywhere else: a step or finding label by grep under `docs/experiments/`, `
       runs 0.0907 → 0.0887 → 0.0215 → 0.0140 across the ramp, ending 2.4× tighter than the
       control (M1.2 step 8 finding 8). Not claimable from this campaign — it is confounded
       with regression from a wide stage-0 draw — but it is a real, testable prediction.
+
+## Added after the migration
+
+Rows here do not come from `TASKS.md`; the sections above carry every open row it had at the tag.
+
+- [ ] Pin the held-out test split's membership before it is first read. `freeze_split` records
+      only train and val, so a leak *into* train or val is caught (the 753 hashes change) but a
+      reshuffle *within* the ~100 held-out pairs is not. The test split is the one `goal.md`'s
+      Success Criteria are scored on. Source: `TASKS.md:788-793` at the tag; the isolation itself
+      is [design.md](design.md) §9, The custom dataset.
