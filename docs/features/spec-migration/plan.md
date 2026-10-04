@@ -205,6 +205,14 @@ loosen criterion 1 to admit a public dataset, now that E9 says "loop beats contr
 datasets and "translation beats thermal" on one. It carries a note that `docs/goal.md`'s Margin
 and Consistency wording may have settled it, for the human to close (Q13).
 
+The corrections list is 12 rows (`TASKS.md:5370-5416`), not 13: the 31 are M2a step 2 (2), step 3
+(1), M2b (5), M3 (4), E8 (1), E9 (2), M4 (4) and the 12 obligations. Rows already stale at the tag
+keep their text and gain a one-line pointer like 3899's — 3623's "readout is pending" → record 016,
+5364's "five acceptance criteria" → the six status lines. A status line grades `goal.md`'s wording,
+never a legacy verdict: the reference judge (`yolo11s`) and the in-loop detector (`yolo11n`) are
+one family, so no finding yet meets Transfer's or Faithfulness's "never in the loop" clause, and
+record 011's "all satisfied" was scored against the legacy five.
+
 ### The citation legend (in `AGENTS.md`)
 
 | Citation | Resolves to |
