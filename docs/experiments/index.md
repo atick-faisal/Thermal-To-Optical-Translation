@@ -17,6 +17,7 @@
 | [011](011-e8-annotation-sweep.md) | 2026-09-24 | E8: direct-thermal (A) vs translated-then-fine-tuned (B) `yolo11n` at N ∈ {10 … 600}, three seeds, against the reference judge's zero-annotation anchors A0 / C / D; C and D topped up to six translator seeds | M3 E8 | Windows server, 2× A100 | arm A passes annotation-free translation (C, 0.7975) at N ≈ 150 annotated thermal images, interval [114, 185]; direct thermal wins at N = 600, 0.9300 | F81, F82, F83, F84, F85, F86, F87, F88 |
 | [012](012-e9-pix2pix-wall-clock.md) | 2026-09-26 | E9 pricing of the FLIR cell's three blockers, and step 0: pix2pix per-stage wall clock from `translator_last.pt` mtimes over 24 completed runs, 72 intervals | M3 E9 | Windows server, filesystem read (zero GPU cost) | a 4-stage pix2pix run is 10.18 h control / 10.75 h loop; the twelve-run cell is ~126 GPU-h, not ~72 | F89, F90, F91, F92, F93, F94 |
 | [013](013-e9-flir-kill-test.md) | 2026-09-27 | E9 steps 1–3 and 2b: FLIR labels mirrored to thermal; `yolo11s` judge and in-loop `yolo11n` trained on FLIR visible; kill-test gate table under the judge | M3 E9 | Windows server, 2× A100 | FLIR 3-class headroom +0.2123 (ceiling 0.6566, floor 0.4442) — WEAK PASS, +0.062 over the 0.15 kill line | F95, F96, F97, F98, F99, F100, F101, F102, F103, F104, F105, F106, F107, F108, F109 |
+| [014](014-e9-flir-deroll-regate.md) | 2026-09-28 | E9 step 3b: FLIR's thermal labels de-rolled by `calibration/flir.json`, then the kill-test gate re-scored under the same judge; the first re-gate scored a stale label cache | M3 E9 | Windows server, 2× A100 | de-rolled 3-class floor 0.4499, headroom +0.2066 — WEAK PASS stands; label misalignment was 2.7% of the headroom | F110, F111, F112, F113, F114, F115, F116, F117, F118, F119, F120 |
 
 ## Findings
 
@@ -114,20 +115,31 @@
 | F90 | A 4-stage pix2pix run costs 10.18 h control / 10.75 h loop (coupling +0.57 h, +6.8%); the twelve-run cell is ~126 GPU-h, and the parts predict 62.8 h of a 63.0 h observed span | 012 | open | |
 | F91 | "~6 h per 4-stage run" was low by 1.7× and "~72 GPU-h" by 1.75×; a full-corpus FLIR cell is ~870 GPU-h, not ~496 — the 600-pair matched cell holds | 012 | open | |
 | F92 | pix2pix:turbo is 9.0× per complete run (10.5 h vs ~94 h), not 16×; the same method re-derives turbo at 23.46 h a stage against F62's 24.1 h | 012 | open | acts on F62 |
-| F93 | FLIR has no thermal labels on disk — adapters write labels under `visible/` only — so the raw-thermal floor needs mirroring, and mirrored labels inherit the 5.90 px residual, biasing the floor down | 012 | open | |
+| F93 | FLIR has no thermal labels on disk — adapters write labels under `visible/` only — so the raw-thermal floor needs mirroring, and mirrored labels inherit the 5.90 px residual, biasing the floor down | 012 | confirmed | F113, F118 |
 | F94 | FLIR's dog class has 13 val instances against 4,124 cars; a 0.4 AP swing moves the 4-class mAP50 by 0.1, a decision band's width — 3-class is primary | 012 | open | |
 | F95 | ultralytics honours a `data.yaml`'s `path:` literally while `t2o`'s loader falls through a stale one: a moved tree passes `t2o` and dies in ultralytics | 013 | open |  |
 | F96 | Step 2's first launch died of host memory, not GPU: a 2.83 MiB numpy allocation failed with 2.56 GB of 40 GPU memory in use | 013 | open |  |
-| F97 | Four ultralytics loader facts put two `--workers 16` runs at 96 loader processes on 64 CPUs / 128 GiB, ≳1.3 GiB each; one run at a time is the load-bearing fix | 013 | open | acts on M1.2 step 2b (legacy; F-ID minted by SPEC-MIGRATION-19) |
+| F97 | Four ultralytics loader facts put two `--workers 16` runs at 96 loader processes on 64 CPUs / 128 GiB, ≳1.3 GiB each; one run at a time is the load-bearing fix | 013 | open | acts on M1.2 step 2b (legacy; F-ID minted by SPEC-MIGRATION-19); F120 |
 | F98 | The FLIR judge costs 1.43 h for 100 epochs; the ~6–15 GPU-h estimate was 4–10× high | 013 | open |  |
 | F99 | The judge's `best.pt` is epoch 46 at 0.5525 mAP50; the last 54 epochs lost 8.1% mAP50 / 10.1% mAP50-95, and `--epochs 50` is a different schedule, not a prefix | 013 | open |  |
 | F100 | The in-loop `yolo11n` costs 1.36 h, not 2.29 h: one epoch stalled 3,370.8 s against a 48.8 s median, so run cost is read from medians | 013 | open |  |
 | F101 | The in-loop `best.pt` is epoch 63; its last 37 epochs gave back 2.9% mAP50 / 5.4% mAP50-95, milder than the judge's | 013 | open |  |
 | F102 | Invariant 7 holds structurally (`yolo11s`/seed 1 vs `yolo11n`/seed 0), but the 0.0497 mAP50 gap is below the 0.059 noise floor | 013 | open |  |
 | F103 | The mirror landed: the gate's thermal arm read 1,013 images / 8,601 instances against 8,604 counted by hand | 013 | open |  |
-| F104 | FLIR kill-test WEAK PASS: 3-class headroom +0.2123 (ceiling 0.6566, floor 0.4442), +0.062 over the 0.15 kill line | 013 | open |  |
+| F104 | FLIR kill-test WEAK PASS: 3-class headroom +0.2123 (ceiling 0.6566, floor 0.4442), +0.062 over the 0.15 kill line | 013 | superseded | F115 |
 | F105 | FLIR's raw-thermal floor 0.4442 is 2.4× the custom set's 0.1887; a raised floor compresses the headroom from +0.733 to +0.212, as predicted | 013 | open |  |
 | F106 | The 3-class guard did not bind: dog's +0.2135 lands within 0.0012 of the 3-class figure, 4-class and 3-class agree to 0.0003 | 013 | open |  |
 | F107 | `person` has the largest headroom (+0.2932): the floor measures a visible-trained judge's domain gap, not thermal information content | 013 | open |  |
 | F108 | `bicycle` is the weak class at +0.1295, compressed by a low ceiling (0.4922), not a high floor | 013 | open |  |
-| F109 | At +0.062 margin the mirrored labels' misalignment confound is load-bearing; mAP50-95/mAP50 0.501 vs 0.439 (−12.3%) is mild evidence it is not the main driver | 013 | open |  |
+| F109 | At +0.062 margin the mirrored labels' misalignment confound is load-bearing; mAP50-95/mAP50 0.501 vs 0.439 (−12.3%) is mild evidence it is not the main driver | 013 | superseded | F118 |
+| F110 | The first re-gate scored a stale `labels.cache`: ultralytics keys it on file sizes and paths, and the de-roll's fixed `:.6f` width keeps all 1,013 val label files the same length | 014 | open | F116 |
+| F111 | `gate.csv`'s calibration digest recorded a flag, not the tree's state; `_verified_digest` now checks `LABELS_PROVENANCE.json` in both directions | 014 | open | |
+| F112 | Visible → thermal is `inv(H)`, not `H`: α = −1.0 peaks mutual information and gradient NCC, improving MI on 59 of 60 pairs; `H` would have doubled the offset | 014 | open | F116 |
+| F113 | The constant is confirmed independently: 5.21 px median displacement against roma's 5.90 px EPE, and the α optimum at −1.0 needs no refit | 014 | open | acts on F93 |
+| F114 | The de-roll moves val boxes to median IoU 0.822 against the plain mirror, 5.4% below 0.5, `person` hardest (0.773, 9.7%); val keeps all 8,604 boxes | 014 | open | F117 |
+| F115 | The de-rolled kill-test is still a WEAK PASS: 3-class headroom +0.2066 (floor 0.4499), +0.0566 over the kill line, 0.0567 short of the 0.5066 refutation line | 014 | open | acts on F104 |
+| F116 | The ceiling reproduced bit-identically while the floor rose: the pipeline did not move, and the correction's direction is confirmed a third time | 014 | open | acts on F110, F112 |
+| F117 | `person` carries 62% of the floor's rise (+0.0106), the class the audit said moves most; `dog`'s −0.0018 is noise | 014 | open | acts on F114 |
+| F118 | The floor rose 0.57 of a point, not single digits: misalignment is 2.7% of the headroom, never load-bearing; at 0.29 recall the judge misses objects, not box positions | 014 | open | acts on F93, F109 |
+| F119 | The floor is honest and the +0.2066 gap real, but pix2pix still trains on rolled pairs: that confound needs the images warped, not the labels | 014 | open | |
+| F120 | Two concurrent E3 runs at `workers: 16` build step 2's two resident worker pools per detector stage; whether 128 GiB holds is unknown and free to measure | 014 | open | acts on F97 |
