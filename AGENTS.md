@@ -69,6 +69,7 @@ records and commit subjects still cite both by section. Those citations stay exa
 | Citation | Resolves to |
 | --- | --- |
 | `PLAN.md §N` | [docs/design.md](docs/design.md) `§N`, same number; `§13` → this file's `# House style` |
+| `PLAN.md invariant N` | [docs/design.md](docs/design.md) `§5`, invariant N of the seven — not `§N` |
 | `TASKS.md M<x>[ step <n>][ finding <k>]`, commit subjects like `(M3 E9)` or `(M1.2 step 8)` | measured work → the record whose `Task:` names that section (`# Conventions` below says where a step or finding sits); open work → the same label in [docs/roadmap.md](docs/roadmap.md); build narrative → `git show pre-spec-migration:TASKS.md` |
 | `RESEARCH_FINDINGS.md §N`, `E1`–`E10`, `C1`–`C4` | unchanged — the file stays at the root, frozen; `E` and `C` are defined in its §7 and §1 |
 
