@@ -171,6 +171,13 @@ the no-run header holds a single Date, Task and `git_sha`; their dates precede 0
 are never reordered. It also replaces F97's `acts on M1.2 step 2b (legacy; …)` cell with 018's
 F-ID, and caveats step 2b's 2026-09-27 narrowing as F97's.
 
+SPEC-MIGRATION-20's census counts claims, not paragraphs. One source paragraph can yield two F-IDs
+under distinct labels (F43 and F44, both M1.2 step 8 finding 9), one F-ID can hold two source
+findings (F12, M1.2 step 1 findings 2 and 3), and a claim the source withdrew before it got an F-ID
+lives in the F-ID that explains the withdrawal (`TASKS.md:2285`, inside F31). None of these is an
+orphan or a double count. A "narrowed" relation keeps the old row `open` with a link in both
+directions (F40 ← F41, F151 ← F97), since the status vocabulary has no `narrowed`.
+
 ### `PLAN.md` → `docs/design.md`
 
 Every `§N` heading survives under the same number so `PLAN.md §N` resolves by one legend rule.
@@ -335,6 +342,18 @@ beats raw thermal" is no longer a criterion.
 - [x] Only step 2b's `workers` (1751–1811); every other discovery paragraph in both ranges goes into Net 2's map as "superseded by the code and its docstrings", each with its reason (recommended) — M0.1–M0.9 labels nothing a finding, and its bold paragraphs are Decisions, which the no-run bar excludes as preferences
 - [ ] Also mint the short list that arguably clears the bar: pyright's wheel-shipped `tests` package shadowing `tests/` (446), InsPLAD's 18 categories against the paper's 17 (740), the ultralytics 8.4.117 API checks including `unwrap_model`'s rename at ~8.4.112 (180), and the §7 dependency maze not materialising (57) — keeps these facts findable once `TASKS.md` is deleted, at the cost of four more draft gates for records no experiment cites
 - [ ] Every bold-led discovery or decision paragraph — nothing has to be judged, but it pads the ledger with design choices
+
+### Q16: How does the finding census crosswalk F01–F14, whose headings carry no `(legacy: …)` label?
+
+Records 001–004 landed without the label Q5 asks for (pitfall SPEC-MIGRATION-07), and Out of
+Scope forbids editing a record after it lands. Only three of the 14 map to a numbered source
+finding (F10, F12, F13 ← M1.2 step 1 findings 1, 2–3, 4); the other 11 would read
+"`<section>`, unnumbered", repeating their record's `Task:` field. No tracked file and no commit
+subject cites any of these labels.
+
+- [x] Leave records 001–004 untouched; the census crosswalks F01–F14 by hand through each record's `Task:` field and `Log:` line anchors (recommended) — the never-edited rule holds, and the labels it gives up are cited nowhere; new work cites F-IDs
+- [ ] Append `(legacy: …)` to the 14 headings, label only, with a one-line carve-out in Out of Scope — meets Q5 and this task's wording exactly, but edits four landed records for labels nothing cites
+- [ ] Leave the records untouched and append a 14-row F-ID → legacy-label table to this plan, beside Net 2's coverage map — durable, but a crosswalk that serves no existing citation
 
 ## Out of Scope
 
