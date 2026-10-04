@@ -20,6 +20,10 @@
 | [014](014-e9-flir-deroll-regate.md) | 2026-09-28 | E9 step 3b: FLIR's thermal labels de-rolled by `calibration/flir.json`, then the kill-test gate re-scored under the same judge; the first re-gate scored a stale label cache | M3 E9 | Windows server, 2× A100 | de-rolled 3-class floor 0.4499, headroom +0.2066 — WEAK PASS stands; label misalignment was 2.7% of the headroom | F110, F111, F112, F113, F114, F115, F116, F117, F118, F119, F120 |
 | [015](015-e9-throughput-probe.md) | 2026-09-28 | E9 step 4: the corpus-cap seam and a per-epoch clock, then a 3-epoch throughput probe on FLIR, solo — control at val 1,013, control at val 153, loop at λ=3; plus step 5 run 1's VRAM and host-RAM peaks | M3 E9 | Windows server, 2× A100 | the twelve-run FLIR cell projects to 77–103 GPU-h, not ~126; a loop run's detector stage peaks at 52.4 GB / 50 processes at `workers 16`, so the cell runs two-up at `workers 8` | F121, F122, F123, F124, F125, F126, F127, F128, F129, F130, F131, F132, F133, F134, F135 |
 | [016](016-e9-flir-twelve-run-cell.md) | 2026-10-01 | E9 step 5: the twelve-run FLIR cell — pix2pix control vs the λ ramp, six paired seeds on 600 train pairs, two-up on both cards; C2 under the reference judge; read through `campaign_report.py` | M3 E9 | Windows server, 2× A100 | 3-class mAP50 loop − control +0.3512 (p = .031), but the loop lands at 0.4415 against the 0.4499 raw-thermal floor | F136, F137, F138, F139, F140, F141, F142, F143, F144, F145, F146, F147, F148, F149 |
+| [017](017-m0-10-device-string.md) | 2026-08-12 | Authoring M0.10's server checks: the `--device` path of `train`/`loop`/`export` | M0.10 | — | `--device 0` raised `Invalid device string: '0'` everywhere but `evaluate`; fixed in 2a6b17d | F150 |
+| [018](018-m1-2-workers-identity.md) | 2026-08-13 | Authoring M1.2 step 2b: the augmentation RNG and `workers`' place in the config | M1.2 | — | Changing `workers` changed the training run and its `config_hash()`; result-neutral since ba6da8e | F151, F152, F153 |
+| [019](019-m1-2-absent-vs-null.md) | 2026-08-23 | Authoring M1.2 step 9's `t2o faithfulness --write-back` | M1.2 | — | An absent metric ("not scored yet") and a null one ("computed nothing") are different facts, and a resume must keep both | F154, F155 |
+| [020](020-e9-faithfulness-list-oom.md) | 2026-10-01 | Fixing E9 step 5's OOM in `t2o faithfulness` | M3 E9 | — | A `list[Path]` source ran FLIR's 1,013-image val as one batch, a 9.89 GiB OOM; chunked in 7a3ca94 | F156, F157 |
 
 ## Findings
 
@@ -121,7 +125,7 @@
 | F94 | FLIR's dog class has 13 val instances against 4,124 cars; a 0.4 AP swing moves the 4-class mAP50 by 0.1, a decision band's width — 3-class is primary | 012 | open | |
 | F95 | ultralytics honours a `data.yaml`'s `path:` literally while `t2o`'s loader falls through a stale one: a moved tree passes `t2o` and dies in ultralytics | 013 | open |  |
 | F96 | Step 2's first launch died of host memory, not GPU: a 2.83 MiB numpy allocation failed with 2.56 GB of 40 GPU memory in use | 013 | open | F133 |
-| F97 | Four ultralytics loader facts put two `--workers 16` runs at 96 loader processes on 64 CPUs / 128 GiB, ≳1.3 GiB each; one run at a time is the load-bearing fix | 013 | open | acts on M1.2 step 2b (legacy; F-ID minted by SPEC-MIGRATION-19); F120, F132, F133 |
+| F97 | Four ultralytics loader facts put two `--workers 16` runs at 96 loader processes on 64 CPUs / 128 GiB, ≳1.3 GiB each; one run at a time is the load-bearing fix | 013 | open | acts on F151; F120, F132, F133 |
 | F98 | The FLIR judge costs 1.43 h for 100 epochs; the ~6–15 GPU-h estimate was 4–10× high | 013 | open |  |
 | F99 | The judge's `best.pt` is epoch 46 at 0.5525 mAP50; the last 54 epochs lost 8.1% mAP50 / 10.1% mAP50-95, and `--epochs 50` is a different schedule, not a prefix | 013 | open |  |
 | F100 | The in-loop `yolo11n` costs 1.36 h, not 2.29 h: one epoch stalled 3,370.8 s against a 48.8 s median, so run cost is read from medians | 013 | open |  |
@@ -174,3 +178,11 @@
 | F147 | `campaign_report.py` ended runs at `metrics.json`'s mtime, which `--write-back` rewrites, so spans read 13.8–63.0 h; `_run_end` fixed it (8705364) | 016 | open |  |
 | F148 | Stages 0–2's `bound_h` looked up the next stage's training before it was filled, so each boundary carried a whole stage (2.1–3.4 h vs ~0.3); fixed in e70760c | 016 | open |  |
 | F149 | `control-s0` stage 1 shows 95 epochs because a resume records only the epochs it runs; it trained all 100 | 016 | open |  |
+| F150 | `--device 0` raised in `train`/`loop`/`export` but worked in `evaluate`: only `evaluate` goes through ultralytics' resolver; fixed in 2a6b17d | 017 | open | |
+| F151 | Changing `workers` changed the training run and its `config_hash()`: augmentation drew from the ambient RNG, whose stream differs between `workers = 0` and `> 0` | 018 | open | F97 |
+| F152 | `persistent_workers` must stay off: `set_epoch` reaches the workers only because a non-persistent `DataLoader` re-pickles the dataset each epoch | 018 | open | |
+| F153 | M1's numbers stand but its run no longer reproduces: the augmentation stream changed at every worker count, `0` included | 018 | open | |
+| F154 | Absent means "not scored here yet" and null "computed nothing"; an unscored `faithfulness` is omitted, never written `null` | 019 | open | |
+| F155 | A post-hoc result needs a `StageResult` field, or the next resume silently drops it | 019 | open | |
+| F156 | A `list[Path]` handed to `model.predict` is one batch with `batch=` dropped: FLIR's 1,013-image val asked for 9.89 GiB and OOM'd; chunked in 7a3ca94 | 020 | open | |
+| F157 | The earlier C2 numbers stand: `rect=False` letterboxes each image alone and NMS is per image, so a chunk boundary cannot move a rate | 020 | open | |
