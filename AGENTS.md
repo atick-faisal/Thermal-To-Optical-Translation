@@ -14,9 +14,6 @@ law, and `tasks.md`). Plan with `/feature-plan`, build one task with `/implement
 gate on `just verify`, commit with `/commit-task`. This file does not describe a
 second loop.
 
-`PLAN.md` and `TASKS.md` are frozen source material for the `spec-migration` feature
-until it deletes them. Read them; never add to them.
-
 # Where the work lives
 
 - **What we are proving, and why** — [docs/goal.md](docs/goal.md). Immutable.
