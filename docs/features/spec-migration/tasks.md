@@ -16,7 +16,7 @@
 | SPEC-MIGRATION-12 | Record `010` — M2a step 5, E3 turbo n = 3 (`TASKS.md:3072-3605`) | complex | opus | done | needs -02 |
 | SPEC-MIGRATION-13 | Record `011` — E8 annotation sweep + C/D top-up (`TASKS.md:3633-3914`) | complex | opus | done | needs -02; row 3899 stays for the roadmap (Q13) |
 | SPEC-MIGRATION-14 | Record `012` — E9 pricing + step 0, pix2pix wall clock (`TASKS.md:3915-4146`) | moderate | opus | done | needs -02 |
-| SPEC-MIGRATION-15 | Record `013` — E9 steps 1–3, FLIR judge + kill-test gate (`TASKS.md:4147-4477`) | complex | opus | pending | needs -02; check `runs/*` for a `Log:` path (Q6) |
+| SPEC-MIGRATION-15 | Record `013` — E9 steps 1, 2, 2b, 3: FLIR judge, in-loop `yolo11n`, kill-test gate (`TASKS.md:4147-4477`) | complex | opus | pending | needs -02; `Log:` adds `runs/inloop-flir-yolo11n-results-2026-09-28.csv` for step 2b (Q6) |
 | SPEC-MIGRATION-16 | Record `014` — E9 step 3b, de-rolled labels + re-gate (`TASKS.md:4478-4728`) | moderate | opus | pending | needs -02 |
 | SPEC-MIGRATION-17 | Record `015` — E9 step 4(b), throughput probe (`TASKS.md:4729-5056`) | moderate | opus | pending | needs -02 |
 | SPEC-MIGRATION-18 | Record `016` — E9 step 5, the twelve-run FLIR cell (`TASKS.md:5057-5358`) | complex | opus | pending | needs -02; `Log:` = `runs/e3f-report-2026-10-01.txt`; open readout rows go to the roadmap |

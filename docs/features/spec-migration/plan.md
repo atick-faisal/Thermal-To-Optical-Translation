@@ -148,7 +148,11 @@ already in `TASKS.md` (the sister's record `001` precedent), never a console blo
 from memory. Header fields `TASKS.md` does not state — the command, wall clock, W&B group, and
 the SHA the run executed at — read `not recorded`, never reconstructed from the code; `git_sha`
 may name the commit that recorded the result (`not recorded — results committed in 7297601`),
-and `Date` is that commit's date unless the source names the run's own.
+and `Date` is that commit's date unless the source names the run's own. Record `013`'s step-2b
+CSV matches `TASKS.md`'s table except in two places, both Provenance caveats: it gives 4,864 s
+stall-free (not 4,881), and its mAP50 peaks at epoch 76 (0.5153), because ultralytics 8.4 picks
+`best.pt` on mAP50-95 alone (`ultralytics/utils/metrics.py:1009`). A `best` row is that peak, not
+the mAP50 one.
 
 ### `PLAN.md` → `docs/design.md`
 
