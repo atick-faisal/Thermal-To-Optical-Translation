@@ -203,7 +203,7 @@ def _write_csv(csv_path: Path, rows: Sequence[Row], class_names: Sequence[str]) 
 
 
 def _report(rows: Sequence[Row], class_names: Sequence[str], primary: Sequence[str]) -> str:
-    """The gate table as markdown, ready to paste into TASKS.md."""
+    """The gate table as markdown, ready to paste into an experiment record."""
     header = ["arm", "mAP50", f"mAP50 ({len(primary)}-class)", "mAP50-95", *class_names]
     lines = [
         "| " + " | ".join(header) + " |",

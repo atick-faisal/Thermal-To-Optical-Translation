@@ -86,12 +86,12 @@ is tracked in one of **two** places — or in neither:
 | Where | What it looks like | Example |
 | --- | --- | --- |
 | a record's `Task:` field | the section only, `**Task:** M1.2`. A step is in `index.md`'s What ran column; a finding is its F-heading's `(legacy: …)` label | `M1.2` → records 004–008; `M1.2 step 8` → record 007; F31's `(legacy: M1.2 step 8, probe result)` |
-| a `docs/roadmap.md` section | a `## <label>` heading over rows carried verbatim from `TASKS.md` | `## M2b` at `roadmap.md:72` |
+| a `docs/roadmap.md` section | a `## <label>` heading over rows carried verbatim from `TASKS.md` | `## M2b` in `roadmap.md` |
 | neither | build narrative the code has superseded | `M0.8` → `git show pre-spec-migration:TASKS.md` |
 
 **Grep both before saying anything about a label.** Some live in both places: `M2a` is records
-009–010 *and* the roadmap's `## M2a step 2` and `## M2a step 3` (`roadmap.md:46`, `:62`); `E9`
-is records 012–016 and 020 *and* `## E9` (`roadmap.md:132`). The spelling differs too: E8 and E9
+009–010 *and* the roadmap's `## M2a step 2` and `## M2a step 3`; `E9`
+is records 012–016 and 020 *and* the roadmap's `## E9`. The spelling differs too: E8 and E9
 ran under M3, so records write `Task: M3 E9` where the roadmap heading says `E9`. F01–F14
 (records 001–004) carry no `(legacy: …)` label; they resolve through their record's `Task:`
 field and `Log:` line anchors.

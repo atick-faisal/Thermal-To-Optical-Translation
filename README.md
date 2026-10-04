@@ -64,7 +64,7 @@ Every component must run end-to-end on that synthetic fixture, on CPU, in second
 pytest. Nothing is pushed without the smoke suite passing:
 
 ```sh
-uv run ruff check && uv run pyright && uv run pytest -m "not slow"
+just verify     # ruff check, ruff format --check, pyright, pytest -m "not slow"
 ```
 
 ## Layout
