@@ -155,7 +155,15 @@ stall-free (not 4,881), and its mAP50 peaks at epoch 76 (0.5153), because ultral
 the mAP50 one. Record `014` mints E9 step 3b's stale-label-cache and label-roll-direction findings
 itself, their evidence in its Results: both came off server runs (the bit-identical first re-gate,
 the 60-pair α sweep), as records 010 and 013 kept their run-found footguns. The 017+ row above
-loses those two, so SPEC-MIGRATION-19 carries four.
+loses those two, so SPEC-MIGRATION-19 carries four. Record `016` mints E9 step 5's two
+`campaign_report.py` wall-clock bugs and the `control-s0` 95-epoch explanation by the same rule,
+while the list-source OOM stays with SPEC-MIGRATION-19. Its saved `runs/e3f-report-2026-10-01.txt`
+predates both fixes (generated at `7a3ca94`), so block 5's spans and stage 0–2 `bound_h` are the
+buggy ones: `train_h` stands, and stage 0–2 boundaries re-derive as `bound_h` minus the next
+stage's `train_h`, but the stage-3 boundaries, the 9.51–10.44 h spans and ~116.8 GPU-h exist only
+in `TASKS.md`, so `Log:` reads `none saved — transcribed from TASKS.md <lines>` for them. The
+launch command reads `not recorded`; block 3's flag set is quoted verbatim, never pieced together
+into a `t2o loop` line.
 
 ### `PLAN.md` → `docs/design.md`
 
