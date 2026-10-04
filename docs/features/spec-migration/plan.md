@@ -1,7 +1,7 @@
 ---
 slug: spec-migration
 title: Spec-Workflow Migration
-status: in-progress
+status: shipped
 created: 2026-10-02
 ---
 
@@ -766,6 +766,25 @@ output. T1–T5 came from reading `TASKS.md` for Net 2: each is a "revisit when�
 ### No logic change
 
 `git diff --exit-code pre-spec-migration -- src scripts tests` prints nothing and exits 0.
+
+### Net 4 — fresh clone
+
+What SPEC-MIGRATION-26 produced. The clone is `5af2ce6` with the task's uncommitted diff applied:
+no `PLAN.md`, `TASKS.md`, `runs/` or `dataset/`. Every answer was read inside the clone, none from
+the tag. **Unanswered: none.**
+
+| # | Question | Answer | Path |
+| --- | --- | --- | --- |
+| 1 | E3 pix2pix's headline and p | Stage-3 paired zero-shot mAP50 +0.0512, p = .031, CI [+.025, +.081] | F35, `docs/experiments/007-m1-2-e3-pix2pix-positive.md:255` |
+| 2 | Why `grad_scale` is per backbone | 0.15 is a property of one objective's composition with one generator; turbo coinciding was measured, not predictable, so every backbone re-runs the 25-epoch `scripts/loss_share.py` probe (20–30% share) | `docs/design.md:360-370`, `:709`; `CLAUDE.md:42` |
+| 3 | E9 FLIR against its floor | Loop − control +0.3512 (p = .031), but the loop lands on the raw-thermal floor, 0.4415 against 0.4499: it prevents a loss, it does not beat no translation | F136, F137, `docs/experiments/016-e9-flir-twelve-run-cell.md:278`, `:288` |
+| 4 | What runs next | The open rows of the roadmap, chosen by a human — nothing ranks them, and the tag did not either | `AGENTS.md:33`; `docs/roadmap.md:5` |
+| 5 | Sign-flip versus bootstrap | The exact sign-flip p is the test; at n = 6 the percentile bootstrap is anti-conservative, so CIs are descriptive only | `docs/design.md:660-666` |
+| 6 | 753 of 853 and the `Connector` class | 600 train + 153 val of 853, ~100 held out; `nc: 5` but `Connector` (index 0) is an unused Label Studio class — report 4 | `docs/goal.md:130-133`; `docs/design.md:403-411`; record 003 |
+| 7 | Why ultralytics is pinned `>=8.4.108,<8.5` | The `Detect` head's output format changed between 8.3 and 8.4, and code written against one silently fails on the other. No reason is given for the `.108` patch floor itself, here or at the tag; `frozen.py` notes the `de_parallel` → `unwrap_model` rename just above it | `docs/design.md:302-311`, `:329`; `docs/goal.md:145`; `src/t2o/detection/frozen.py:27-30` |
+| 8 | The three detector roles | In-loop (gets generator gradients), evaluation (fine-tuned on exports, never gets them), reference (never trained, zero-shot gate) — three `DetectorConfig` sub-sections | `docs/design.md:168-173` |
+| 9 | E8's crossover | Translation is worth ≈150 annotated thermal images, ±1 sd [114, 185]; ≈214 against arm D | F81, `docs/experiments/011-e8-annotation-sweep.md:188`, `:210` |
+| 10 | The open paper obligations | 12 unchecked rows | `docs/roadmap.md` `## Paper obligations` |
 
 ## Out of Scope
 
