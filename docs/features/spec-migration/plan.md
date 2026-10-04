@@ -224,6 +224,13 @@ record 011's "all satisfied" was scored against the legacy five.
 The `C1`–`C4` row carries the same crosswalk, since `goal.md` and the legacy files now number
 C2–C4 differently.
 
+`AGENTS.md`'s other End-state sections restate nothing that already has a home: server runs point
+at `~/.claude/guidelines/research.md` §Conventions for the `logs/` rule, non-negotiables at
+`docs/design.md §5` Invariants. "Where an M/E label lives" works at three levels: a record's
+`Task:` holds the section only (`M1.2`, `M3 E9`), a step is in the index's What ran column, a
+finding in its F-heading's `(legacy: …)` label. A label can live in a record and a roadmap section
+at once (`M2a`, `E9`), so the table says to grep both.
+
 ### Loss prevention
 
 | Net | What | Catches |
@@ -264,6 +271,16 @@ Port them to the current project memory. Rewrite `biweekly-progress-updates` to 
 `dataset-rehost-deferred` — M0.9 closed 2026-09-19 with LLVIP and M3FD adapted on the server.
 
 ## Open Questions
+
+### Q17: §13 says `basicConfig` only in `cli.py`; four `scripts/*.py` own theirs by design. What lands in `AGENTS.md`?
+
+`scripts/fetch_datasets.py:176`, `mirror_thermal_labels.py:72`, `adapt_datasets.py:73` and
+`gate_table.py:267` each call `logging.basicConfig`, and each docstring says why. Answered by the
+human on 2026-10-04; awaiting the move to `## Resolved`.
+
+- [ ] §13 verbatim, plus one *Migration note* under it naming the four scripts and that "invariant N" means `docs/design.md §5` (recommended) — the house rule keeps its wording, and the note stops an agent from "fixing" a script
+- [x] Amend the bullet to "`basicConfig` only in `cli.py` and in each standalone `scripts/*.py`", as the sister did — matches the code, but rewrites a house rule inside a migration that promises no content change
+- [ ] §13 verbatim, no note — fully faithful, but every session loads a rule four files break on purpose
 
 ## Resolved
 
