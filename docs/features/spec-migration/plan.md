@@ -165,6 +165,12 @@ in `TASKS.md`, so `Log:` reads `none saved — transcribed from TASKS.md <lines>
 launch command reads `not recorded`; block 3's flag set is quoted verbatim, never pieced together
 into a `t2o loop` line.
 
+SPEC-MIGRATION-19 writes one no-run record per finding — 017 `--device 0`, 018 `workers`, 019
+absent vs null (which also judges record 008's consequences 1 and 3), 020 list-source OOM — because
+the no-run header holds a single Date, Task and `git_sha`; their dates precede 016's, and numbers
+are never reordered. It also replaces F97's `acts on M1.2 step 2b (legacy; …)` cell with 018's
+F-ID, and caveats step 2b's 2026-09-27 narrowing as F97's.
+
 ### `PLAN.md` → `docs/design.md`
 
 Every `§N` heading survives under the same number so `PLAN.md §N` resolves by one legend rule.
@@ -323,6 +329,12 @@ beats raw thermal" is no longer a criterion.
 - [x] Move it out of the feature: a post-merge chore with no task row (recommended) — it changes nothing in the repo, so a task row could never end in a commit, and the rewritten `biweekly-progress-updates` memory needs `docs/experiments/` and `docs/roadmap.md` to exist first anyway
 - [ ] Keep it as the last task and narrow Out of Scope to "templates, skills, guidelines" — keeps it tracked, but a row whose only output is outside git breaks the one-commit-per-task rhythm
 - [ ] Drop it entirely — the five memories stay orphaned at the old path, where no session will ever load them
+
+### Q15: Which paragraphs of `TASKS.md:20-969` and `1681-1965` does SPEC-MIGRATION-19 mint as findings?
+
+- [x] Only step 2b's `workers` (1751–1811); every other discovery paragraph in both ranges goes into Net 2's map as "superseded by the code and its docstrings", each with its reason (recommended) — M0.1–M0.9 labels nothing a finding, and its bold paragraphs are Decisions, which the no-run bar excludes as preferences
+- [ ] Also mint the short list that arguably clears the bar: pyright's wheel-shipped `tests` package shadowing `tests/` (446), InsPLAD's 18 categories against the paper's 17 (740), the ultralytics 8.4.117 API checks including `unwrap_model`'s rename at ~8.4.112 (180), and the §7 dependency maze not materialising (57) — keeps these facts findable once `TASKS.md` is deleted, at the cost of four more draft gates for records no experiment cites
+- [ ] Every bold-led discovery or decision paragraph — nothing has to be judged, but it pads the ledger with design choices
 
 ## Out of Scope
 
