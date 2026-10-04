@@ -43,7 +43,7 @@
 | F12 | Self-grading was real but small (~0.023 on λ>0 arms); λ_det's effect is not monotone (stage 2 0.8106 < stage 1 0.8244); the gain lives in Switch | 004 | superseded | acts on F04; F19, F21 |
 | F13 | The noise floor is 0.0591 mAP50, not 0.0129: stage 3 vs baseline +0.062 is ~1 noise draw, so at n = 1 λ_det's gain cannot be separated from run variance | 004 | confirmed | acts on F04, F07; F17, F134 |
 | F14 | ultralytics resolves a relative `project` under a machine-global `runs_dir`, not the cwd, so outputs land in another repository; M1's numbers unaffected | 004 | open | |
-| F15 | E3's pix2pix arm is negative on its pre-registered endpoint at `grad_scale: 1.0e-2`: stage 3 +0.0070 (p = .656) vs a −0.0063 stage-0 null | 005 | open | F35 |
+| F15 | E3's pix2pix arm is negative on its pre-registered endpoint at `grad_scale: 1.0e-2`: stage 3 +0.0070 (p = .656) vs a −0.0063 stage-0 null | 005 | superseded | F35 |
 | F16 | The stage-0 null control behaved as a null (−0.0063, p = .875, CI straddling zero), so the campaign is a measurement, not a broken run | 005 | open | |
 | F17 | Step 1's n = 1 noise floor was right: stage 0's CI half-width implies a per-seed sd ≈ 0.053 | 005 | open | acts on F13 |
 | F18 | Six paired seeds resolve ±0.026: the claim is "no effect larger than ~+3 mAP50 points", not "no effect" | 005 | open | |
@@ -66,7 +66,7 @@
 | F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | open | acts on F15, F25; F72, F87, F136 |
 | F36 | Dose-response appeared: paired difference 0 → +0.0280 → +0.0357 → +0.0512, monotone in λ | 007 | open | acts on F19, F28; F77 |
 | F37 | Raw detection loss falls 2.56 → 2.12 → 1.84 across stages 1–3, stage 3 ~30% below the uncalibrated campaign's 2.61 | 007 | open | acts on F33 |
-| F38 | Achieved share at 100 epochs 10.0 / 16.1 / 19.8%, just under the 20–30% band; not re-tuned after seeing mAP | 007 | open | acts on F30; F144 |
+| F38 | Achieved share at 100 epochs 10.0 / 16.1 / 19.8%, just under the 20–30% band; not re-tuned after seeing mAP | 007 | open | acts on F29, F30; F144 |
 | F39 | `loss_gan` did not diverge: +10.6% across stages 0→3 vs +11.1% uncalibrated; the probe's +35% was the 25-epoch artifact | 007 | open | acts on F31 |
 | F40 | The stage-0 null drew wide: −0.0397 (p = .469), loop-arm sd 0.0907 vs 0.0372; stage 3 is only 1.3× it — not clearly larger on that reading alone | 007 | open | F41, F140 |
 | F41 | Within-arm trajectory +0.0909, p = .094, CI [+.019, +.181], monotone in dose: corroborates but does not confirm; post-hoc sensitivity analysis | 007 | open | acts on F40 |
