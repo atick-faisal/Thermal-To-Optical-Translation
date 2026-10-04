@@ -152,7 +152,10 @@ and `Date` is that commit's date unless the source names the run's own. Record `
 CSV matches `TASKS.md`'s table except in two places, both Provenance caveats: it gives 4,864 s
 stall-free (not 4,881), and its mAP50 peaks at epoch 76 (0.5153), because ultralytics 8.4 picks
 `best.pt` on mAP50-95 alone (`ultralytics/utils/metrics.py:1009`). A `best` row is that peak, not
-the mAP50 one.
+the mAP50 one. Record `014` mints E9 step 3b's stale-label-cache and label-roll-direction findings
+itself, their evidence in its Results: both came off server runs (the bit-identical first re-gate,
+the 60-pair α sweep), as records 010 and 013 kept their run-found footguns. The 017+ row above
+loses those two, so SPEC-MIGRATION-19 carries four.
 
 ### `PLAN.md` → `docs/design.md`
 
