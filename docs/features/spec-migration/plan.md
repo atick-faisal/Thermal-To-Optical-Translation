@@ -247,6 +247,24 @@ at once (`M2a`, `E9`), so the table says to grep both.
 Nets 2 and 3 run before the deletion task, and the deletion task is blocked on them.
 `git diff pre-spec-migration -- src scripts tests` must show no logic change.
 
+**How SPEC-MIGRATION-25 runs the nets.**
+
+- Net 2 splits a range wherever a carve-out sits inside it. Where two records cite the same
+  lines, the record whose `Task:` names the section owns them. The other is listed in an "also
+  lifted into" column, and the tile check stays strict.
+- In `TASKS.md:20-969` and `1681-1965`, each discovery paragraph gets its own row with its
+  reason (Q15).
+- Net 3b counts a decimal as `\d+\.\d+` with at least 3 digits once the leading zeros and the
+  point are dropped. It matches on number boundaries, never as a substring, against
+  `docs/**/*.{md,csv}`. A number found only outside `docs/experiments/`, `design.md` and
+  `roadmap.md` goes on the triage list too, marked as such.
+- Net 3d lists every shape found, not only `§N` and `M<x>`: `PLAN.md §N` (N must exist in
+  `design.md`), `TASKS.md` labels (each classed record, roadmap or neither), bare `(TASKS.md)`
+  cites, `TASKS.md:<line>` anchors, and commit subjects up to the tag, parenthesised and bare.
+  Counts are taken fresh, not reconciled to the 188 and 90 in this plan's table.
+- The results (the map, the 3a result, the 3b triage list, the 3d shape table) go under the map
+  in this file. The scripts stay in the scratchpad.
+
 ### Sequencing
 
 1. *Done in 5b37655.* `/project-init` lands `docs/goal.md`, `CLAUDE.md` and `justfile` **before** `tasks.md`:
