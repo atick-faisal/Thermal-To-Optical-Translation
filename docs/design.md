@@ -1,0 +1,738 @@
+# Thermal→Visible Translation with Detection-in-the-Loop
+
+**Design.** This document defines *how* the code gets built. *What* we are proving and *why*
+— the problem, the drafting criteria, the non-goals — is [goal.md](goal.md). Measurements live
+in the run ledger, [experiments/](experiments/index.md); open work lives in
+[roadmap.md](roadmap.md). [RESEARCH_FINDINGS.md](../RESEARCH_FINDINGS.md) stays as the proposal
+of record.
+
+This is `PLAN.md` as tagged `pre-spec-migration`, every `§N` kept under its number so a
+`PLAN.md §N` citation resolves here (§13's body now lives in `AGENTS.md`). Measurement narrative
+is replaced by a pointer to the record that holds it; everything else is verbatim.
+
+---
+
+## 1. Objective and scope
+
+*Objective → [goal.md](goal.md), Problem: the research question this repo answers. Its original,
+diffusion-only wording is `RESEARCH_FINDINGS.md` §1.*
+
+The repo is an instrument for producing one defensible results table and defending it. It
+is not a product. No inference service, no deployment tooling, no UI, no labeling tools.
+
+Contribution stack (`RESEARCH_FINDINGS.md` §1):
+
+| # | Contribution | Role |
+| --- | --- | --- |
+| C1 | Closed-loop detection-consistency feedback for diffusion IR→VIS translation | Headline method |
+| C2 | Faithfulness / hallucination metric for safety-critical translation | Co-contribution |
+| C3 | Paired thermal-visible power-component detection benchmark protocol | Domain contribution |
+| C4 | Analysis of *when* translation beats direct thermal detection | Defends the premise |
+
+These are the legacy labels, which every record, `src/` and the experiment configs use.
+`goal.md` renumbers C2–C4: legacy C2 (faithfulness) is its C3, C3 (protocol) its C4, and C4
+(when translation pays) its C2.
+
+---
+
+## 2. Three facts that shape everything below
+
+**1. The custom dataset is ~850 annotated pairs.** `RESEARCH_FINDINGS.md` §6 assumes
+LBBDM-f4 can be trained on it. At 850 pairs that is not credible — diffusion from scratch
+will memorise. This drives the backbone revision in §4.
+
+**2. `Clean-SeAFusion` is the direct ancestor.** Our own repo at `../Clean-SeAFusion`
+already implements detection-in-the-loop correctly: frozen detector, differentiable
+`v8DetectionLoss`, staged λ ramp, and the non-obvious W&B/ultralytics integration fixes.
+Large parts port over rather than being rebuilt. See §6.
+
+**3. Training data and detector weights live only on the server.** Locally we have 9 pairs,
+and because the remote is public they are **not committed** — so a fresh clone has no
+images at all. Local development is therefore validated exclusively against a *synthetic*
+smoke fixture generated at test time, and that has to be a first-class design constraint
+rather than an afterthought. See §9.
+
+---
+
+## 3. Environment and constraints
+
+| | |
+| --- | --- |
+| Dev machine | macOS, CPU/MPS only. Code is written and smoke-tested here. |
+| Train machine | Native Windows Server 2022, 2×A100 40GB, **no WSL2** |
+| Transport | git push from dev → git pull on server. No shared filesystem. |
+| Config | Pydantic v2 models + YAML on disk, hashed for provenance |
+| W&B | Self-hosted; base URL already in the server environment |
+
+Native Windows consequences, accommodated by design rather than fought:
+
+- **No DDP.** NCCL does not exist on Windows. The second A100 is throughput, not scale —
+  one experiment per GPU via `CUDA_VISIBLE_DEVICES`. Every method must be trainable on a
+  single 40GB card.
+- **Assume no triton, no xformers, no `torch.compile`.** Mitigations in order of value:
+  PyTorch native `scaled_dot_product_attention`, gradient checkpointing, bf16.
+- **Spawn, not fork.** Dataset classes importable at module level, everything picklable,
+  entry points guarded. This is the most common source of silent hangs on this platform.
+- **No bash launchers.** Invoke Python directly through our own config layer.
+- **No symlinks.** Absolute config paths instead.
+- `pycocotools` may need a prebuilt wheel.
+
+---
+
+## 4. Backbone strategy — the central revision
+
+`RESEARCH_FINDINGS.md` §6 makes LBBDM-f4-from-scratch the Phase 2 backbone, then spends §4
+and E5 working around the consequence: a multi-step sampler cannot be back-propagated
+through on 40GB, so detection loss must reach it via ReFL/DRaFT approximations. At 850
+pairs, training that model from scratch also will not produce a translator worth attaching
+a loop to.
+
+**`pix2pix-turbo` becomes the primary diffusion backbone.** Verified in the local checkout
+at `../img2img-turbo` (`src/pix2pix_turbo.py:186`, commit `463b2d3`):
+
+```python
+self.sched = make_1step_sched()          # __init__
+encoded_control = self.vae.encode(c_t).latent_dist.sample() * scaling_factor
+model_pred  = self.unet(encoded_control, self.timesteps, encoder_hidden_states=caption_enc).sample
+x_denoised  = self.sched.step(model_pred, self.timesteps, encoded_control).prev_sample
+output_image = self.vae.decode(x_denoised / scaling_factor).sample.clamp(-1, 1)
+```
+
+One UNet evaluation. No sampling loop. `self.timesteps` is a fixed `tensor([999])`. This
+resolves four separate problems at once:
+
+| Problem in RESEARCH_FINDINGS | Resolution |
+| --- | --- |
+| 850 pairs can't train diffusion from scratch | SD-turbo is pretrained; only LoRA adapters train (rank 8 UNet / 4 VAE) |
+| "Full-sampler gradient backprop will not fit" (§2) | The whole generator is one forward pass — detection loss back-props through *all* of it, exactly |
+| E5 tractability ladder (ReFL → DRaFT-K → LCM) | Becomes an *experiment*, not a dependency. We start distilled. |
+| Reward hacking (§6 guardrails) | LoRA-only updates are the lever DRaFT identifies as most effective — built in |
+
+LBBDM is **not** dropped. It becomes the multi-step arm of E5. That comparison — exact
+gradients through a distilled one-step model vs. truncated gradients through a multi-step
+one — is a more interesting methodological finding than the original framing, and the
+honest version of E5 rather than a workaround.
+
+### Backbone ladder
+
+**pix2pix (Phase 1 gate) → pix2pix-turbo (Phase 2a primary) → LBBDM-f4 + ReFL (Phase 2b).**
+
+CUT moves to E2 as the *unpaired* baseline. Our data is paired and CUT has no paired mode —
+the author explicitly declined to add one ([issue #141](https://github.com/taesungp/contrastive-unpaired-translation/issues/141):
+*"this repo does not aim to tackle the aligned setting"*).
+
+UNSB drops to optional: single-GPU batch-1 only, a three-arg `netG(x, time_idx, z)`
+signature, two zipped dataloaders per step, and a multi-step sampler buried inside
+`forward()` behind a `phase == 'test'` branch. Poor cost/benefit for one baseline row.
+
+---
+
+## 5. Repository architecture
+
+Five layers. The boundary that matters most: `core` never contains method-specific code.
+
+```
+src/t2o/
+  config/        pydantic schemas, YAML loading, config hashing, snapshotting
+  data/          manifest, pairing, dataset, labels, adapters per public dataset
+  metrics/       fidelity (PSNR/SSIM/LPIPS/FID/KID), task (mAP), faithfulness (C2)
+  translators/   uniform wrapper per backbone over vendored third_party/
+  detection/     FrozenDetector (in-loop) + evaluation detector, strictly separated
+  coupling/      detection-consistency loss and its schedule
+  engine/        trainer, loop, export, checkpointing
+  tracking.py    W&B RunTracker
+  cli.py         argparse subcommands
+experiments/     experiment config YAMLs — tracked. An experiment IS a config file.
+runs/            run outputs (checkpoints, exports, metrics.json) — ignored
+third_party/     vendored at pinned commits, never edited in place
+tests/
+```
+
+Splitting `experiments/` (configs, tracked) from `runs/` (outputs, ignored) departs
+deliberately from `RESEARCH_FINDINGS.md` §3's "experiments/ configs and results only".
+Configs must reach the server via git; results must not come back through it.
+
+### Invariants
+
+1. **One evaluation path.** Every method computes every metric through the same code.
+   Non-negotiable — it is what makes the comparison table defensible.
+2. **Frozen data contract.** Splits decided once, hashed, version-controlled. No method
+   sees its own split logic.
+3. **Backbones interchangeable.** A translator is anything that can `fit()` and
+   `translate(batch) -> Tensor`. Swapping one for another is a config change.
+4. **Third-party code vendored at pinned commits, never edited in place.** All adaptation
+   lives in wrappers we own.
+5. **The loop is a first-class component**, switchable off cleanly — because switching it
+   off *is* the central ablation.
+6. **An experiment is a config file.** Results carry their config hash.
+7. **Three detector roles, never conflated.** The *in-loop* detector guides training and
+   receives generator gradients. The *evaluation* detector is fine-tuned on translated
+   exports and never receives them. The *reference* detector is never trained at all — it
+   only scores translations zero-shot, and is what §12's gate arm is measured with. Encoded
+   structurally as three sub-sections of `DetectorConfig` (`config/schema.py`), so no two
+   roles can share a weights file by accident.
+
+---
+
+## 6. What ports from Clean-SeAFusion
+
+Read and verified during planning. Near-verbatim ports, not inspiration.
+
+| Source (`../Clean-SeAFusion/`) | Target | Change |
+| --- | --- | --- |
+| `src/seafusion/models/detector.py` — `FrozenDetector` | `detection/frozen.py` | None. `train()` override, `_normalize_args` checkpoint repair, stride validation all still apply. |
+| `src/seafusion/losses/task.py` — `DetectionTaskLoss` | `coupling/detection_loss.py` | Drop YCbCr recombination; the translator emits RGB directly. **Keep the batch-size division** (`components / batch_size`) that keeps λ invariant to batch size. |
+| `src/seafusion/data/dataset.py` | `data/dataset.py` | Rename to translation semantics; keep the bbox crop/flip math, the class-id range precheck, and the `v8DetectionLoss`-shaped collate exactly. |
+| `src/seafusion/data/{pairing,manifest,labels}.py` | `data/` | None. Filename-based pairing (never sorted-index); `data.yaml` as single source of truth. |
+| `src/seafusion/engine/detector_stage.py` | `engine/detector_stage.py` | Keep `wandb_integration_disabled()` and the `_resolve_weights()` `last.pt` fallback. |
+| `src/seafusion/engine/fusion_trainer.py` | `engine/trainer.py` | Keep bf16/fp16 GradScaler logic, resumable checkpoints, `config_hash()`, warn-on-config-drift resume. |
+| `src/seafusion/engine/export.py` | `engine/export.py` | Translated images + copied labels + generated `data.yaml` → feeds the evaluation detector. |
+| `src/seafusion/tracking.py` — `RunTracker` | `tracking.py` | None. Rank-0 only, never raises, context manager. |
+| `src/seafusion/imaging.py` — `Normalize` | `imaging.py` | None. Per-image (never batch-wise) clamp/stretch on export. |
+| `../RGBT-Fusion-Detection/pyproject.toml` cpu/gpu extras | `pyproject.toml` | Port immediately — it is what lets one lockfile serve Mac-CPU dev and Windows-CUDA training. |
+| `../RGBT-Fusion-Detection/src/rgbt/config.py` — `Hyperparams` | `config/detector.py` | Re-express as a pydantic model. |
+
+Two integration fixes in `detector_stage.py` that are worth their own mention, because they
+cost real debugging time to find:
+
+- **`wandb_integration_disabled()`** — ultralytics' W&B integration adopts an already-open
+  run and calls `wb.run.finish()` at training end, killing the outer run. Must be patched
+  at `ultralytics.utils.callbacks.wb.callbacks`, not on `model.callbacks`.
+- **`_resolve_weights()`** — falls back to `last.pt` because ultralytics never writes
+  `best.pt` if fitness was ever NaN.
+
+**Must be built from scratch:** all fidelity metrics. No PSNR/SSIM/LPIPS/FID/KID exists in
+any of our repos, and `torchmetrics`/`piq`/`lpips` appear in zero pyprojects. mAP is fine
+(ultralytics `DetMetrics`).
+
+**Do not port `../Experiment-Logging-WB/main.py`** — it hardcodes a W&B API key on line 20.
+That credential should be rotated.
+
+---
+
+## 7. Vendoring strategy: networks and losses, not training frameworks
+
+The upstream repos each ship a full training framework (`BaseModel` + `opt` namespaces +
+`BaseDataset` + bash launchers). Wrapping four of those is where this kind of project
+drowns — and the bash/`opt`/symlink machinery is exactly what does not survive native
+Windows.
+
+Vendor **model definitions and loss functions only**; drive all of them with the one
+trainer ported from Clean-SeAFusion.
+
+| Backbone | Pin | Vendor | Ignore |
+| --- | --- | --- | --- |
+| pix2pix / CycleGAN | `2a7afba` (2025-08-06) | `models/networks.py` — `define_G`, `define_D`, `GANLoss` | `BaseModel`, `options/`, `data/`, `train.py`, `scripts/*.sh` |
+| CUT / FastCUT | `b3ac297` (2023-09-05) | generator + `models/patchnce.py::PatchNCELoss` + `PatchSampleF` | everything else |
+| pix2pix-turbo | `463b2d3` (local checkout is current) | `src/model.py` — `my_vae_encoder_fwd`, `my_vae_decoder_fwd` | `train_pix2pix_turbo.py` — reimplement its loss assembly. Also `src/pix2pix_turbo.py::Pix2Pix_Turbo`: **reimplemented, not vendored** (M2a). It starts with `sys.path.append("src/")` + `from model import`, so it does not import outside upstream's cwd, and 100 of its 229 lines are checkpoint downloads for tasks we do not use. Same split M1 made between `networks.py` and `Pix2PixModel`. |
+| LBBDM-f4 | `02c3b13` (2024-08-01) | `BrownianBridgeModel`, `LatentBrownianBridgeModel`, `model/VQGAN/` | `runners/`, `main.py`, `configs/` |
+
+This makes invariant 3 real, and it defuses the single biggest practical risk in the
+project:
+
+> **The dependency maze is a property of the frameworks, not the models.** img2img-turbo's
+> open issues (#97, #119, #139, #145) are all one problem — `diffusers==0.25.1` needs
+> `huggingface_hub.cached_download`, removed upstream; `transformers==4.35.2` collides with
+> `peft>=0.14`. The known-good combination users report is a 2023-era stack that will not
+> coexist with modern torch. But `Pix2Pix_Turbo` is a ~230-line class using only stable
+> APIs (`AutoencoderKL`, `UNet2DConditionModel`, `CLIPTextModel`, `AutoTokenizer`,
+> `peft.LoraConfig`). Vendoring that one file and running it against *current* diffusers
+> sidesteps the entire maze.
+>
+> Same story elsewhere: CUT's Pillow-10 `Image.BICUBIC` crash and its missing
+> `torch.load(weights_only=)` both live in `data/base_dataset.py` and `models/base_model.py`
+> — files we never import.
+
+Two patches we *do* inherit and must make deliberately:
+
+- `Pix2Pix_Turbo.__init__` hardcodes `.cuda()` (lines 33, 40–43, 158–162), and
+  `src/model.py::make_1step_sched` does `set_timesteps(1, device="cuda")`. **Our wrapper
+  owns device placement.**
+- `LatentBrownianBridgeModel.decode()` is `@torch.no_grad()`. A grad-enabled copy is
+  required for the ReFL path. The VQ quantizer already does straight-through
+  `z_q = z + (z_q - z).detach()`, so gradients do flow once the decorator is gone.
+
+### Extra dependencies
+
+`diffusers`, `transformers`, `peft`, `lpips`, `torchmetrics` (FID/KID), `pycocotools`.
+
+**Not** needed: `accelerate` (our trainer replaces it) and `vision_aided_loss` (the CLIP
+discriminator is optional — start without it; the detection loss is the point).
+
+### Licensing to note in the paper
+
+- **sd-turbo**: Stability AI Non-Commercial Research Community License. Fine for an
+  academic paper; constrains downstream use.
+- **CUT**: bundles NVIDIA StyleGAN2 code (non-commercial) via `models/stylegan_networks.py`,
+  which `models/networks.py` imports at module level even on the `resnet_9blocks` path.
+- **Ultralytics**: AGPL-3.0, already accepted in `RESEARCH_FINDINGS.md` §4. Note it is
+  network copyleft.
+
+---
+
+## 8. Coupling design
+
+The translator emits RGB directly, so the coupling term is simpler than SeAFusion's:
+
+```
+loss = λ_l2·L2 + λ_lpips·LPIPS + λ_gan·GAN + λ_det·DetectionTaskLoss(rgb_pred, batch)
+```
+
+The first three terms are what `img2img-turbo/src/train_pix2pix_turbo.py:176-200` already
+computes; the fourth is the ported `DetectionTaskLoss`. Insertion point is a single added
+term at line 179's `loss = loss_l2 + loss_lpips`.
+
+Two things come free:
+
+- `net_lpips` is already in that loop → the **fidelity floor** guardrail (early-stop when
+  LPIPS rises past a threshold) needs no new machinery.
+- LoRA rank is already a knob → the anti-reward-hacking lever is a config field.
+
+### λ_det schedule
+
+Follows `../Clean-SeAFusion/src/seafusion/engine/loop.py`: staged `task_weights: [0,1,2,3]`,
+translator **and** detector warm-started across stages. Note that original SeAFusion
+re-instantiates its generator from scratch every stage (`train.py:203`), so its "loop" only
+ever accumulates progress in the task network — making the alternation pointless in one
+direction. Clean-SeAFusion already documents and fixes this. Do not reintroduce it.
+
+**`λ_det = 0` must be a clean no-op path**: at weight 0 the frozen detector is never even
+constructed. That is what makes E3 a genuine control.
+
+### Ultralytics must be pinned `>=8.4.108,<8.5`
+
+The `Detect` head output format **changed between 8.3 and 8.4**. 8.4 returns a dict
+(`{"boxes", "scores", "feats"}`) from `forward_head`; 8.3 returns a list of concatenated
+feature maps that `v8DetectionLoss` reshapes itself. Code written against one silently does
+not work against the other.
+
+This is also an independent reason to keep the YOLOv11-RGBT fork out of the loop: it is a
+hard fork of ultralytics **8.3.75** with the whole tree vendored, unupgradable without
+redoing the fork.
+
+### The differentiable detection loss contract
+
+Verified against ultralytics source. `v8DetectionLoss` detaches **only** the
+TaskAlignedAssigner inputs (`loss.py:430-431`) — label assignment is a non-differentiable
+discrete choice. The loss terms themselves consume non-detached `pred_scores` and
+`pred_distri`, so gradients flow through the whole backbone/neck/head into the image.
+
+Required `batch` keys are exactly three: `batch_idx` `(N,)`, `cls` `(N,1)`, `bboxes`
+`(N,4)` **normalised cxcywh**. Image size is derived from `preds["feats"][0].shape[2:]`, so
+the generated image never needs to be threaded into the batch dict.
+
+Six things that bite, all already handled in the Clean-SeAFusion port:
+
+1. Keep the detector in `eval()` — BN uses running statistics, so the task gradient does
+   not shift with batch composition. The loss still works: `Detect.forward` returns
+   `(y, preds)` outside training and `parse_output` unwraps exactly that.
+2. De-parallelize before constructing the loss (`unwrap_model`; named `de_parallel` before
+   ~8.4.112).
+3. `model.args` must expose `.box`/`.cls`/`.dfl` — normalise it.
+4. Divide by batch size; the loss is returned pre-multiplied.
+5. Input must be divisible by the coarsest stride (32).
+6. **Do not route generated images through `preprocess_batch`** — it does `.float()/255` on
+   a uint8 dataloader tensor, which is a fresh graph root. Feed float32 `[0,1]` directly.
+
+### Two guardrails from the reward-tuning literature
+
+- **Saturating reward, not pure maximisation.** ReFL uses `relu(-r + 2)`; AlignProp uses
+  `|r - target|`. Both stop rewarding a sample once it is good enough, which blunts reward
+  hacking directly. The detector *will* find adversarial textures otherwise.
+- **Aggressive constant downscale on the reward gradient.** ReFL `grad_scale=1e-3`,
+  AlignProp `loss_coeff=0.01`. The `[0,1,2,3]` ramp is calibrated to SeAFusion's
+  *segmentation* loss scale, not a detection loss — recalibrate empirically in Phase 0.
+  *Result → [record 006](experiments/006-m1-2-dose-limited.md): the recalibration skipped, and
+  the detection term's measured share of the objective at `grad_scale: 1.0e-2`.*
+
+  **Calibrated value for pix2pix: `grad_scale: 0.15`**, achieving 10.0 / 16.1 / 19.8% of the
+  objective over a full 100-epoch stage (M1.2 step 8).
+  The guardrail this downscale was providing transfers to `reward_target` plus the per-stage
+  LPIPS readout — and the readout has since caught something: the calibrated dose costs
+  +0.0097 stage-3 LPIPS, where at `1.0e-2` fidelity was neutral within ±0.016.
+  *Result → [record 007](experiments/007-m1-2-e3-pix2pix-positive.md): E3 pix2pix at this dose.*
+
+  **Calibrated value for pix2pix-turbo: also `grad_scale: 0.15`**, achieving 16.6 / 22.9 /
+  24.5% over a 25-epoch probe, with a second probe at 0.75 bracketing it at 46.6 / 54.7 /
+  57.4% (TASKS.md M2a step 4). The two campaigns therefore run at the same dose and differ by
+  the backbone alone — the cleanest possible form of §11's backbone comparison.
+
+  **The calibration is per backbone, not a global constant, and turbo coinciding is not
+  evidence otherwise.** 0.15 is a property of *this* objective's composition with *this*
+  generator. sd-turbo does start pretrained and its `loss_det` does sit lower — raw 1.98 at
+  stage 3 against pix2pix's 2.76 — so the same `grad_scale` could easily have landed back near
+  2%, reproducing step 7's null for step 7's reason at another ~72 GPU-hours. It did not, only
+  because the fidelity terms fell by a similar factor and the *ratio* held. That is a fact the
+  probe established, not one that could have been predicted from it. Every new backbone re-runs
+  the 25-epoch `scripts/loss_share.py` probe before its campaign; the two turbo probes cost
+  hours and returned "change nothing", which is the cheapest possible outcome and still worth
+  paying for. This is the single most expensive mistake available in this project and it has
+  already been made once.
+
+### Worth stealing from DetFusion: object-aware content loss
+
+DetFusion itself is unportable (mmdetection 0.2.14 era, torch 1.1/1.3, Linux-only, CUDA
+extensions via `bash compile.sh`). But its `DetcropPixelLoss`
+(`mmdet/models/losses/fusion_loss.py:64-128`) is ~20 lines and directly serves C2:
+**inside ground-truth boxes match the per-pixel max of the source modalities; outside match
+their mean.** Reimplement rather than port. It gives a spatially-aware fidelity term that
+specifically protects the safety-relevant components.
+
+---
+
+## 9. Data
+
+### Contract
+
+One internal representation; adapters normalise every dataset into it. Adding a dataset
+never touches training code.
+
+- Layout `{split}/{visible,infrared}/{images,labels}`, YOLO txt labels, filename-paired.
+- Pairing is **path-segment substitution**, never sorted-index, with eager validation.
+- `data.yaml` is the single source of truth. Keep the `rgbt:` token block (it drives
+  pairing); drop `channels: 6` — our detector is stock 3-channel.
+- Splits decided once, hashed, version-controlled.
+
+### The custom dataset
+
+~850 annotated pairs, of which **600 train / 153 val (753) are all any experiment in this repo
+touches** — the remaining ~100 are held out as an unseen test set, used only at reporting time.
+That isolation is structural, not procedural: `DatasetManifest` reads only
+`path`/`train`/`val`/`nc`/`names`/`rgbt`, so a `test:` key in `data.yaml` is invisible to every
+code path here. Frozen on the server as `yolo_rgbt_29_jul` (`combined_hash 7ede3433adc9c0b8`);
+see TASKS.md M0.9 for why that record cannot reach git. **Report "753 train+val of 853", not
+"850 pairs".** Scale arguments below that say "850" are order-of-magnitude and hold at 753.
+
+**4 annotated classes** (Fuse, Pole, Switch, Transformer) inside a
+manifest that declares `nc: 5`. The fifth, `Connector` (index 0), is a Label Studio artifact —
+created in the labelling project and never used — so it has zero instances in both splits and
+is absent from every per-class AP table. Kept rather than renumbered, since it is index 0 and
+dropping it would rewrite the class id in every label file for no measurable gain; see
+TASKS.md M1.1 for why every consequence is benign. **Report 4 classes in the paper, not 5.**
+Registered 640×480 FLIR
+pairs; thermal is single-channel. Labels are shared across modalities.
+
+A 9-pair sample sits at `dataset/yolo_rgbt/` on the dev machine with `train == val` — it is
+a **local smoke fixture, not a split**.
+
+**`dataset/` is never tracked in git, no exceptions.** The remote is public and these are
+unpublished research pairs. The blanket ignore has a consequence that has to be designed
+around rather than discovered: **a fresh clone — including the server's — has no images at
+all.**
+
+### Smoke-fixture discipline
+
+This is the answer to the code-here / train-there friction, and it is load-bearing.
+
+Because no image can be committed, the smoke suite is built on **synthetic pairs generated
+at test time** via `tmp_path_factory` (already the house convention, §13): a handful of
+random 640×480 arrays written as JPEGs plus hand-written YOLO txt labels, laid out in the
+same `{split}/{visible,infrared}/{images,labels}` structure with a matching `data.yaml`.
+One session-scoped fixture builds it; every test consumes it.
+
+This is strictly better than depending on committed images, and not only for the privacy
+reason:
+
+- Tests that need a *specific* pathology — an out-of-range class id, an unpairable
+  filename, a degenerate box below `_MIN_BOX_SIDE`, a genuinely disjoint `train`/`val` —
+  can construct it exactly, instead of hoping the 9 real pairs happen to contain it.
+- The suite runs identically on a bare clone, on the server, and in CI.
+
+Any test that wants the *real* pairs (visual spot-checks, a sanity run against genuine
+thermal statistics) must `skipif` the directory is absent, and must never be the only
+coverage of a code path.
+
+Every component must run end-to-end on the synthetic fixture, on CPU, in seconds, as a
+pytest. `experiments/smoke.yaml` mirrors every real config at tiny scale. Nothing is pushed
+to the server without the smoke suite passing.
+
+The suite needs a tiny CPU stand-in translator implementing the same interface, so the
+data → coupling → export → eval path stays locally testable in seconds. **That stand-in is
+part of the design, not a test fixture afterthought.** (The original reason was that
+`Pix2Pix_Turbo` hardcodes `.cuda()` and cannot be imported on the Mac at all. M2a's wrapper
+owns device placement, so the turbo backbone *does* now run on CPU — but a 1.3B-parameter
+model is not what the data-path tests should be paying for.)
+
+### Public datasets
+
+| Access | Datasets |
+| --- | --- |
+| Trivially scriptable (`git clone --depth 1` / `curl`) | MSRS, CPLID, HIT-UAV, FLIR-aligned (HuggingFace mirror `UserNae3/FLIR_aligned` — avoids the Teledyne registration form) |
+| Google Drive, needs `gdown` + a human first time | LLVIP, M3FD, TTPLA |
+| Manual/browser | InsPLAD (Mendeley), Yetgin & Gerek (Mendeley) |
+
+~~For the Drive-hosted three: fetch once on the Mac, re-host, then the server script is a
+plain `curl`.~~ **Superseded (2026-08-23, TASKS.md M0.9):** `scripts/fetch_datasets.py` ran
+directly on the server against all three, so there is no intermediate artifact and no
+re-hosting decision to make. The registry is the delivery mechanism on both machines.
+
+**Correction to `RESEARCH_FINDINGS.md` §5:** Yetgin & Gerek is **4,000 IR + 4,000 VL at
+128×128, unpaired/unregistered different scenes**, with binary presence/absence labels
+(wire masks are a separate deposit) — not "400 IR + 400 VL with wire masks". At 128×128 and
+unpaired it is unusable as translation data. Cite-as-motivation only (which the doc already
+concludes) but fix the numbers in the paper.
+
+~~Still unverified: whether MSRS's `detection/` folder has box annotations usable for mAP;
+InsPLAD's annotation format.~~ **Both verified (TASKS.md M0.9):** MSRS `detection/` has 80
+YOLO-labelled pairs; InsPLAD is MS-COCO detection JSON. **Adapted and frozen:** MSRS,
+FLIR-aligned, M3FD, LLVIP. CPLID, HIT-UAV and TTPLA are single-modality, so they are out of
+scope for translation pairs.
+
+---
+
+## 10. Phases
+
+Each phase produces a usable result even if the next fails.
+
+### Phase 0 — Instrument
+
+Harness only, no research claims. Port the Clean-SeAFusion pieces; build config / data /
+metrics / tracking; stand up the CPU stand-in translator and the smoke suite; write the
+fidelity metrics that don't exist yet; measure actual VRAM on the server before committing
+to batch size and resolution; recalibrate the λ_det scale for a detection loss.
+
+Establishes the E1 reference bracket using the detector weights already on the server.
+
+### Phase 1 — GAN loop (the go/no-go)
+
+**pix2pix**, not CUT. pix2pix is the cheapest seam of all backbones — `translate` is
+literally `netG(x)`, and the detection loss slots into `backward_G()` where `fake_B` is
+already un-detached.
+
+**Gate: if translated mAP does not beat raw-thermal mAP on at least one class, stop and
+re-frame before escalating to diffusion.** Cheap by construction — hours, single card.
+
+Both sides of that comparison are §12's **zero-shot** arm — one unadapted visible-trained
+detector, run on raw thermal (E1's 0.1887 floor) and on translated images. The adapted arm
+answers a different question and lands near 0.9 either way, so reading the gate off it would
+pass it for the wrong reason.
+
+*Result → the gate: [record 002](experiments/002-m1-phase1-gate.md), re-scored under an
+independent judge in [record 004](experiments/004-m1-2-yolo11s-judge.md); whether λ_det drives
+the gain: E3, records [005](experiments/005-m1-2-e3-pix2pix-null.md)–[007](experiments/007-m1-2-e3-pix2pix-positive.md).*
+
+### Phase 2a — One-step diffusion loop (primary)
+
+pix2pix-turbo behind the translator interface. **FLIR-aligned pretrain → custom fine-tune**
+(revised from LLVIP, 2026-08-23, confirmed with the user: the adapter is already written and
+verified at 4129 train pairs, and FLIR-aligned is the same camera family as the custom 640×480
+data where LLVIP is 1024×1280 street scenes; LLVIP stays available for an E9 corpus ablation).
+Exact end-to-end detection-loss backprop, LoRA-scaled, λ_det warmed up from near-zero — at a
+`grad_scale` calibrated for *this* backbone, per §8. **That calibration is done: 0.15**, the same
+value as pix2pix, re-probed rather than inherited (TASKS.md M2a step 4).
+
+**The E3 turbo campaign launches on the custom pairs alone, without the FLIR pretrain**, and the
+ordering matters. pix2pix's arm had no pretrain, so pretraining only the turbo arm would confound
+E3's backbone comparison with a corpus change — the one thing §11 says that cell must not do. The
+FLIR-aligned pretrain is a separate experiment on a "more data" axis, to be read against the
+campaign below rather than folded into it. It also needs a seam that does not exist yet: nothing
+in the config or `cli.py`'s overrides can initialise a translator from an external checkpoint, so
+stage 0 has no way to start from pretrained weights today.
+
+Data prep fits naturally: thermal → `train_A`, visible → `train_B`, plus a
+`train_prompts.json` with a constant caption. **Watch the normalisation asymmetry in
+`PairedDataset` — input arrives in [0,1], target in [-1,1].**
+
+VRAM: the documented paired recipe is 512² at `train_batch_size=2`. The maintainer reports
+A6000/48GB for the *unpaired* CycleGAN-turbo variant (multiple generators + discriminators)
+and calls batch 8 "too high". Paired is far lighter, but this is exactly why Phase 0
+measures on the actual card first. **Measured: 34.14 GB peak** at `batch_size: 2` on a 40GB
+A100 at full 640×512 frames, stage 3 with the `FrozenDetector` resident — so batch 2 is the
+effective ceiling, the stride-32 `[512, 512]` fallback stays unused, and full frames keep the
+backbone as the only difference from the pix2pix campaign.
+
+Guardrails against collapse and reward hacking: LoRA scaling, λ_det warmup from near-zero,
+fidelity floor on LPIPS, independent evaluation detector.
+
+### Phase 2b — Multi-step diffusion comparison arm (lower priority)
+
+LBBDM-f4 + ReFL. The seam is precisely located:
+`BrownianBridgeModel.predict_x0_from_objective`
+(`model/BrownianBridge/BrownianBridgeModel.py:148-160`) is already exposed differentiably
+as `log_dict["x0_recon"]` out of `p_losses` — that *is* the ReFL x̂₀, free, at a random t
+per batch. For the latent variant it is a latent, so it needs the grad-enabled `decode()`
+from §7.
+
+For the truncated-gradient arm, copy **AlignProp's** pattern rather than ReFL's:
+`sd_pipeline.py:206-225` runs one unified loop with every UNet call wrapped in
+`torch.utils.checkpoint.checkpoint(..., use_reentrant=False)`, truncating with a per-step
+`if i < backprop_timestep: noise_pred = noise_pred.detach()`. Cleaner than ReFL's
+`no_grad`-prefix split, and it makes K a single config value.
+
+DRaFT has **no official code**; `trl`'s `AlignPropTrainer` is the maintained equivalent.
+Reference hyperparameters: K ∈ {1,5,10,30,50} with **smaller K better**, LoRA rank 8
+(small) / 32 (large), lr 2e-4–4e-4. Start at K ∈ [1, 10].
+
+Cost flags justifying the lower priority: BBDM's pretrained weights are **Baidu-only** and
+effectively unavailable (issues #16, #41, #59); it depends on `pytorch_lightning` purely as
+a base class for `VQModel`; its templates carry known unfixed config bugs (issue #47),
+including `UNetParams.image_size` needing the *latent* size not the image size; and
+`VQModel.init_from_ckpt` uses `load_state_dict(..., strict=False)`, so a wrong checkpoint
+loads silently with random weights. VQGAN f4 weights come from LDM and *are* freely
+downloadable. Reference point: 24GB @ batch 8 @ 256² f4.
+
+### Phase 3 — Defend
+
+Full baseline suite, low-annotation sweep (E8), cross-dataset generalisation (E9),
+faithfulness stress tests (E10).
+
+### Phase 4 — Harden
+
+Multi-seed runs, significance testing, complete ablation grid.
+
+---
+
+## 11. Experiment matrix
+
+E1–E10 from `RESEARCH_FINDINGS.md` §7 survive. Changes:
+
+| Exp | Status |
+| --- | --- |
+| E1 reference bracket | Unchanged. Detector on {raw thermal, real visible} × {detector trained on thermal, on visible}. The server's existing weights cover most of this. |
+| E2 backbone comparison | `{pix2pix, pix2pix-turbo, LBBDM-f4}` paired at λ_det=0; `{CUT}` unpaired. UNSB optional. |
+| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. *Results → pix2pix: [005](experiments/005-m1-2-e3-pix2pix-null.md) at `grad_scale: 1.0e-2`, [006](experiments/006-m1-2-dose-limited.md) its dose, [007](experiments/007-m1-2-e3-pix2pix-positive.md) at the calibrated 0.15, [008](experiments/008-m1-2-c2-faithfulness.md) C2 on its exports; turbo: [009](experiments/009-m2a-turbo-probes.md) its calibration, [010](experiments/010-m2a-e3-turbo-replicates.md) the campaign.* |
+| **E4 coupling mechanism** | **Scope reduced.** Was `{cascaded, bilevel (TarDAL), meta-feature (MetaFusion)}`. Both comparison arms are unportable — see below. Becomes `{cascaded, bilevel-reimplemented}`, meta-feature deferred. |
+| **E5 gradient tractability** | **Reframed.** Was "which approximation makes backprop fit". Now: *exact* full-generator gradients through a one-step distilled model vs. *truncated* ReFL/K gradients through multi-step LBBDM. A cleaner and more publishable question. |
+| E6 schedule | Unchanged. Warmup vs none; joint vs alternating; λ_det sweep. |
+| E7 detector identity | Directly supported: in-loop detector is the existing optical `.pt`; the evaluation detector is retrained per-run on exported translations. |
+| E8 low-annotation | At 850 pairs this is likely the **headline**, not the fallback. Build the annotation-fraction sweep into the data layer from the start. |
+| E9 cross-dataset | Unchanged. |
+| E10 faithfulness | Unchanged. False-object and missed-object rates vs λ_det. |
+
+### Why E4's comparison arms must be reimplemented, not ported
+
+**TarDAL's detection-in-the-loop edge is severed in the released code.**
+`scripts/train_fd.py:171` calls `self.fuse.eval(...)`, but `Fuse.eval` is decorated
+`@torch.no_grad()` (`pipeline/fuse.py:112-116`). The fused tensor arrives with
+`requires_grad=False`, the subsequent `fus.detach_()` at `:173` is a no-op, and the
+detection loss backprops **only into YOLOv5, never into the generator**. Neither of the two
+commits that file has received touches this. If we implement "bilevel" as a comparison arm
+we must use `Fuse.forward` (which keeps the graph) — and say so in the paper, or a reviewer
+who knows the codebase will assume we reproduced the bug.
+
+**MetaFusion's released repo is inference-only.** Its entire contents are `README.md`,
+`environment.yml`, `models/metafusion_net.py`, `test.py`, `utils/dataloader.py`, and a
+weights file. There is no MFE module, no detector, no training script, and **no license
+file at all**. The meta-learning scaffolding *is* present (`MetaModule.update_params` is a
+graph-preserving functional SGD step — the canonical MAML inner loop), but the code that
+calls it is not shipped. Deferring the meta-feature arm is the honest call; revisit only if
+E4 shows gradient conflict the cascaded and bilevel arms cannot resolve.
+
+---
+
+## 12. Metrics
+
+**Fidelity:** PSNR, SSIM, LPIPS, FID, KID — reported, but explicitly argued as
+insufficient. PSNR/SSIM reward blur; FID/KID use ImageNet backbones insensitive to
+domain-specific structure and are unreliable on small sets.
+
+Scored on the **exported images**, not the translator's float output, so fidelity and the
+task metric describe the same artifact. Their job in this project is not to carry an argument
+alone but to sit beside the task metric as the reward-hacking check: detection rising while
+LPIPS/FID fall is the signature §8's guardrails exist to catch, and neither number diagnoses
+it by itself.
+
+**Task:** mAP@50, mAP@50:95, per-class AP — reported in **two arms**, which answer different
+questions and must never be conflated:
+
+- **Zero-shot** (`detector.reference`): a fixed, visible-trained detector, never fine-tuned on
+  anything this project produced, run straight at the translated images. This is the arm the
+  Phase 1 gate and E3 are decided on, because it is the only one directly comparable to E1's
+  raw-thermal floor (0.1887 mAP@50) and the only one that does not presuppose thermal-domain
+  annotations — the very thing E8 exists to avoid depending on.
+- **Adapted** (`detector.evaluation`): the evaluation detector fine-tuned on each stage's
+  translated export, then measured. Still the right number for E7 and for "how good can a
+  detector get on these images", but it **saturates**: M0.10's E1 bracket put a
+  same-domain-trained detector above 0.9 mAP@50 on raw thermal too, and M1's two runs landed
+  every arm in 0.8984–0.9199 — a band narrower than the noise between two runs of the *same*
+  configuration. It cannot separate methods on this dataset.
+
+**Faithfulness (C2):** false-object rate, missed-object rate, detection-consistency between
+translated and real-visible, and an adapted Hallucination Index. **Measured through the same
+paired test as the task metric**, not read run by run: `t2o faithfulness --write-back` records
+the three rates into the scored run's `metrics.json`, so `t2o aggregate --metric
+faithfulness.false_object_rate` gives C2 the sign-flip p-value below rather than a table of
+twelve numbers to eyeball. Scored post hoc over a finished export, so no campaign is ever
+repeated to obtain it — and always with the **reference** detector, never the in-loop one.
+
+**Rigor:** ≥3 seeds, mean ± std, and an exact paired significance test on mAP.
+
+**The test is the exact sign-flip permutation p, not the bootstrap CI.** The original wording
+here allowed "paired t-test *or* bootstrap CIs", and at n=6 the two disagree — E3 produced three
+cells where the percentile CI excludes zero while p does not clear 0.05 (TASKS.md M1.2 step 8
+finding 11). The sign-flip test is exact but coarse (2⁶ = 64 assignments, so p ∈ {0.031, 0.062,
+0.094, …}); the percentile bootstrap resamples six numbers and is anti-conservative at that
+size. CIs stay in the tables as descriptive spread. **No claim rests on a bootstrap interval
+excluding zero.**
+
+---
+
+## 13. House style
+
+*Moved → [AGENTS.md](../AGENTS.md), House style, which every session loads, so there is one
+copy.*
+
+---
+
+## 14. Dev-on-Mac / train-on-server workflow
+
+- Remote: `github.com/atick-faisal/Thermal-To-Optical-Translation` (public). Note that the
+  research design in this file and in `RESEARCH_FINDINGS.md` is therefore public.
+- Port the `../RGBT-Fusion-Detection` cpu/gpu extras so `uv sync --extra cpu` works here
+  and `uv sync --extra gpu` works on the server, from one lockfile:
+  ```toml
+  [project.optional-dependencies]
+  cpu = ["torch>=...", "torchvision>=..."]
+  gpu = ["torch>=...", "torchvision>=..."]
+  [tool.uv]
+  conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
+  ```
+- Pre-push gate: `ruff`, `pyright`, and the smoke suite. Nothing else is verifiable locally.
+- ~~Attempt one `uv sync` with all dependencies first — the conflict may not exist.~~
+  **Resolved in M0.1: the conflict does not exist.** One `uv lock` resolved torch 2.13
+  (`+cpu` and `+cu130`), diffusers 0.39, transformers 5.15, peft 0.20, ultralytics 8.4.117,
+  torchmetrics 1.9 and pycocotools together. §7's thesis holds — the maze belongs to
+  img2img-turbo's pinned framework, not to the model code we vendor. Note that
+  uv dependency groups resolve into a *single* lockfile and venv.
+- W&B self-hosted; base URL already in the server environment. Key from env, never
+  committed.
+
+---
+
+## 15. Risks
+
+| Risk | Signal | Mitigation |
+| --- | --- | --- |
+| ~~Phase 1 fails — translation never beats raw thermal~~ | E1 vs E3 at λ_det=0 | **Retired.** *Result → [record 002](experiments/002-m1-phase1-gate.md).* |
+| 850 pairs too few even for LoRA fine-tuning | Turbo overfits during Phase 2a | FLIR-aligned pretrain is already in the plan (§10); escalate to heavier augmentation and lower LoRA rank. |
+| **Reward hacking — mAP rises, images degrade** | *Measured → pix2pix: [007](experiments/007-m1-2-e3-pix2pix-positive.md) training loss, [008](experiments/008-m1-2-c2-faithfulness.md) C2 on its exports; turbo: [010](experiments/010-m2a-e3-turbo-replicates.md).* | `reward_target` **stays null**: there is no measured problem for it to respond to, and changing the dose and its guard together would make any fidelity result unattributable. C2 is now measured through the same paired sign-flip test as the task metric (`t2o faithfulness --write-back`), so turbo re-tests all of it at far higher capacity on the same instrument. |
+| **λ_det miscalibrated for a new backbone** | Detection share outside 20–30% on `scripts/loss_share.py` | §8's per-backbone probe, 25 epochs, before any campaign. Skipping it once already cost 72 GPU-hours and an uninterpretable null. *Fired on turbo → [record 009](experiments/009-m2a-turbo-probes.md).* A probe that returns no change is the control working, not the control being unnecessary. |
+| Gradient conflict — training unstable | Loss oscillation, collapse | Escalate cascaded → bilevel (E4). Meta-feature only if both fail. |
+| VRAM tighter than expected | Phase 0 OOM | SDPA + gradient checkpointing + bf16; reduce batch, then resolution. |
+| DataLoader hangs on Windows spawn | Phase 0, silent stalls | Module-level dataset classes, guarded entry points, low `num_workers` until stable. |
+| sd-turbo download blocked on the server | Phase 2a setup | Fetch on the Mac, commit-adjacent cache or re-host. |
+| Direct thermal detection wins at full annotation | E8 at 100% | Expected outcome — pivot to E8's low-label regime as headline. |
+
+---
+
+## 16. Acceptance criteria for drafting
+
+*Criteria → [goal.md](goal.md), Success Criteria: the six that must all hold before drafting.
+The legacy five this section once restated are `RESEARCH_FINDINGS.md` §10.*
+
+*Status → [roadmap.md](roadmap.md), one line per criterion, citing findings. The status this
+section held after M1.2 step 8 is records [005](experiments/005-m1-2-e3-pix2pix-null.md)–[008](experiments/008-m1-2-c2-faithfulness.md).*
+
+The superseded campaign at `grad_scale: 1.0e-2` (+0.0070, p = 0.66) stays in the record: step 7
+measured its dose at 2.3% of the objective, so it never tested coupling at a dose capable of
+refuting it. The two campaigns together are the dose argument, and neither is publishable alone.
+
+**Fallback framing:** if the loop helps only in low-annotation regimes, that remains a
+strong honest Q1 story — pivot to data-efficiency and operator interpretability. Given 850
+pairs, treat this as the *likely* outcome rather than the fallback.
+
+**But the fallback is not a substitute for causality, and cannot be reached by lowering
+`annotation_fraction` in E3.** That knob gates only the batch's `cls`/`bboxes`, i.e. only the
+λ_det>0 arm's own supervision — the λ_det=0 control never reads annotations at all — so
+reducing it makes the two arms *more* alike, not less. E8 is a question about the translator's
+data efficiency; it answers something different from C1.
