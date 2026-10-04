@@ -19,6 +19,7 @@
 | [013](013-e9-flir-kill-test.md) | 2026-09-27 | E9 steps 1–3 and 2b: FLIR labels mirrored to thermal; `yolo11s` judge and in-loop `yolo11n` trained on FLIR visible; kill-test gate table under the judge | M3 E9 | Windows server, 2× A100 | FLIR 3-class headroom +0.2123 (ceiling 0.6566, floor 0.4442) — WEAK PASS, +0.062 over the 0.15 kill line | F95, F96, F97, F98, F99, F100, F101, F102, F103, F104, F105, F106, F107, F108, F109 |
 | [014](014-e9-flir-deroll-regate.md) | 2026-09-28 | E9 step 3b: FLIR's thermal labels de-rolled by `calibration/flir.json`, then the kill-test gate re-scored under the same judge; the first re-gate scored a stale label cache | M3 E9 | Windows server, 2× A100 | de-rolled 3-class floor 0.4499, headroom +0.2066 — WEAK PASS stands; label misalignment was 2.7% of the headroom | F110, F111, F112, F113, F114, F115, F116, F117, F118, F119, F120 |
 | [015](015-e9-throughput-probe.md) | 2026-09-28 | E9 step 4: the corpus-cap seam and a per-epoch clock, then a 3-epoch throughput probe on FLIR, solo — control at val 1,013, control at val 153, loop at λ=3; plus step 5 run 1's VRAM and host-RAM peaks | M3 E9 | Windows server, 2× A100 | the twelve-run FLIR cell projects to 77–103 GPU-h, not ~126; a loop run's detector stage peaks at 52.4 GB / 50 processes at `workers 16`, so the cell runs two-up at `workers 8` | F121, F122, F123, F124, F125, F126, F127, F128, F129, F130, F131, F132, F133, F134, F135 |
+| [016](016-e9-flir-twelve-run-cell.md) | 2026-10-01 | E9 step 5: the twelve-run FLIR cell — pix2pix control vs the λ ramp, six paired seeds on 600 train pairs, two-up on both cards; C2 under the reference judge; read through `campaign_report.py` | M3 E9 | Windows server, 2× A100 | 3-class mAP50 loop − control +0.3512 (p = .031), but the loop lands at 0.4415 against the 0.4499 raw-thermal floor | F136, F137, F138, F139, F140, F141, F142, F143, F144, F145, F146, F147, F148, F149 |
 
 ## Findings
 
@@ -58,21 +59,21 @@
 | F32 | Two GPU runs at one seed do not reproduce, by design: the single-run loss-space floor is +3.4 / +3.6 / +11.8 / +7.1% (l2 / lpips / gan / total) | 007 | superseded | F44 |
 | F33 | Under 15× the weight, raw `L_det` does not detectably move at 25 epochs: −5.0 / +3.9 / +1.4%, all inside the floor | 007 | superseded | F37 |
 | F34 | The dose trades fidelity improvement: within-run `loss_lpips` falls 25.2% at `grad_scale` 0.01 vs 9.5% at 0.15 (withdrawn in the source) | 007 | refuted | F43 |
-| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | open | acts on F15, F25; F72, F87 |
+| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | open | acts on F15, F25; F72, F87, F136 |
 | F36 | Dose-response appeared: paired difference 0 → +0.0280 → +0.0357 → +0.0512, monotone in λ | 007 | open | acts on F19, F28; F77 |
 | F37 | Raw detection loss falls 2.56 → 2.12 → 1.84 across stages 1–3, stage 3 ~30% below the uncalibrated campaign's 2.61 | 007 | open | acts on F33 |
-| F38 | Achieved share at 100 epochs 10.0 / 16.1 / 19.8%, just under the 20–30% band; not re-tuned after seeing mAP | 007 | open | acts on F30 |
+| F38 | Achieved share at 100 epochs 10.0 / 16.1 / 19.8%, just under the 20–30% band; not re-tuned after seeing mAP | 007 | open | acts on F30; F144 |
 | F39 | `loss_gan` did not diverge: +10.6% across stages 0→3 vs +11.1% uncalibrated; the probe's +35% was the 25-epoch artifact | 007 | open | acts on F31 |
-| F40 | The stage-0 null drew wide: −0.0397 (p = .469), loop-arm sd 0.0907 vs 0.0372; stage 3 is only 1.3× it — not clearly larger on that reading alone | 007 | open | F41 |
+| F40 | The stage-0 null drew wide: −0.0397 (p = .469), loop-arm sd 0.0907 vs 0.0372; stage 3 is only 1.3× it — not clearly larger on that reading alone | 007 | open | F41, F140 |
 | F41 | Within-arm trajectory +0.0909, p = .094, CI [+.019, +.181], monotone in dose: corroborates but does not confirm; post-hoc sensitivity analysis | 007 | open | acts on F40 |
-| F42 | Loop-arm variance collapses as λ rises: sd 0.0907 → 0.0140, 2.4× tighter than control by stage 3 — a hypothesis to pre-register for turbo | 007 | open | acts on F21; F80 |
-| F43 | Val LPIPS +0.0097 at stage 3 (p = .125) but training fidelity untouched (`loss_lpips` −18.42% vs −18.50%): a generalisation gap, bounded at ~0.02 LPIPS | 007 | confirmed | acts on F20, F34; F53 |
+| F42 | Loop-arm variance collapses as λ rises: sd 0.0907 → 0.0140, 2.4× tighter than control by stage 3 — a hypothesis to pre-register for turbo | 007 | confirmed | acts on F21; F80, F139 |
+| F43 | Val LPIPS +0.0097 at stage 3 (p = .125) but training fidelity untouched (`loss_lpips` −18.42% vs −18.50%): a generalisation gap, bounded at ~0.02 LPIPS | 007 | confirmed | acts on F20, F34; F53, F141 |
 | F44 | Pooled 6-vs-6 loss-space floor 0.95 / 0.73 / 2.02 / 1.34% governs campaign-scale comparisons; the single-run floor still governs probes | 007 | open | acts on F32 |
 | F45 | Switch is not claimable: stage-3 +0.1035 (p = .094) dissolves under the trajectory to +0.0524, p = .781 | 007 | open | acts on F21 |
 | F46 | Where bootstrap CI and sign-flip p disagree (three cells, always CI excludes zero), believe the p; no claim rests on a bootstrap CI | 007 | open | |
 | F47 | PLAN.md §16's causality criterion is satisfied for pix2pix, with F40/F41 and F43 as its caveats; F25's dose caveat resolved | 007 | open | acts on F07, F25 |
 | F48 | Without `--resume`, `run_loop` rewrites `metrics.json` from `results = []`: no `config_hash` guard on a run dir, so a reused name destroys the earlier run | 007 | open | |
-| F49 | C2's pre-registered discriminator is met: stage-3 false-object rate fell −0.0289 (−15.1%), loop 0.1629 vs control 0.1918, while mAP50 rose +0.0512 | 008 | open | F76 |
+| F49 | C2's pre-registered discriminator is met: stage-3 false-object rate fell −0.0289 (−15.1%), loop 0.1629 vs control 0.1918, while mAP50 rose +0.0512 | 008 | open | F76, F143 |
 | F50 | False-object rate is the only rate independent of the gain and is not significant (p = .156, CI [−.0559, +.0039]); missed-object −0.0370 and consistency +0.0291 (both p = .031) corroborate the endpoint, not hallucination | 008 | open | F76 |
 | F51 | No per-metric claim survives multiplicity: Bonferroni α = 0.0167 is below the n = 6 sign-flip floor of 0.031; false-object rate was designated primary before the numbers | 008 | open | |
 | F52 | The loop arm is less variable on all three rates (sd ratio loop/control 0.69 / 0.52 / 0.41); untested, an observation to pre-register for turbo | 008 | open | F80 |
@@ -99,7 +100,7 @@
 | F73 | Observation B falsified per run: only `control-s3` is monotone, its −.0596 five times the others; all three controls do finish below their start | 010 | open | acts on F70 |
 | F74 | The stage-3 trajectory statistic (+0.0329, p = .75) is the s3 pair's −0.0601 baseline draw; with a level stage-0 the raw contrast governs (3/3) | 010 | open | |
 | F75 | Turbo `fidelity.lpips` is null: stage-0 null −0.0117 (3/3) is not level, so the trajectory governs, −0.0080, p = .500; not a device confound | 010 | open | |
-| F76 | C2 clean on turbo: false-object −0.0193 (p = .500), missed-object −0.0386 and consistency +0.0319 at the p = .250 floor — recall, not precision; `reward_target` stays null | 010 | open | acts on F49, F50, F53 |
+| F76 | C2 clean on turbo: false-object −0.0193 (p = .500), missed-object −0.0386 and consistency +0.0319 at the p = .250 floor — recall, not precision; `reward_target` stays null | 010 | open | acts on F49, F50, F53; F143 |
 | F77 | No dose-response on turbo (0 → +.0274 → +.0235 → +.0306): share plateaus 8.8 / 12.3 / 12.9% as backbone-intrinsic `loss_gan` inflates 2.47 → 4.51 | 010 | open | acts on F36, F56, F61 |
 | F78 | Turbo loss-space figures are weak at n = 3: resumed stages pool stumps, only stage 2 is clean in both arms, and control `loss_gan` spans 1.55–4.42 across seeds | 010 | open | |
 | F79 | The resume audit is balanced: ~2–3 degraded endpoint epochs on two control runs vs ~3 on one loop run, opposite pairs — M2a's caveat closed; `AdamW` now checkpointed (e210b13) | 010 | open | acts on F68 |
@@ -112,7 +113,7 @@
 | F86 | A0's 0.1552 reproduces the clean-judge thermal floor to four decimals, and C / D land on its λ=0 / stage-3 rows — nothing drifted between campaigns | 011 | open | acts on F10 |
 | F87 | D − C at n = 6 reproduces E3's +0.0512 (6/6, p = .031) to every digit — the same computation, a reproduction never counted as second evidence | 011 | open | acts on F35 |
 | F88 | The crossover's width is C's translator-seed spread, not A's resolution: n = 3 → 6 nearly halved C's sem and narrowed [111, 214] to [114, 185]; infilling A not worth it | 011 | open | |
-| F89 | A pix2pix stage is not a constant: interval medians 2.40 / 2.83 / 3.37 h, ~+20% a stage, ±8% within a boundary; stage 0 ≈ 1.79 h | 012 | open | F128, F129 |
+| F89 | A pix2pix stage is not a constant: interval medians 2.40 / 2.83 / 3.37 h, ~+20% a stage, ±8% within a boundary; stage 0 ≈ 1.79 h | 012 | confirmed | F128, F129, F145 |
 | F90 | A 4-stage pix2pix run costs 10.18 h control / 10.75 h loop (coupling +0.57 h, +6.8%); the twelve-run cell is ~126 GPU-h, and the parts predict 62.8 h of a 63.0 h observed span | 012 | open | F126, F128 |
 | F91 | "~6 h per 4-stage run" was low by 1.7× and "~72 GPU-h" by 1.75×; a full-corpus FLIR cell is ~870 GPU-h, not ~496 — the 600-pair matched cell holds | 012 | open | |
 | F92 | pix2pix:turbo is 9.0× per complete run (10.5 h vs ~94 h), not 16×; the same method re-derives turbo at 23.46 h a stage against F62's 24.1 h | 012 | open | acts on F62 |
@@ -130,32 +131,46 @@
 | F104 | FLIR kill-test WEAK PASS: 3-class headroom +0.2123 (ceiling 0.6566, floor 0.4442), +0.062 over the 0.15 kill line | 013 | superseded | F115 |
 | F105 | FLIR's raw-thermal floor 0.4442 is 2.4× the custom set's 0.1887; a raised floor compresses the headroom from +0.733 to +0.212, as predicted | 013 | open |  |
 | F106 | The 3-class guard did not bind: dog's +0.2135 lands within 0.0012 of the 3-class figure, 4-class and 3-class agree to 0.0003 | 013 | open |  |
-| F107 | `person` has the largest headroom (+0.2932): the floor measures a visible-trained judge's domain gap, not thermal information content | 013 | open |  |
-| F108 | `bicycle` is the weak class at +0.1295, compressed by a low ceiling (0.4922), not a high floor | 013 | open |  |
+| F107 | `person` has the largest headroom (+0.2932): the floor measures a visible-trained judge's domain gap, not thermal information content | 013 | open | F138 |
+| F108 | `bicycle` is the weak class at +0.1295, compressed by a low ceiling (0.4922), not a high floor | 013 | open | F138 |
 | F109 | At +0.062 margin the mirrored labels' misalignment confound is load-bearing; mAP50-95/mAP50 0.501 vs 0.439 (−12.3%) is mild evidence it is not the main driver | 013 | superseded | F118 |
 | F110 | The first re-gate scored a stale `labels.cache`: ultralytics keys it on file sizes and paths, and the de-roll's fixed `:.6f` width keeps all 1,013 val label files the same length | 014 | open | F116 |
 | F111 | `gate.csv`'s calibration digest recorded a flag, not the tree's state; `_verified_digest` now checks `LABELS_PROVENANCE.json` in both directions | 014 | open | |
 | F112 | Visible → thermal is `inv(H)`, not `H`: α = −1.0 peaks mutual information and gradient NCC, improving MI on 59 of 60 pairs; `H` would have doubled the offset | 014 | open | F116 |
 | F113 | The constant is confirmed independently: 5.21 px median displacement against roma's 5.90 px EPE, and the α optimum at −1.0 needs no refit | 014 | open | acts on F93 |
 | F114 | The de-roll moves val boxes to median IoU 0.822 against the plain mirror, 5.4% below 0.5, `person` hardest (0.773, 9.7%); val keeps all 8,604 boxes | 014 | open | F117 |
-| F115 | The de-rolled kill-test is still a WEAK PASS: 3-class headroom +0.2066 (floor 0.4499), +0.0566 over the kill line, 0.0567 short of the 0.5066 refutation line | 014 | open | acts on F104 |
+| F115 | The de-rolled kill-test is still a WEAK PASS: 3-class headroom +0.2066 (floor 0.4499), +0.0566 over the kill line, 0.0567 short of the 0.5066 refutation line | 014 | open | acts on F104; F137 |
 | F116 | The ceiling reproduced bit-identically while the floor rose: the pipeline did not move, and the correction's direction is confirmed a third time | 014 | open | acts on F110, F112 |
 | F117 | `person` carries 62% of the floor's rise (+0.0106), the class the audit said moves most; `dog`'s −0.0018 is noise | 014 | open | acts on F114 |
 | F118 | The floor rose 0.57 of a point, not single digits: misalignment is 2.7% of the headroom, never load-bearing; at 0.29 recall the judge misses objects, not box positions | 014 | open | acts on F93, F109 |
-| F119 | The floor is honest and the +0.2066 gap real, but pix2pix still trains on rolled pairs: that confound needs the images warped, not the labels | 014 | open | |
+| F119 | The floor is honest and the +0.2066 gap real, but pix2pix still trains on rolled pairs: that confound needs the images warped, not the labels | 014 | open | F138 |
 | F120 | Two concurrent E3 runs at `workers: 16` build step 2's two resident worker pools per detector stage; whether 128 GiB holds is unknown and free to measure | 014 | confirmed | acts on F97; F130, F132 |
 | F121 | FLIR's val is 6.6× the custom set's and scored 400 times a run, but the per-epoch val loss feeds nothing (`translator_best.pt` is never loaded), so it can be capped | 015 | open | F125, F128 |
 | F122 | No per-epoch wall clock existed; `EpochStats.seconds` (defaulted, stripped from determinism tests) now writes it into `metrics.json` | 015 | open | F124 |
 | F123 | The training cap must reach the export (else a 6.9× detector-budget confound) and the val-loss cut must not; `subset_seed` is held apart from `train.seed` | 015 | open |  |
 | F124 | The clock is complete: run start to `translator_last.pt` exceeds Σ`seconds` by 1.56–2.13 s, ~99% coverage | 015 | open | acts on F122 |
 | F125 | FLIR's full val pass is 21.0% of an epoch (A − B = 11.553 s), not 30–40%; `--val-loss-images 153` saves 15.4 GPU-h | 015 | open | acts on F121 |
-| F126 | Coupling costs +17.5% per coupled epoch (C − B = 7.632 s), flat in λ; +10.4% per run against the custom cell's +6.8% | 015 | open | acts on F90 |
+| F126 | Coupling costs +17.5% per coupled epoch (C − B = 7.632 s), flat in λ; +10.4% per run against the custom cell's +6.8% | 015 | open | acts on F90; F144 |
 | F127 | The stage boundary is 1,135 s: export + zero-shot + FID ±1.3% across runs, the fixed 50-epoch detector ±11% | 015 | open |  |
-| F128 | The FLIR cell projects to 77.0 GPU-h flat / 103.3 with +20%/stage carried, not ~126 or ~180 — a solo-measured floor, not a forecast | 015 | open | acts on F89, F90, F121 |
-| F129 | The export is the same fixed corpus every stage, ruling out step 0's explanation for the +20%-a-stage growth, which stays unexplained | 015 | open | acts on F89 |
+| F128 | The FLIR cell projects to 77.0 GPU-h flat / 103.3 with +20%/stage carried, not ~126 or ~180 — a solo-measured floor, not a forecast | 015 | confirmed | acts on F89, F90, F121; F146 |
+| F129 | The export is the same fixed corpus every stage, ruling out step 0's explanation for the +20%-a-stage growth, which stays unexplained | 015 | confirmed | acts on F89; F145 |
 | F130 | Host RAM (~45 GB a run at `workers 16`), not VRAM, decides whether the cell runs two-up; `runtime.workers` is the result-neutral lever | 015 | open | acts on F120; F131, F132 |
 | F131 | The translator peaks at 22.59 GiB reserved of 39.70; the 3.42 GB first recorded was sampled outside a translator step and is withdrawn — no two runs on one card | 015 | open | acts on F66, F130 |
 | F132 | A loop run's detector stage is the host peak: 52.4 GB across 50 processes at `workers 16` vs 14.5 GB in translator epochs, ≈1.03 GB a worker | 015 | open | acts on F97, F120, F130 |
 | F133 | Two-up at `workers 8` (26 processes, ~28 GB a run); `workers 16` two-up rejected unattempted (~105 GB, 100 processes on 64 CPUs); the translator pays nothing | 015 | open | acts on F96, F97 |
 | F134 | A and B differ only by an inert val cut, and their detector mAP50s differ by 0.048 — a second noise-floor estimate, under F13's 0.059 | 015 | open | acts on F13 |
 | F135 | `--resume` is safe on a fresh run dir, so every run in the cell carries it and a crash costs at most one epoch | 015 | open |  |
+| F136 | 3-class mAP50 loop − control +0.3512, p = .031 (the n = 6 floor), CI [+.292, +.405]: 13× a stage-0 null of +0.0266 that held; trajectory +0.3247 | 016 | open | acts on F35 |
+| F137 | The loop lands on the raw-thermal floor (0.4415 vs 0.4499) and the control 0.360 below it: the loss prevents a loss plain translation incurs, never "translation beats thermal" | 016 | open | acts on F115 |
+| F138 | Per class, car (+0.0905) and person (+0.0401) clear the floor, bicycle loses 42% of it (−0.1558); thin structures plus the 5.90 px roll is an untested hypothesis | 016 | open | acts on F107, F108, F119 |
+| F139 | The control collapses on 7 of 24 stage-rows (< 0.02 mAP50), the loop on 0; the worst loop seed (0.414) beats the best control (0.249); loop sd 3.7× tighter | 016 | open | acts on F42 |
+| F140 | Stage 0 collapses by draw, not by arm: `control-s4` collapsed where `loop-s4` did not (2/6 vs 0/6, Fisher p ≈ 0.45); a single-seed FLIR pix2pix number is near meaningless | 016 | open | acts on F40 |
+| F141 | The fidelity null failed (stage-0 LPIPS, SSIM, FID all p = .031 on a heavy tail) and every fidelity trajectory is null: no λ-attributable fidelity cost or gain | 016 | open | acts on F43 |
+| F142 | `detector.map50` is not a λ effect: stage 3 +0.0986 against a +0.1055 stage-0 null, trajectory −0.0070, p = 1.000 | 016 | open |  |
+| F143 | C2 favours the loop on all three rates (p = .031 each), worst loop beating best control on each; no stage-0 null, and "low" is not met (57% missed, 19% false) | 016 | open | acts on F49, F76 |
+| F144 | The dose landed in the band: share 12.4 / 17.7 / 21.1%; raw `loss_det` −37% vs e3b's −28%; `loss_gan` +27% control / +17% loop | 016 | open | acts on F38, F126 |
+| F145 | Per-stage growth is ×2.03 (~27%/stage) in the control arm too, so not coupling; two-up contention is ×1.16, and the report's ×1.64 folds the growth in | 016 | open | acts on F89, F129 |
+| F146 | The cell cost ~116.8 GPU-h (102.3 h training, boundaries 0.27–0.35 h flat), 13% over the 77–103 floor, for the two terms the floor disclaimed | 016 | open | acts on F128 |
+| F147 | `campaign_report.py` ended runs at `metrics.json`'s mtime, which `--write-back` rewrites, so spans read 13.8–63.0 h; `_run_end` fixed it (8705364) | 016 | open |  |
+| F148 | Stages 0–2's `bound_h` looked up the next stage's training before it was filled, so each boundary carried a whole stage (2.1–3.4 h vs ~0.3); fixed in e70760c | 016 | open |  |
+| F149 | `control-s0` stage 1 shows 95 epochs because a resume records only the epochs it runs; it trained all 100 | 016 | open |  |
