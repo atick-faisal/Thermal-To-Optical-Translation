@@ -18,6 +18,7 @@
 | [012](012-e9-pix2pix-wall-clock.md) | 2026-09-26 | E9 pricing of the FLIR cell's three blockers, and step 0: pix2pix per-stage wall clock from `translator_last.pt` mtimes over 24 completed runs, 72 intervals | M3 E9 | Windows server, filesystem read (zero GPU cost) | a 4-stage pix2pix run is 10.18 h control / 10.75 h loop; the twelve-run cell is ~126 GPU-h, not ~72 | F89, F90, F91, F92, F93, F94 |
 | [013](013-e9-flir-kill-test.md) | 2026-09-27 | E9 steps 1–3 and 2b: FLIR labels mirrored to thermal; `yolo11s` judge and in-loop `yolo11n` trained on FLIR visible; kill-test gate table under the judge | M3 E9 | Windows server, 2× A100 | FLIR 3-class headroom +0.2123 (ceiling 0.6566, floor 0.4442) — WEAK PASS, +0.062 over the 0.15 kill line | F95, F96, F97, F98, F99, F100, F101, F102, F103, F104, F105, F106, F107, F108, F109 |
 | [014](014-e9-flir-deroll-regate.md) | 2026-09-28 | E9 step 3b: FLIR's thermal labels de-rolled by `calibration/flir.json`, then the kill-test gate re-scored under the same judge; the first re-gate scored a stale label cache | M3 E9 | Windows server, 2× A100 | de-rolled 3-class floor 0.4499, headroom +0.2066 — WEAK PASS stands; label misalignment was 2.7% of the headroom | F110, F111, F112, F113, F114, F115, F116, F117, F118, F119, F120 |
+| [015](015-e9-throughput-probe.md) | 2026-09-28 | E9 step 4: the corpus-cap seam and a per-epoch clock, then a 3-epoch throughput probe on FLIR, solo — control at val 1,013, control at val 153, loop at λ=3; plus step 5 run 1's VRAM and host-RAM peaks | M3 E9 | Windows server, 2× A100 | the twelve-run FLIR cell projects to 77–103 GPU-h, not ~126; a loop run's detector stage peaks at 52.4 GB / 50 processes at `workers 16`, so the cell runs two-up at `workers 8` | F121, F122, F123, F124, F125, F126, F127, F128, F129, F130, F131, F132, F133, F134, F135 |
 
 ## Findings
 
@@ -35,7 +36,7 @@
 | F10 | An independent `yolo11s` judge confirms M1's gate: baseline 0.7851 vs 0.1552 floor, +0.630 mAP50, all four classes | 004 | open | acts on F03; F86 |
 | F11 | No evidence the old judge was trained on val: the train-only judge scores real visible 0.9364 vs the old 0.9213; M1's ceiling stands | 004 | open | |
 | F12 | Self-grading was real but small (~0.023 on λ>0 arms); λ_det's effect is not monotone (stage 2 0.8106 < stage 1 0.8244); the gain lives in Switch | 004 | superseded | acts on F04; F19, F21 |
-| F13 | The noise floor is 0.0591 mAP50, not 0.0129: stage 3 vs baseline +0.062 is ~1 noise draw, so at n = 1 λ_det's gain cannot be separated from run variance | 004 | confirmed | acts on F04, F07; F17 |
+| F13 | The noise floor is 0.0591 mAP50, not 0.0129: stage 3 vs baseline +0.062 is ~1 noise draw, so at n = 1 λ_det's gain cannot be separated from run variance | 004 | confirmed | acts on F04, F07; F17, F134 |
 | F14 | ultralytics resolves a relative `project` under a machine-global `runs_dir`, not the cwd, so outputs land in another repository; M1's numbers unaffected | 004 | open | |
 | F15 | E3's pix2pix arm is negative on its pre-registered endpoint at `grad_scale: 1.0e-2`: stage 3 +0.0070 (p = .656) vs a −0.0063 stage-0 null | 005 | open | F35 |
 | F16 | The stage-0 null control behaved as a null (−0.0063, p = .875, CI straddling zero), so the campaign is a measurement, not a broken run | 005 | open | |
@@ -88,7 +89,7 @@
 | F63 | `expandable_segments:True` is silently unsupported on Windows (torch 2.12.1): accepted, warned, `is_expandable` [False]; its crash-free 24 h was luck | 010 | open | |
 | F64 | A mid-stage-3 resume died in FID with `CUSOLVER_STATUS_INTERNAL_ERROR`, read as cache pressure not numerics; `empty_cache()` before fidelity (b7b1627) fixed it | 010 | open | |
 | F65 | A crashed `uv run` does not stop `foreach`: the first attempt started all twelve runs and finished none, 18 of 48 stages; a relaunch must `break` on <4 stages | 010 | open | |
-| F66 | The turbo config never fit: ~32.1 GiB allocated + ~6.8 GiB reserved-but-unallocated ≈ 98% of the card, steady across four crashes; step 4 measured allocated, not reserved | 010 | open | acts on F55 |
+| F66 | The turbo config never fit: ~32.1 GiB allocated + ~6.8 GiB reserved-but-unallocated ≈ 98% of the card, steady across four crashes; step 4 measured allocated, not reserved | 010 | open | acts on F55; F131 |
 | F67 | Allocator flags cannot fix it on Windows: the ~6.8 GB sits in segments holding a live tensor, which only `expandable_segments` addresses; per-epoch release could not reach a mid-epoch crash | 010 | open | |
 | F68 | Every resume silently resets both turbo `AdamW` optimizers; endpoint exposure 1–4 epochs of 400, falling on both arms — a stated limitation | 010 | open | F79 |
 | F69 | Turbo's control starts far above pix2pix's: stage-0 mAP50 0.8889 vs 0.7579 ± .0372 (~3.5 sd), LPIPS ~5 sd better at stage 3 — n = 1, most-disturbed run | 010 | open | |
@@ -111,15 +112,15 @@
 | F86 | A0's 0.1552 reproduces the clean-judge thermal floor to four decimals, and C / D land on its λ=0 / stage-3 rows — nothing drifted between campaigns | 011 | open | acts on F10 |
 | F87 | D − C at n = 6 reproduces E3's +0.0512 (6/6, p = .031) to every digit — the same computation, a reproduction never counted as second evidence | 011 | open | acts on F35 |
 | F88 | The crossover's width is C's translator-seed spread, not A's resolution: n = 3 → 6 nearly halved C's sem and narrowed [111, 214] to [114, 185]; infilling A not worth it | 011 | open | |
-| F89 | A pix2pix stage is not a constant: interval medians 2.40 / 2.83 / 3.37 h, ~+20% a stage, ±8% within a boundary; stage 0 ≈ 1.79 h | 012 | open | |
-| F90 | A 4-stage pix2pix run costs 10.18 h control / 10.75 h loop (coupling +0.57 h, +6.8%); the twelve-run cell is ~126 GPU-h, and the parts predict 62.8 h of a 63.0 h observed span | 012 | open | |
+| F89 | A pix2pix stage is not a constant: interval medians 2.40 / 2.83 / 3.37 h, ~+20% a stage, ±8% within a boundary; stage 0 ≈ 1.79 h | 012 | open | F128, F129 |
+| F90 | A 4-stage pix2pix run costs 10.18 h control / 10.75 h loop (coupling +0.57 h, +6.8%); the twelve-run cell is ~126 GPU-h, and the parts predict 62.8 h of a 63.0 h observed span | 012 | open | F126, F128 |
 | F91 | "~6 h per 4-stage run" was low by 1.7× and "~72 GPU-h" by 1.75×; a full-corpus FLIR cell is ~870 GPU-h, not ~496 — the 600-pair matched cell holds | 012 | open | |
 | F92 | pix2pix:turbo is 9.0× per complete run (10.5 h vs ~94 h), not 16×; the same method re-derives turbo at 23.46 h a stage against F62's 24.1 h | 012 | open | acts on F62 |
 | F93 | FLIR has no thermal labels on disk — adapters write labels under `visible/` only — so the raw-thermal floor needs mirroring, and mirrored labels inherit the 5.90 px residual, biasing the floor down | 012 | confirmed | F113, F118 |
 | F94 | FLIR's dog class has 13 val instances against 4,124 cars; a 0.4 AP swing moves the 4-class mAP50 by 0.1, a decision band's width — 3-class is primary | 012 | open | |
 | F95 | ultralytics honours a `data.yaml`'s `path:` literally while `t2o`'s loader falls through a stale one: a moved tree passes `t2o` and dies in ultralytics | 013 | open |  |
-| F96 | Step 2's first launch died of host memory, not GPU: a 2.83 MiB numpy allocation failed with 2.56 GB of 40 GPU memory in use | 013 | open |  |
-| F97 | Four ultralytics loader facts put two `--workers 16` runs at 96 loader processes on 64 CPUs / 128 GiB, ≳1.3 GiB each; one run at a time is the load-bearing fix | 013 | open | acts on M1.2 step 2b (legacy; F-ID minted by SPEC-MIGRATION-19); F120 |
+| F96 | Step 2's first launch died of host memory, not GPU: a 2.83 MiB numpy allocation failed with 2.56 GB of 40 GPU memory in use | 013 | open | F133 |
+| F97 | Four ultralytics loader facts put two `--workers 16` runs at 96 loader processes on 64 CPUs / 128 GiB, ≳1.3 GiB each; one run at a time is the load-bearing fix | 013 | open | acts on M1.2 step 2b (legacy; F-ID minted by SPEC-MIGRATION-19); F120, F132, F133 |
 | F98 | The FLIR judge costs 1.43 h for 100 epochs; the ~6–15 GPU-h estimate was 4–10× high | 013 | open |  |
 | F99 | The judge's `best.pt` is epoch 46 at 0.5525 mAP50; the last 54 epochs lost 8.1% mAP50 / 10.1% mAP50-95, and `--epochs 50` is a different schedule, not a prefix | 013 | open |  |
 | F100 | The in-loop `yolo11n` costs 1.36 h, not 2.29 h: one epoch stalled 3,370.8 s against a 48.8 s median, so run cost is read from medians | 013 | open |  |
@@ -142,4 +143,19 @@
 | F117 | `person` carries 62% of the floor's rise (+0.0106), the class the audit said moves most; `dog`'s −0.0018 is noise | 014 | open | acts on F114 |
 | F118 | The floor rose 0.57 of a point, not single digits: misalignment is 2.7% of the headroom, never load-bearing; at 0.29 recall the judge misses objects, not box positions | 014 | open | acts on F93, F109 |
 | F119 | The floor is honest and the +0.2066 gap real, but pix2pix still trains on rolled pairs: that confound needs the images warped, not the labels | 014 | open | |
-| F120 | Two concurrent E3 runs at `workers: 16` build step 2's two resident worker pools per detector stage; whether 128 GiB holds is unknown and free to measure | 014 | open | acts on F97 |
+| F120 | Two concurrent E3 runs at `workers: 16` build step 2's two resident worker pools per detector stage; whether 128 GiB holds is unknown and free to measure | 014 | confirmed | acts on F97; F130, F132 |
+| F121 | FLIR's val is 6.6× the custom set's and scored 400 times a run, but the per-epoch val loss feeds nothing (`translator_best.pt` is never loaded), so it can be capped | 015 | open | F125, F128 |
+| F122 | No per-epoch wall clock existed; `EpochStats.seconds` (defaulted, stripped from determinism tests) now writes it into `metrics.json` | 015 | open | F124 |
+| F123 | The training cap must reach the export (else a 6.9× detector-budget confound) and the val-loss cut must not; `subset_seed` is held apart from `train.seed` | 015 | open |  |
+| F124 | The clock is complete: run start to `translator_last.pt` exceeds Σ`seconds` by 1.56–2.13 s, ~99% coverage | 015 | open | acts on F122 |
+| F125 | FLIR's full val pass is 21.0% of an epoch (A − B = 11.553 s), not 30–40%; `--val-loss-images 153` saves 15.4 GPU-h | 015 | open | acts on F121 |
+| F126 | Coupling costs +17.5% per coupled epoch (C − B = 7.632 s), flat in λ; +10.4% per run against the custom cell's +6.8% | 015 | open | acts on F90 |
+| F127 | The stage boundary is 1,135 s: export + zero-shot + FID ±1.3% across runs, the fixed 50-epoch detector ±11% | 015 | open |  |
+| F128 | The FLIR cell projects to 77.0 GPU-h flat / 103.3 with +20%/stage carried, not ~126 or ~180 — a solo-measured floor, not a forecast | 015 | open | acts on F89, F90, F121 |
+| F129 | The export is the same fixed corpus every stage, ruling out step 0's explanation for the +20%-a-stage growth, which stays unexplained | 015 | open | acts on F89 |
+| F130 | Host RAM (~45 GB a run at `workers 16`), not VRAM, decides whether the cell runs two-up; `runtime.workers` is the result-neutral lever | 015 | open | acts on F120; F131, F132 |
+| F131 | The translator peaks at 22.59 GiB reserved of 39.70; the 3.42 GB first recorded was sampled outside a translator step and is withdrawn — no two runs on one card | 015 | open | acts on F66, F130 |
+| F132 | A loop run's detector stage is the host peak: 52.4 GB across 50 processes at `workers 16` vs 14.5 GB in translator epochs, ≈1.03 GB a worker | 015 | open | acts on F97, F120, F130 |
+| F133 | Two-up at `workers 8` (26 processes, ~28 GB a run); `workers 16` two-up rejected unattempted (~105 GB, 100 processes on 64 CPUs); the translator pays nothing | 015 | open | acts on F96, F97 |
+| F134 | A and B differ only by an inert val cut, and their detector mAP50s differ by 0.048 — a second noise-floor estimate, under F13's 0.059 | 015 | open | acts on F13 |
+| F135 | `--resume` is safe on a fresh run dir, so every run in the cell carries it and a crash costs at most one epoch | 015 | open |  |
