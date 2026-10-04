@@ -15,6 +15,7 @@
 | [009](009-m2a-turbo-probes.md) | 2026-08-25 | M2a step 4: turbo VRAM probe (one stage-3 epoch, batch 2, full frame) and two 25-epoch `--no-detector` `grad_scale` probes at 0.15 and 0.75, seed 0 | M2a | Windows server, 2× A100 | `grad_scale: 0.15` puts turbo's detection term at 16.6 / 22.9 / 24.5% of the objective — in band at pix2pix's value; batch 2 peaks at 34.14 GB | F55, F56, F57, F58, F59, F60, F61 |
 | [010](010-m2a-e3-turbo-replicates.md) | 2026-09-23 | M2a step 5: E3 pix2pix-turbo, all-zero control vs λ_det [0,1,2,3] loop at `grad_scale: 0.15`, cut from six paired seeds to three (0, 1, 3) after four OOM episodes, judged by `yolo11s`, plus C2 on the stage-3 exports | M2a | Windows server, 2× A100 | stage-3 paired zero-shot mAP50 +0.0306 (p = .250, the n = 3 floor, 3/3 seeds) against a level −0.0023 stage-0 null — E3 replicates on turbo | F62, F63, F64, F65, F66, F67, F68, F69, F70, F71, F72, F73, F74, F75, F76, F77, F78, F79, F80 |
 | [011](011-e8-annotation-sweep.md) | 2026-09-24 | E8: direct-thermal (A) vs translated-then-fine-tuned (B) `yolo11n` at N ∈ {10 … 600}, three seeds, against the reference judge's zero-annotation anchors A0 / C / D; C and D topped up to six translator seeds | M3 E8 | Windows server, 2× A100 | arm A passes annotation-free translation (C, 0.7975) at N ≈ 150 annotated thermal images, interval [114, 185]; direct thermal wins at N = 600, 0.9300 | F81, F82, F83, F84, F85, F86, F87, F88 |
+| [012](012-e9-pix2pix-wall-clock.md) | 2026-09-26 | E9 pricing of the FLIR cell's three blockers, and step 0: pix2pix per-stage wall clock from `translator_last.pt` mtimes over 24 completed runs, 72 intervals | M3 E9 | Windows server, filesystem read (zero GPU cost) | a 4-stage pix2pix run is 10.18 h control / 10.75 h loop; the twelve-run cell is ~126 GPU-h, not ~72 | F89, F90, F91, F92, F93, F94 |
 
 ## Findings
 
@@ -81,7 +82,7 @@
 | F59 | Turbo is lower than pix2pix on every objective term at stage 3 (total −34%; raw LPIPS 0.175 at 25 ep vs 0.298 at 100) — training loss, one seed, descriptive only | 009 | open | |
 | F60 | Turbo's objective is GAN-heavy: detection 24.5 / GAN 50.9 / LPIPS 24.1 / l2 0.5% vs pix2pix's 19.8 / 43.7 / 35.7 / 0.8% — composition differs by backbone at identical knobs | 009 | open | |
 | F61 | `loss_gan` +119% across stages reads as catch-up, not divergence: ends below pix2pix (1.8513 vs 2.3294) from half the stage-0 base; the 0.75 arm climbs alike | 009 | open | F77 |
-| F62 | Turbo costs 24.1 h a stage, ~96 h a 4-stage run; the ~72 GPU-h budget was pix2pix's and 16× low — time one stage of a new backbone before its campaign | 010 | open | |
+| F62 | Turbo costs 24.1 h a stage, ~96 h a 4-stage run; the ~72 GPU-h budget was pix2pix's and 16× low — time one stage of a new backbone before its campaign | 010 | confirmed | F92 |
 | F63 | `expandable_segments:True` is silently unsupported on Windows (torch 2.12.1): accepted, warned, `is_expandable` [False]; its crash-free 24 h was luck | 010 | open | |
 | F64 | A mid-stage-3 resume died in FID with `CUSOLVER_STATUS_INTERNAL_ERROR`, read as cache pressure not numerics; `empty_cache()` before fidelity (b7b1627) fixed it | 010 | open | |
 | F65 | A crashed `uv run` does not stop `foreach`: the first attempt started all twelve runs and finished none, 18 of 48 stages; a relaunch must `break` on <4 stages | 010 | open | |
@@ -108,3 +109,9 @@
 | F86 | A0's 0.1552 reproduces the clean-judge thermal floor to four decimals, and C / D land on its λ=0 / stage-3 rows — nothing drifted between campaigns | 011 | open | acts on F10 |
 | F87 | D − C at n = 6 reproduces E3's +0.0512 (6/6, p = .031) to every digit — the same computation, a reproduction never counted as second evidence | 011 | open | acts on F35 |
 | F88 | The crossover's width is C's translator-seed spread, not A's resolution: n = 3 → 6 nearly halved C's sem and narrowed [111, 214] to [114, 185]; infilling A not worth it | 011 | open | |
+| F89 | A pix2pix stage is not a constant: interval medians 2.40 / 2.83 / 3.37 h, ~+20% a stage, ±8% within a boundary; stage 0 ≈ 1.79 h | 012 | open | |
+| F90 | A 4-stage pix2pix run costs 10.18 h control / 10.75 h loop (coupling +0.57 h, +6.8%); the twelve-run cell is ~126 GPU-h, and the parts predict 62.8 h of a 63.0 h observed span | 012 | open | |
+| F91 | "~6 h per 4-stage run" was low by 1.7× and "~72 GPU-h" by 1.75×; a full-corpus FLIR cell is ~870 GPU-h, not ~496 — the 600-pair matched cell holds | 012 | open | |
+| F92 | pix2pix:turbo is 9.0× per complete run (10.5 h vs ~94 h), not 16×; the same method re-derives turbo at 23.46 h a stage against F62's 24.1 h | 012 | open | acts on F62 |
+| F93 | FLIR has no thermal labels on disk — adapters write labels under `visible/` only — so the raw-thermal floor needs mirroring, and mirrored labels inherit the 5.90 px residual, biasing the floor down | 012 | open | |
+| F94 | FLIR's dog class has 13 val instances against 4,124 cars; a 0.4 AP swing moves the 4-class mAP50 by 0.1, a decision band's width — 3-class is primary | 012 | open | |
