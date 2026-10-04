@@ -265,6 +265,13 @@ Nets 2 and 3 run before the deletion task, and the deletion task is blocked on t
 - The results (the map, the 3a result, the 3b triage list, the 3d shape table) go under the map
   in this file. The scripts stay in the scratchpad.
 
+**How SPEC-MIGRATION-26 runs Net 4.** The clone is HEAD with the uncommitted deletion applied
+(`git diff HEAD --binary | git -C <clone> apply`), and no answer may come from
+`git show pre-spec-migration:`. "What runs next" is answered by `docs/roadmap.md`'s open rows and
+`AGENTS.md`'s "a human picks it", not by a ranking. The ten answers, question → path, go under the
+Net 3 results as `### Net 4 — fresh clone`. An unanswerable question is fixed in `design.md`,
+`roadmap.md` or `AGENTS.md`, never in a record, before the deletion lands.
+
 ### Sequencing
 
 1. *Done in 5b37655.* `/project-init` lands `docs/goal.md`, `CLAUDE.md` and `justfile` **before** `tasks.md`:
@@ -290,15 +297,7 @@ Port them to the current project memory. Rewrite `biweekly-progress-updates` to 
 
 ## Open Questions
 
-### Q17: §13 says `basicConfig` only in `cli.py`; four `scripts/*.py` own theirs by design. What lands in `AGENTS.md`?
-
-`scripts/fetch_datasets.py:176`, `mirror_thermal_labels.py:72`, `adapt_datasets.py:73` and
-`gate_table.py:267` each call `logging.basicConfig`, and each docstring says why. Answered by the
-human on 2026-10-04; awaiting the move to `## Resolved`.
-
-- [ ] §13 verbatim, plus one *Migration note* under it naming the four scripts and that "invariant N" means `docs/design.md §5` (recommended) — the house rule keeps its wording, and the note stops an agent from "fixing" a script
-- [x] Amend the bullet to "`basicConfig` only in `cli.py` and in each standalone `scripts/*.py`", as the sister did — matches the code, but rewrites a house rule inside a migration that promises no content change
-- [ ] §13 verbatim, no note — fully faithful, but every session loads a rule four files break on purpose
+None.
 
 ## Resolved
 
@@ -407,6 +406,16 @@ subject cites any of these labels.
 - [x] Leave records 001–004 untouched; the census crosswalks F01–F14 by hand through each record's `Task:` field and `Log:` line anchors (recommended) — the never-edited rule holds, and the labels it gives up are cited nowhere; new work cites F-IDs
 - [ ] Append `(legacy: …)` to the 14 headings, label only, with a one-line carve-out in Out of Scope — meets Q5 and this task's wording exactly, but edits four landed records for labels nothing cites
 - [ ] Leave the records untouched and append a 14-row F-ID → legacy-label table to this plan, beside Net 2's coverage map — durable, but a crosswalk that serves no existing citation
+
+### Q17: §13 says `basicConfig` only in `cli.py`; four `scripts/*.py` own theirs by design. What lands in `AGENTS.md`?
+
+`scripts/fetch_datasets.py:176`, `mirror_thermal_labels.py:72`, `adapt_datasets.py:73` and
+`gate_table.py:267` each call `logging.basicConfig`, and each docstring says why. Answered by the
+human on 2026-10-04.
+
+- [ ] §13 verbatim, plus one *Migration note* under it naming the four scripts and that "invariant N" means `docs/design.md §5` (recommended) — the house rule keeps its wording, and the note stops an agent from "fixing" a script
+- [x] Amend the bullet to "`basicConfig` only in `cli.py` and in each standalone `scripts/*.py`", as the sister did — matches the code, but rewrites a house rule inside a migration that promises no content change
+- [ ] §13 verbatim, no note — fully faithful, but every session loads a rule four files break on purpose
 
 ## Net 2 and Net 3 results
 
