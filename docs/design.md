@@ -1,18 +1,21 @@
 # Thermal→Visible Translation with Detection-in-the-Loop
 
-**Implementation plan.** Companion to [RESEARCH_FINDINGS.md](RESEARCH_FINDINGS.md), which
-defines *what* we are proving and *why*. This document defines *how* the code gets built.
-Task-level breakdown lives in [TASKS.md](TASKS.md).
+**Design.** This document defines *how* the code gets built. *What* we are proving and *why*
+— the problem, the drafting criteria, the non-goals — is [goal.md](goal.md). Measurements live
+in the run ledger, [experiments/](experiments/index.md); open work lives in
+[roadmap.md](roadmap.md). [RESEARCH_FINDINGS.md](../RESEARCH_FINDINGS.md) stays as the proposal
+of record.
+
+This is `PLAN.md` as tagged `pre-spec-migration`, every `§N` kept under its number so a
+`PLAN.md §N` citation resolves here (§13's body now lives in `AGENTS.md`). Measurement narrative
+is replaced by a pointer to the record that holds it; everything else is verbatim.
 
 ---
 
 ## 1. Objective and scope
 
-The research question, unchanged from `RESEARCH_FINDINGS.md` §1:
-
-> Does closing a training-time detection-consistency loop around a diffusion-based
-> thermal→visible translator improve downstream power-line component detection, without
-> hallucinating or erasing safety-relevant components?
+*Objective → [goal.md](goal.md), Problem: the research question this repo answers. Its original,
+diffusion-only wording is `RESEARCH_FINDINGS.md` §1.*
 
 The repo is an instrument for producing one defensible results table and defending it. It
 is not a product. No inference service, no deployment tooling, no UI, no labeling tools.
@@ -25,6 +28,10 @@ Contribution stack (`RESEARCH_FINDINGS.md` §1):
 | C2 | Faithfulness / hallucination metric for safety-critical translation | Co-contribution |
 | C3 | Paired thermal-visible power-component detection benchmark protocol | Domain contribution |
 | C4 | Analysis of *when* translation beats direct thermal detection | Defends the premise |
+
+These are the legacy labels, which every record, `src/` and the experiment configs use.
+`goal.md` renumbers C2–C4: legacy C2 (faithfulness) is its C3, C3 (protocol) its C4, and C4
+(when translation pays) its C2.
 
 ---
 
@@ -335,17 +342,15 @@ Six things that bite, all already handled in the Clean-SeAFusion port:
 - **Aggressive constant downscale on the reward gradient.** ReFL `grad_scale=1e-3`,
   AlignProp `loss_coeff=0.01`. The `[0,1,2,3]` ramp is calibrated to SeAFusion's
   *segmentation* loss scale, not a detection loss — recalibrate empirically in Phase 0.
-  **This recalibration was skipped, and E3 paid for it (TASKS.md M1.2 step 7).** At
-  `grad_scale: 1.0e-2` the detection term was measured at 0.9 / 1.7 / **2.3%** of the
-  objective across the ramp — roughly 19× smaller than the LPIPS term it competed against,
-  which was itself 44% of the objective, with GAN at 52%. (Not the objective's *smallest*
-  term: `loss_l2` measured 1.0%.) A null measured at that dose says nothing about coupling.
+  *Result → [record 006](experiments/006-m1-2-dose-limited.md): the recalibration skipped, and
+  the detection term's measured share of the objective at `grad_scale: 1.0e-2`.*
 
   **Calibrated value for pix2pix: `grad_scale: 0.15`**, achieving 10.0 / 16.1 / 19.8% of the
-  objective over a full 100-epoch stage (M1.2 step 8). At that dose E3 came back positive.
+  objective over a full 100-epoch stage (M1.2 step 8).
   The guardrail this downscale was providing transfers to `reward_target` plus the per-stage
   LPIPS readout — and the readout has since caught something: the calibrated dose costs
   +0.0097 stage-3 LPIPS, where at `1.0e-2` fidelity was neutral within ±0.016.
+  *Result → [record 007](experiments/007-m1-2-e3-pix2pix-positive.md): E3 pix2pix at this dose.*
 
   **Calibrated value for pix2pix-turbo: also `grad_scale: 0.15`**, achieving 16.6 / 22.9 /
   24.5% over a 25-epoch probe, with a second probe at 0.75 bracketing it at 46.6 / 54.7 /
@@ -502,15 +507,9 @@ detector, run on raw thermal (E1's 0.1887 floor) and on translated images. The a
 answers a different question and lands near 0.9 either way, so reading the gate off it would
 pass it for the wrong reason.
 
-**Result: the gate passed** (TASKS.md M1), and was re-confirmed in M1.2 under an
-independently-trained judge that supplied no gradient to anything: pix2pix at λ_det=0 scores
-**0.7851** zero-shot mAP50 against the thermal floor's **0.1552**, +0.630, improving all four
-classes. λ_det=3 reaches 0.8470, 90% of the real-visible ceiling.
-
-The λ_det gain itself was **not** established at the time — re-scoring under the honest judge
-showed the apparent monotone ramp was partly self-grading, and put the run-to-run noise floor at
-0.059 mAP50, about the size of the effect being claimed. **E3 settled it** (§11, §16): at a
-calibrated dose the coupled arm beats its own control by +0.0512 mAP50 at stage 3, p = 0.031.
+*Result → the gate: [record 002](experiments/002-m1-phase1-gate.md), re-scored under an
+independent judge in [record 004](experiments/004-m1-2-yolo11s-judge.md); whether λ_det drives
+the gain: E3, records [005](experiments/005-m1-2-e3-pix2pix-null.md)–[007](experiments/007-m1-2-e3-pix2pix-positive.md).*
 
 ### Phase 2a — One-step diffusion loop (primary)
 
@@ -591,7 +590,7 @@ E1–E10 from `RESEARCH_FINDINGS.md` §7 survive. Changes:
 | --- | --- |
 | E1 reference bracket | Unchanged. Detector on {raw thermal, real visible} × {detector trained on thermal, on visible}. The server's existing weights cover most of this. |
 | E2 backbone comparison | `{pix2pix, pix2pix-turbo, LBBDM-f4}` paired at λ_det=0; `{CUT}` unpaired. UNSB optional. |
-| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. **The pix2pix cell is done and it is POSITIVE** (TASKS.md M1.2 step 8): twelve runs at the calibrated `grad_scale: 0.15`, stage-3 zero-shot mAP50 **+0.0512, p = 0.031, CI [+0.025, +0.081]** — p exactly at the design's 2/2⁶ floor, so all six seeds agreed. Corroborated by a monotone dose-response (+0.028 → +0.036 → +0.051) that was absent at 1/15th the dose, and by raw detection loss falling ~30% where it previously did not move. §16's causality criterion is **satisfied for pix2pix**, with two caveats: the stage-0 null drew wide (−0.0397, and the within-arm trajectory contrast corroborates rather than closes it — +0.0909 but p = 0.094, a post-hoc sensitivity analysis and never the endpoint), and fidelity may cost up to ~0.02 LPIPS (+0.0097 at the finish line, p = 0.125; +0.0129 within-arm, p = 0.562 — directionally consistent, established by neither), which C2 has since localised to texture rather than objects. **Reward hacking is ruled out**: at stage 3 the coupled arm invents fewer objects (false-object rate −0.0289, p = 0.156, the pre-registered criterion), erases fewer (−0.0370, p = 0.031) and is more consistent with the detector's real-image behaviour (+0.0291, p = 0.031). The earlier campaign at `grad_scale: 1.0e-2` came back null (+0.0070, p = 0.66) and is reported beside this one: it was **dose-limited** at 2.3% of the objective (step 7), and the pair of campaigns is itself the dose argument. **The turbo cell is calibrated and ready to launch** (TASKS.md M2a step 4): 34.14 GB peak at `batch_size: 2` on a 40GB A100, and `grad_scale: 0.15` — pix2pix's value, re-probed for this backbone rather than inherited — putting the detection term at 16.6 / 22.9 / 24.5% of the objective. Both campaigns therefore run at the same dose, so the turbo-minus-pix2pix contrast is a backbone contrast and nothing else. |
+| E3 core ablation | `{pix2pix, pix2pix-turbo} × {λ_det=0, λ_det>0} × seeds`. The turbo arm is the strong one, pix2pix the cheap control. **Most important experiment in the project.** Decided on §12's **zero-shot** task arm — the adapted arm saturates and cannot separate the conditions (M1). Design settled in M1.2: the λ_det=0 arm is `task_weights: [0,0,0,0]`, so both arms run 400 warm-started epochs through identical machinery and λ_det is the only difference; stage 0 is λ=0 in *both*, making the paired stage-0 difference a free within-experiment null control. **Six seeds**, because an exact sign-flip permutation test on paired runs cannot reach p < 0.05 below n=6 (2/2⁶ = 0.031) whatever the effect size. Needs an independently-trained reference detector: scoring a λ_det>0 arm with the same checkpoint that supplied its training gradient is not separable from reward hacking. *Results → pix2pix: [005](experiments/005-m1-2-e3-pix2pix-null.md) at `grad_scale: 1.0e-2`, [006](experiments/006-m1-2-dose-limited.md) its dose, [007](experiments/007-m1-2-e3-pix2pix-positive.md) at the calibrated 0.15, [008](experiments/008-m1-2-c2-faithfulness.md) C2 on its exports; turbo: [009](experiments/009-m2a-turbo-probes.md) its calibration, [010](experiments/010-m2a-e3-turbo-replicates.md) the campaign.* |
 | **E4 coupling mechanism** | **Scope reduced.** Was `{cascaded, bilevel (TarDAL), meta-feature (MetaFusion)}`. Both comparison arms are unportable — see below. Becomes `{cascaded, bilevel-reimplemented}`, meta-feature deferred. |
 | **E5 gradient tractability** | **Reframed.** Was "which approximation makes backprop fit". Now: *exact* full-generator gradients through a one-step distilled model vs. *truncated* ReFL/K gradients through multi-step LBBDM. A cleaner and more publishable question. |
 | E6 schedule | Unchanged. Warmup vs none; joint vs alternating; λ_det sweep. |
@@ -670,34 +669,8 @@ excluding zero.**
 
 ## 13. House style
 
-Match the mature repos (`../Clean-SeAFusion`, `../RGBT-Fusion-Detection`), not the older
-`PYTHON_CODING_GUIDELINES.md`:
-
-- `src/` layout; Python ≥3.12; `from __future__ import annotations` in every module.
-- Fully annotated. `@dataclass(frozen=True, slots=True)` for value objects; `TypedDict` for
-  batch dicts; `Protocol` for pluggable hooks; `StrEnum` for choice-typed config.
-- pyright `standard`; ruff line-length 100.
-- Module docstrings explaining *why*, citing upstream `file:line` for every deviation.
-- **An inline comment on every config field naming its failure mode.**
-- `logging.getLogger(__name__)` with **%-style lazy formatting — never f-strings, never
-  `print`**. `basicConfig` only in `cli.py`.
-- Custom exception subclasses; fail fast at startup with messages saying what was tried.
-- argparse CLI with an explicit flag→config-path override table.
-- pytest, `tmp_path_factory` synthetic datasets, a `slow` marker for CPU end-to-end runs.
-- gitmoji + conventional commits.
-
-**Deliberate deviation:** pydantic replaces the hand-rolled YAML→dataclass `_build`/
-`_coerce` loader in `../Clean-SeAFusion/src/seafusion/config.py`. Keep that file's two best
-behaviours — **unknown-key rejection** (pydantic `extra="forbid"`) and **`snapshot()`** of
-the resolved config into the run dir.
-
-**`config_hash()` covers the experiment, not the invocation.** The `runtime` section
-(device, run name, run dir, W&B flags) is excluded wholly, so the same experiment run on
-two GPUs under two names carries one hash — which is what lets invariant 6 mean anything.
-`seed` therefore lives under `train`, not `runtime`: it is scientific, and a
-silently-changed seed on resume is precisely the drift M0.8's warn-on-drift check exists to
-catch. Clean-SeAFusion hashed everything (`engine/fusion_trainer.py:60`) and consequently
-warned on a renamed run.
+*Moved → [AGENTS.md](../AGENTS.md), House style, which every session loads, so there is one
+copy.*
 
 ---
 
@@ -730,10 +703,10 @@ warned on a renamed run.
 
 | Risk | Signal | Mitigation |
 | --- | --- | --- |
-| ~~Phase 1 fails — translation never beats raw thermal~~ | E1 vs E3 at λ_det=0 | **Retired.** Measured: 0.7751 vs 0.1887 zero-shot mAP50, all four classes improved (TASKS.md M1). |
+| ~~Phase 1 fails — translation never beats raw thermal~~ | E1 vs E3 at λ_det=0 | **Retired.** *Result → [record 002](experiments/002-m1-phase1-gate.md).* |
 | 850 pairs too few even for LoRA fine-tuning | Turbo overfits during Phase 2a | FLIR-aligned pretrain is already in the plan (§10); escalate to heavier augmentation and lower LoRA rank. |
-| **Reward hacking — mAP rises, images degrade** | **Cleared on pix2pix, from both sides.** Training loss shows no perceptual sacrifice (λ-attributable `loss_lpips` change −0.09 pp, step 8 finding 9); object counts on the finished exports show no hallucination (false-object rate −0.0289, missed −0.0370 at p = 0.031, consistency +0.0291 at p = 0.031 — step 9). Evaluation LPIPS is +0.0097 (p = 0.125) and is texture, not objects | `reward_target` **stays null**: there is no measured problem for it to respond to, and changing the dose and its guard together would make any fidelity result unattributable. C2 is now measured through the same paired sign-flip test as the task metric (`t2o faithfulness --write-back`), so turbo re-tests all of it at far higher capacity on the same instrument. |
-| **λ_det miscalibrated for a new backbone** | Detection share outside 20–30% on `scripts/loss_share.py` | §8's per-backbone probe, 25 epochs, before any campaign. Skipping it once already cost 72 GPU-hours and an uninterpretable null. **Fired as designed on turbo** (TASKS.md M2a step 4): two probes, hours of GPU, verdict "0.15 is in band at 24.5% — change nothing". A probe that returns no change is the control working, not the control being unnecessary. |
+| **Reward hacking — mAP rises, images degrade** | *Measured → pix2pix: [007](experiments/007-m1-2-e3-pix2pix-positive.md) training loss, [008](experiments/008-m1-2-c2-faithfulness.md) C2 on its exports; turbo: [010](experiments/010-m2a-e3-turbo-replicates.md).* | `reward_target` **stays null**: there is no measured problem for it to respond to, and changing the dose and its guard together would make any fidelity result unattributable. C2 is now measured through the same paired sign-flip test as the task metric (`t2o faithfulness --write-back`), so turbo re-tests all of it at far higher capacity on the same instrument. |
+| **λ_det miscalibrated for a new backbone** | Detection share outside 20–30% on `scripts/loss_share.py` | §8's per-backbone probe, 25 epochs, before any campaign. Skipping it once already cost 72 GPU-hours and an uninterpretable null. *Fired on turbo → [record 009](experiments/009-m2a-turbo-probes.md).* A probe that returns no change is the control working, not the control being unnecessary. |
 | Gradient conflict — training unstable | Loss oscillation, collapse | Escalate cascaded → bilevel (E4). Meta-feature only if both fail. |
 | VRAM tighter than expected | Phase 0 OOM | SDPA + gradient checkpointing + bf16; reduce batch, then resolution. |
 | DataLoader hangs on Windows spawn | Phase 0, silent stalls | Module-level dataset classes, guarded entry points, low `num_workers` until stable. |
@@ -744,56 +717,15 @@ warned on a renamed run.
 
 ## 16. Acceptance criteria for drafting
 
-Unchanged from `RESEARCH_FINDINGS.md` §10. Begin drafting when all five hold: margin
-(≥ +2–4 mAP@50 over the strongest baseline), consistency (≥2–3 datasets), causality (E3
-shows the loop drives the gain, seed-stable), stability (≥3 seeds, significance-tested, no
-collapse), and faithfulness (hallucination rates low and reported).
+*Criteria → [goal.md](goal.md), Success Criteria: the six that must all hold before drafting.
+The legacy five this section once restated are `RESEARCH_FINDINGS.md` §10.*
 
-**Status after M1.2 step 8 (2026-08-23): causality is SATISFIED for the pix2pix backbone.**
-E3's twelve-run campaign at the calibrated `grad_scale: 0.15` puts stage-3 zero-shot mAP50 at
-**+0.0512, p = 0.031, CI [+0.025, +0.081]** — the exact sign-flip floor at n=6, meaning all six
-seeds moved the same way. Three things carry the claim beyond the p-value, which sits at a floor
-it cannot go below: a **monotone dose-response** (+0.028 → +0.036 → +0.051) that was absent at
-1/15th the dose; raw detection loss falling ~30%, outside the measured loss-space noise floor,
-where at `1.0e-2` it did not move at all; and an **independent judge** (M1.2 step 1's `yolo11s`)
-that supplied no gradient to anything.
-
-*Stability* was met in full (six seeds, exact sign-flip, no collapse). Two caveats travel with
-the result and must be reported:
-
-1. **The stage-0 null drew wide** — −0.0397, against a stage-3 effect of +0.0512, i.e. 1.3× by
-   magnitude where the pre-registered rule asks for "clearly larger". Stage 0 is provably
-   λ-inert in both arms, so this is an unlucky draw rather than a confound. The within-arm
-   trajectory — control +0.0396 over the 400-epoch budget against loop +0.1305 — puts the
-   difference-of-differences at **+0.0909, p = 0.094**: it *corroborates* the endpoint and shows
-   the effect is not the offset showing through (removing the offset makes the contrast grow,
-   monotonically in dose, rather than collapse), but it **does not itself clear significance**.
-   Differencing two paired quantities adds their variances, and the stage-0 difference is the
-   noisy one. That test was **added after seeing the data**; it is a sensitivity analysis and
-   never the endpoint. This remains the result's softest edge.
-2. **Fidelity costs nothing measurable in training loss, and at most ~0.02 LPIPS at
-   evaluation.** The evaluation gap is +0.0097 at stage 3 (p = 0.125) and +0.0129 within-arm
-   (p = 0.562) — consistent in sign, significant in neither. In *training* loss there is no gap
-   at all: `loss_lpips` falls 18.42% in the control and 18.50% in the loop arm, and the
-   λ-attributable change to the perceptual term is **−0.09 percentage points** against a
-   λ-inert stage-0 null (TASKS.md M1.2 step 8 finding 9). So the detection term is not
-   outbidding LPIPS for the optimiser's attention, which is the specific mechanism §8's
-   saturating-reward guardrail exists to prevent — **`reward_target` is not indicated; there is
-   nothing in the objective to saturate.** And none of what remains is hallucination: C2 on the
-   twelve stage-3 exports (step 9) finds the coupled arm invents **fewer** objects
-   (false-object rate −0.0289, p = 0.156 — the pre-registered "flat or falling" criterion,
-   met), erases significantly fewer (missed-object −0.0370, p = 0.031), and reproduces
-   significantly more of the detector's behaviour on the real photo (consistency +0.0291,
-   p = 0.031). The LPIPS gap is therefore a perceptual-texture difference that does not reach
-   the objects — a reportable property of the method, not an open threat.
+*Status → [roadmap.md](roadmap.md), one line per criterion, citing findings. The status this
+section held after M1.2 step 8 is records [005](experiments/005-m1-2-e3-pix2pix-null.md)–[008](experiments/008-m1-2-c2-faithfulness.md).*
 
 The superseded campaign at `grad_scale: 1.0e-2` (+0.0070, p = 0.66) stays in the record: step 7
 measured its dose at 2.3% of the objective, so it never tested coupling at a dose capable of
 refuting it. The two campaigns together are the dose argument, and neither is publishable alone.
-
-**Margin and consistency remain untouched.** E3 compares the method to its own ablation, not to
-baselines; nothing here says how the method fares against E2's backbones, and the result stands
-on one dataset. Those are the next two criteria, after the turbo arm replicates C1.
 
 **Fallback framing:** if the loop helps only in low-annotation regimes, that remains a
 strong honest Q1 story — pivot to data-efficiency and operator interpretability. Given 850
