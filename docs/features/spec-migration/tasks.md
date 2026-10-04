@@ -19,7 +19,7 @@
 | SPEC-MIGRATION-15 | Record `013` — E9 steps 1, 2, 2b, 3: FLIR judge, in-loop `yolo11n`, kill-test gate (`TASKS.md:4147-4477`) | complex | opus | done | needs -02; `Log:` adds `runs/inloop-flir-yolo11n-results-2026-09-28.csv` for step 2b (Q6) |
 | SPEC-MIGRATION-16 | Record `014` — E9 step 3b, de-rolled labels + re-gate, with the stale-label-cache and roll-direction findings (`TASKS.md:4478-4728`) | moderate | opus | done | needs -02 |
 | SPEC-MIGRATION-17 | Record `015` — E9 step 4(b), throughput probe (`TASKS.md:4729-5056`) | moderate | opus | done | needs -02 |
-| SPEC-MIGRATION-18 | Record `016` — E9 step 5, the twelve-run FLIR cell (`TASKS.md:5057-5358`) | complex | opus | pending | needs -02; `Log:` = `runs/e3f-report-2026-10-01.txt`; open readout rows go to the roadmap |
+| SPEC-MIGRATION-18 | Record `016` — E9 step 5, the twelve-run FLIR cell (`TASKS.md:5057-5358`) | complex | opus | done | needs -02; `Log:` = `runs/e3f-report-2026-10-01.txt`; open readout rows go to the roadmap |
 | SPEC-MIGRATION-19 | No-run records `017`+ — the inventory's four build-time findings (`--device 0`, `workers`, absent vs null, list-source OOM), plus named findings in M0.1–M0.9 (`TASKS.md:20-969`) and M1.2 steps 2–4 (`1681-1965`) | complex | opus | pending | needs -02 |
 | SPEC-MIGRATION-20 | Finding census (Net 3c): every finding has exactly one F-ID carrying its legacy label; every superseded/withdrawn/narrowed chain resolves from both ends | moderate | opus | pending | needs -03..-19; blocks -21, -22 |
 | SPEC-MIGRATION-21 | `docs/design.md` from `PLAN.md`, `§1`–`§16` kept; results narrative → record pointers; `§1`/`§16` → `docs/goal.md`; `§13` heading + pointer only | complex | opus | pending | needs -20; Q2, Q12 |
