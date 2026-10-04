@@ -9,11 +9,15 @@ Research code for one question:
 This repo is an instrument for producing one defensible results table and defending it. It
 is not a product — no inference service, no deployment tooling, no UI.
 
-- **[RESEARCH_FINDINGS.md](RESEARCH_FINDINGS.md)** — what we are proving and why
-- **[PLAN.md](PLAN.md)** — how the code gets built
-- **[TASKS.md](TASKS.md)** — the working checklist
+- **[docs/goal.md](docs/goal.md)** — what we are proving and why
+- **[RESEARCH_FINDINGS.md](RESEARCH_FINDINGS.md)** — the original proposal, frozen
+- **[docs/design.md](docs/design.md)** — how the code gets built
+- **[docs/roadmap.md](docs/roadmap.md)** — what is still open
+- **[docs/experiments/](docs/experiments/index.md)** — what was measured
 
-**Status: Phase 0 (instrument).** No research claims yet.
+**Status: measuring.** The instrument is built and experiments have run. Results are in the
+[run ledger](docs/experiments/index.md); where each of the six drafting criteria stands is in
+the [roadmap](docs/roadmap.md#drafting-criteria).
 
 ## Install
 
