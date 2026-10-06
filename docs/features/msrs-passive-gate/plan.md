@@ -62,7 +62,9 @@ unchanged.
   `convert_segment_masks_to_yolo_seg` was read and rejected: it writes polygons, keeps all
   eight classes as `pixel − 1`, and filters only contours under 3 points. The written labels go through
   `t2o.data.adapters.common.write_label`'s conventions. Class ids are remapped explicitly to the
-  kept class list, not passed through.
+  kept class list, not passed through. A frame whose mask has no kept-class blob of at least
+  10 px is a label-less negative under `write_label_lines`' convention (44 train / 13 val real
+  frames, 19 / 4 of them daytime); a frame with no mask is an `AdapterError`.
 - **Two trees, one adapter.** The plain `msrs` tree keeps every frame, now mask-labelled
   (1,083 train / 361 val). The `msrs-day` tree keeps frames whose stem ends in `D` (536 train /
   179 val), built by the same adapter with a day-only switch. Night was measured
