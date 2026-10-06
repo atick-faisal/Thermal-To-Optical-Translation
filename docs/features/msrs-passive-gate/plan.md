@@ -16,9 +16,30 @@ segmentation masks for thermally passive classes. Two of them are common enough 
 `car_stop` (406 train-day / 132 test-day blobs) and `color_cone` (264 / 102).
 
 This feature turns those masks into YOLO boxes and builds a daytime-only labelled MSRS tree.
-That makes the existing kill-test (`scripts/gate_table.py`, record 013's recipe) runnable on
-MSRS per class. The gate then decides, for a few GPU-hours, whether a ~117 GPU-h campaign is
-worth it.
+That makes a per-class headroom gate runnable on MSRS. The gate then decides, for a few
+GPU-hours, whether a ~117 GPU-h campaign is worth it.
+
+**Headroom is measured two ways, not one** (added 2026-10-06, after the plan was first
+approved). Three detectors score each class:
+
+- **V**: a visible-trained detector on visible images (the ceiling);
+- **T**: a thermal-trained detector of the same architecture and recipe, on thermal images;
+- **J**: the visible-trained detector run on raw thermal (the zero-label floor).
+
+The existing kill-test (`scripts/gate_table.py`, record 013) measures only V − J. That total
+splits into two parts that mean different things:
+
+- **V − T, the sensor gap.** What colour shows that thermal does not. This is the room for a
+  translation to beat direct thermal detection. If V ≈ T on a class, translation cannot beat a
+  thermal-trained detector there, whatever the loop does.
+- **T − J, the domain gap.** What the thermal pixels already carry that the visible detector
+  cannot read. This is the room translation can win back with zero thermal labels.
+
+No dataset has a per-class T yet. Record 013, F107 already notes that its floor measures "a
+visible-trained judge's domain gap, not thermal information content". On the custom set, the
+only all-class T is 0.9300 (record 011, yolo11n, 600 labels) against V = 0.9213 (record 001):
+a sensor gap of about zero overall. The passive-object hypothesis is precisely that V − T is
+large for thermally passive classes, so this feature has to measure it.
 
 The feature also fixes a train/val leak found during reconnaissance. 71 of the 80 `detection/`
 pairs are pixel-identical (mean absolute error 0.0) to MSRS frames, and 23 of those are val
@@ -56,25 +77,85 @@ unchanged.
 - **Tests.** The MSRS-shaped fixture in `tests/test_adapters.py:41-67` gains synthetic
   `Segmentation_labels` masks. The tests cover the remap, the area floor, day filtering and the
   absence of `detection/` stems. The existing `skipif`-guarded real-data test pattern is kept.
-- **The gate itself is a server run, not a task.** It follows record 013's recipe:
+- **The gate itself is a server run, not a task.** It extends record 013's recipe with the
+  thermal-trained arm:
   1. `mirror_thermal_labels.py`.
-  2. Train a new visible yolo11s judge with `t2o train-detector --init-weights yolo11s.pt
-     --epochs 100 --seed 1`. The FLIR judge cannot be reused: the class set differs
-     (invariant 7).
-  3. `gate_table.py --primary-classes car_stop color_cone`.
+  2. Train the visible yolo11s judge (V) with `t2o train-detector --init-weights yolo11s.pt
+     --epochs 100`. The FLIR judge cannot be reused: the class set differs (invariant 7).
+  3. Train the thermal yolo11s (T) the same way on the thermal manifest `gate_table.py`
+     already writes (`runs/gate/<name>/manifests/thermal/data.yaml`), so the only difference
+     between V and T is the modality. `scripts/annotation_sweep.py:161-163` (E8 arm A) is the
+     precedent for a thermal-trained arm.
+  4. `gate_table.py --primary-classes car_stop color_cone`, reporting V, T and J per class
+     (Q5), judged by the rule fixed in Q6 before any number exists, as record 012 did
+     (`012:88-94`).
 
 **Server rebuild.** The adapter skips a populated destination (`dest_already_populated`), so
 the server's existing `dataset/processed/msrs/` must be deleted before re-adapting. Delete any
 `labels.cache` too: it is keyed on sizes and paths, not contents. The server also needs the raw
 `Segmentation_labels/` folders, which `dataset/` being git-ignored does not carry.
 
-**goal.md touch-point.** `docs/goal.md:123` lists "MSRS (1,163 / 361)". The leak fix makes that
-1,083 / 361, and a day tree is a further variant. Editing goal.md is the human's conversation,
-not a task in this feature.
+**goal.md touch-point.** Edited on 2026-10-06 at the human's direction, in the conversation that added the
+headroom bracket: MSRS reads 1,083 / 361 plus `msrs-day` 536 / 179, LLVIP is dropped,
+Consistency needs ≥2 of the 4 datasets, and C2 defines headroom per class as the two gaps
+above.
 
 ## Open Questions
 
 ## Resolved
+
+### Q5: How is the thermal-trained arm (T) scored?
+
+- [x] An optional `--thermal-weights` flag on `scripts/gate_table.py` that scores T on the
+      thermal val split as a third row and prints V − T and T − J per class (recommended) —
+      one table holds all three numbers on the same val stems; it follows the script's
+      one-construction-one-flag pattern (`gate_table.py:24-25`) and its tests in
+      `tests/test_gate_table.py`; and it is reusable on every dataset (Q8). One small task.
+- [ ] Recipe only: train T, run `t2o evaluate` on it, and compare with `gate_table.py`'s
+      output by hand — no code, but the three numbers live in two logs, and nothing checks
+      that both were scored on the same val split
+
+### Q6: What is the pre-registered go / no-go rule?
+
+Thresholds are absolute mAP50 differences of the primary-class mean, as in `gate_table.py:64-65`.
+
+- [x] Two parts (recommended). **KILL** if V − J < 0.15, the existing pre-registered rule
+      (`012:90-94`): no room even at zero labels. Otherwise, a passive class with **V − T ≥
+      0.10** is a **passive GO**: the campaign tests the passive-object claim on it. If V − T <
+      0.10 the class is only a **domain-gap GO**: worth running for Consistency, like FLIR, but
+      it cannot test the passive claim. 0.10 is about 1.7× the 0.059 judge-to-judge noise
+      measured on FLIR (F102), so a smaller gap cannot be told from noise
+- [ ] V − T only, the framing that prompted this revision — the direct test of the passive claim, but it discards
+      a class where T is high and J collapses, which is FLIR's case and the zero-label route
+      the paper's Margin criterion actually grades
+- [ ] V − J only, the current gate — already pre-registered, but it cannot tell a sensor gap from
+      a domain gap, which is the question this revision exists to answer
+
+### Q7: How many seeds for V and T?
+
+- [x] Three seeds each, reporting the mean and spread (recommended) — the 0.10 band in Q6 is
+      under 2× the FLIR judge noise, so one seed can flip a verdict; yolo11s on 536 frames is
+      cheap next to the ~117 GPU-h it guards
+- [ ] One seed each, as record 013 did — cheapest, but a single-seed V − T near 0.10 cannot be
+      told from noise, and the gate would have to be rerun to trust a borderline result
+
+### Q8: Which datasets get the three-number bracket?
+
+- [x] Every dataset still in scope, with the same `gate_table.py` flag (recommended) — per-class
+      T exists on no dataset, and `goal.md` C4 already owes "a bracket of visible ceiling,
+      raw-thermal floor, thermal-supervised and label-transfer references" per dataset. FLIR
+      and the custom set already have V and J judges, so each needs only one T arm of its
+      judge's architecture (yolo11s on FLIR, yolo11n on custom). The custom set's all-class
+      V ≈ T is the strongest reason to look per class there
+- [ ] MSRS only — keeps this feature narrow, but leaves the sensor gap unknown on the datasets
+      already campaigned, and a reviewer will ask for it there first
+
+*Resolved with the `goal.md` edit of 2026-10-06:* the datasets in scope are the custom set,
+FLIR-aligned, `msrs-day` and M3FD (LLVIP dropped). M3FD has no V or J judge yet, so it needs
+both arms; its `Lamp` class (751 val boxes, median about 17×17 px) is the primary class. The
+custom set's V is `optical_best_n_1.pt`, whose training recipe is not recorded (record 001),
+so its T matches the architecture but not necessarily the recipe; that caveat travels with
+the number.
 
 ### Q1: How is the daytime-only subset represented?
 
@@ -145,8 +226,8 @@ is why the floor sits below the smallest real far-away object rather than at a s
 
 ## Out of Scope
 
-- **Editing `docs/goal.md`.** The MSRS count (1,163 → 1,083 after the leak fix) and whether
-  `msrs-day` counts toward Consistency's datasets are the human's conversation.
+- **Further `docs/goal.md` edits.** The 2026-10-06 edit is recorded above; any other change is
+  the human's conversation.
 - **The server runs.** The judge training and the gate are runs between tasks; their result
   becomes a record via `/log-experiment`, not a task row.
 - **The campaign.** Translator and loop runs on MSRS wait for the gate's verdict and get their

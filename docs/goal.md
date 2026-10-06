@@ -53,7 +53,7 @@ Drafting begins when **all six** hold:
   Margin becomes non-inferiority to ModTr, with Transfer and Faithfulness carrying the claim.
 - **Transfer** — the loop's gain over the no-loop translator holds for at least one visible
   detector from a different family, never used in the loop, across ≥3 seeds.
-- **Consistency** — on ≥3 of the 5 datasets, the loop beats its own no-loop control
+- **Consistency** — on ≥2 of the 4 datasets, the loop beats its own no-loop control
   (sign-flip test, ≥3 seeds). Whether translation beats raw thermal is *not* a criterion: it
   is C2's measured outcome, reported for every dataset, failures included.
 - **Causality** — the λ_det ablation (E3) shows the loop drives the gain, seed-stable.
@@ -70,11 +70,12 @@ Alongside them:
 - **C1** — visible-faithful detection-in-the-loop translation: paired reconstruction plus a
   frozen detector's loss, for pix2pix and one-step pix2pix-turbo, positioned as a successor
   to HalluciDet and ModTr.
-- **C2** — a map of *when* translation pays, along three axes: headroom (each dataset's
-  thermal–visible gap), annotation budget (the thermal labels a direct detector needs to
-  match the loop, E8), and registration error (how fast label transfer and translation each
-  degrade as alignment worsens). Label transfer is compared with the visible detector trained
-  both on the pairs and on visible data the translator never saw.
+- **C2** — a map of *when* translation pays, along three axes: headroom (per class: the gap
+  between a visible ceiling and a thermal-trained detector, and between that detector and the
+  visible detector on raw thermal), annotation budget (the thermal labels a direct detector
+  needs to match the loop, E8), and registration error (how fast label transfer and
+  translation each degrade as alignment worsens). Label transfer is compared with the visible
+  detector trained both on the pairs and on visible data the translator never saw.
 - **C3** — an object-level insertion/deletion audit for translators trained against a
   detector.
 - **C4** — a power-line testbed and reproducible protocol: frozen splits, and per dataset a
@@ -119,14 +120,15 @@ Alongside them:
   fork. No bash launchers, no symlinks.
 - **Every component runs end-to-end on a synthetic fixture built at test time**, on CPU, in
   seconds, as a pytest.
-- **Public benchmarks, adapted and frozen** (`splits/*.json`: sorted stems + hash): LLVIP
-  (12,025 / 3,463), FLIR-aligned (4,129 / 1,013), M3FD (3,369 / 831), MSRS (1,163 / 361)
-  train / val pairs, fetched by `scripts/fetch_datasets.py`. FLIR ships no thermal labels;
-  they are mirrored from visible and de-rolled. No public dataset provides registered
-  thermal–visible pairs of power-line components with boxes: CPLID and TTPLA are
-  visible-only, HIT-UAV is thermal-only (people and vehicles), Yetgin & Gerek states no
-  pairing at 128×128, and VITLD (~400 registered transmission-line pairs, conductor masks
-  only) is available on request.
+- **Public benchmarks, adapted and frozen** (`splits/*.json`: sorted stems + hash):
+  FLIR-aligned (4,129 / 1,013), M3FD (3,369 / 831) and MSRS (1,083 / 361; daytime-only
+  `msrs-day` 536 / 179) train / val pairs, fetched by `scripts/fetch_datasets.py`. LLVIP is
+  dropped as a benchmark: people only, all warm, mostly low-light, so it cannot test thermally
+  passive objects. FLIR ships no thermal labels; they are mirrored from visible and de-rolled.
+  No public dataset provides registered thermal–visible pairs of power-line components with
+  boxes: CPLID and TTPLA are visible-only, HIT-UAV is thermal-only (people and vehicles),
+  Yetgin & Gerek states no pairing at 128×128, and VITLD (~400 registered transmission-line
+  pairs, conductor masks only) is available on request.
 - **Custom data.** ~850 annotated, registered 640×480 FLIR pairs, taken in Brazil.
   Experiments touch only 600 train / 153 val; the ~100 held-out test pairs are read only at
   reporting time. Report "753 train+val of 853" and 4 classes — the manifest
