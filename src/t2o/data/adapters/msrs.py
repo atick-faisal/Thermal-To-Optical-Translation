@@ -26,6 +26,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import cv2
+import numpy as np
+
 from t2o.data.adapters.common import (
     AdapterError,
     copy_image_pair,
@@ -36,6 +39,21 @@ from t2o.data.adapters.common import (
 logger = logging.getLogger(__name__)
 
 CLASSES_FILENAME = "classes.txt"
+
+# The classes kept as detection targets, in output-id order (plan.md Q2). Written to data.yaml
+# by MSRS-PASSIVE-GATE-03; a reordering silently relabels every box already on disk.
+KEPT_CLASSES = ("car", "person", "bike", "car_stop", "color_cone")
+
+# Segmentation_labels pixel value -> output class id. The mask order is car, person, bike,
+# curve, car_stop, guardrail, color_cone, bump (dataset/raw/msrs/visualize.py:10-33). Values
+# 4, 6 and 8 are absent on purpose: too rare to score, or long strips whose boxes mostly cover
+# background (plan.md Q2). A value missing here is dropped, never passed through as `value - 1`.
+MASK_TO_CLASS = {1: 0, 2: 1, 3: 2, 5: 3, 7: 4}
+
+# Minimum blob area in pixels (plan.md Q3's measured table). Blobs of 1-9 px are annotation
+# crumbs, almost all warm-class fragments; 10-29 px car stops and cones are real distant
+# objects. Raising this drops the passive classes under test, so it fails silently.
+MIN_BLOB_AREA = 10
 
 
 def adapt_msrs(raw_root: Path, dest_root: Path) -> Path:
@@ -78,6 +96,27 @@ def adapt_msrs(raw_root: Path, dest_root: Path) -> Path:
         dest_root,
     )
     return write_manifest_yaml(dest_root, names)
+
+
+def mask_to_yolo_lines(mask: np.ndarray) -> list[str]:
+    """Turn one ``Segmentation_labels`` mask into normalised YOLO ``cls cx cy w h`` lines.
+
+    Each kept class contributes one box per 8-connected blob of at least ``MIN_BLOB_AREA``
+    pixels. Touching objects of one class merge into one box; that is accepted (plan.md Q3).
+    """
+    height, width = mask.shape
+    lines: list[str] = []
+    for mask_value, class_id in MASK_TO_CLASS.items():
+        binary = (mask == mask_value).astype(np.uint8)
+        count, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        for index in range(1, count):  # label 0 is the background
+            x, y, w, h, area = (int(v) for v in stats[index])
+            if area < MIN_BLOB_AREA:
+                continue
+            cx = (x + w / 2) / width
+            cy = (y + h / 2) / height
+            lines.append(f"{class_id} {cx:.6f} {cy:.6f} {w / width:.6f} {h / height:.6f}")
+    return lines
 
 
 def _stems(images_dir: Path) -> set[str]:
