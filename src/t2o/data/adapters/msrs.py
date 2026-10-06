@@ -4,15 +4,21 @@ Raw layout (``github.com/Linfeng-Tang/MSRS``, verified against the real clone --
 M0.9 note that no ``detection/`` folder exists was written from browsing GitHub without
 cloning and was wrong)::
 
-    train/vi/*.png, train/ir/*.png          # 1083 pairs, matching filenames, unlabelled
-    test/vi/*.png,  test/ir/*.png           # 361 pairs, same shape, unlabelled
-    detection/vi/*.png, detection/ir/*.png  # 80 pairs, disjoint filenames from train/test
-    detection/labels/*.txt                  # YOLO cls/cx/cy/w/h
-    detection/labels/classes.txt            # canonical class order
+    train/vi/*.png, train/ir/*.png          # 1083 pairs, matching filenames
+    test/vi/*.png,  test/ir/*.png           # 361 pairs, same shape
+    detection/vi/*.png, detection/ir/*.png  # 80 pairs -- NOT read, see below
+    detection/labels/classes.txt            # still the source of the class names
 
-``detection/`` is its own small labelled pool, not a subset of ``train``/``test`` -- verified
-disjoint by filename stem. It merges into ``train`` rather than becoming a third split, since
-the internal representation only has two. MSRS has no dedicated val split; ``test`` stands in.
+``detection/`` is deliberately not read. Its filenames are disjoint from ``train/`` and
+``test/``, but its pixels are not: 71 of the 80 pairs are pixel-identical (mean absolute
+error 0.0) to MSRS frames, and 23 of those 71 are ``test`` frames. Merging it into ``train``
+therefore put labelled copies of val frames in the train split. The 9 pairs with no twin carry
+only ``person, bicycle, car`` labels, so merged in they would teach a detector that unlabelled
+cones and car stops are background (docs/features/msrs-passive-gate/plan.md, Q4).
+
+Train is therefore the 1083 ``train/`` frames and val is the 361 ``test`` frames (MSRS has no
+dedicated val split). Neither carries labels yet; the mask-derived labels arrive with
+MSRS-PASSIVE-GATE-03, which also stops reading ``classes.txt``.
 """
 
 from __future__ import annotations
@@ -24,7 +30,6 @@ from t2o.data.adapters.common import (
     AdapterError,
     copy_image_pair,
     dest_already_populated,
-    write_label,
     write_manifest_yaml,
 )
 
@@ -45,15 +50,6 @@ def adapt_msrs(raw_root: Path, dest_root: Path) -> Path:
     names = _read_classes(raw_root / "detection" / "labels" / CLASSES_FILENAME)
 
     train_stems = _stems(raw_root / "train" / "vi")
-    detection_stems = _stems(raw_root / "detection" / "vi")
-    collisions = train_stems & detection_stems
-    if collisions:
-        preview = ", ".join(sorted(collisions)[:5])
-        raise AdapterError(
-            f"{len(collisions)} filename(s) appear in both train/ and detection/: {preview}"
-            f"{'...' if len(collisions) > 5 else ''}. Merging them into one train split would "
-            f"silently overwrite images."
-        )
 
     train_root = dest_root / "train"
     for stem in sorted(train_stems):
@@ -64,15 +60,6 @@ def adapt_msrs(raw_root: Path, dest_root: Path) -> Path:
             train_root,
             ".png",
         )
-    for stem in sorted(detection_stems):
-        copy_image_pair(
-            raw_root / "detection" / "vi" / f"{stem}.png",
-            raw_root / "detection" / "ir" / f"{stem}.png",
-            stem,
-            train_root,
-            ".png",
-        )
-        write_label(train_root, stem, raw_root / "detection" / "labels" / f"{stem}.txt")
 
     val_root = dest_root / "val"
     for stem in sorted(_stems(raw_root / "test" / "vi")):
@@ -85,9 +72,8 @@ def adapt_msrs(raw_root: Path, dest_root: Path) -> Path:
         )
 
     logger.info(
-        "msrs: %d train pairs (%d labelled), %d val pairs -> %s",
-        len(train_stems) + len(detection_stems),
-        len(detection_stems),
+        "msrs: %d train pairs, %d val pairs -> %s",
+        len(train_stems),
         len(_stems(raw_root / "test" / "vi")),
         dest_root,
     )

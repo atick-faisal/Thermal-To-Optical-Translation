@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from t2o.data.adapters import AdapterError, adapt_msrs
+from t2o.data.adapters import adapt_msrs
 from t2o.data.labels import load_yolo_labels
 from t2o.data.manifest import DatasetManifest
 from t2o.data.pairing import Pairing
@@ -38,22 +38,18 @@ def _write_pair(vi_dir: Path, ir_dir: Path, stem: str) -> None:
     )
 
 
-def _build_msrs_raw(
-    root: Path,
-    train_stems: list[str] = TRAIN_STEMS,
-    detection_stems: list[str] = DETECTION_STEMS,
-) -> Path:
-    for stem in train_stems:
+def _build_msrs_raw(root: Path) -> Path:
+    for stem in TRAIN_STEMS:
         _write_pair(root / "train" / "vi", root / "train" / "ir", stem)
     for stem in TEST_STEMS:
         _write_pair(root / "test" / "vi", root / "test" / "ir", stem)
-    for stem in detection_stems:
+    for stem in DETECTION_STEMS:
         _write_pair(root / "detection" / "vi", root / "detection" / "ir", stem)
 
     labels_dir = root / "detection" / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     (labels_dir / "classes.txt").write_text("\n".join(CLASSES) + "\n")
-    for i, stem in enumerate(detection_stems):
+    for i, stem in enumerate(DETECTION_STEMS):
         (labels_dir / f"{stem}.txt").write_text(f"{i % len(CLASSES)} 0.5 0.5 0.2 0.2\n")
     return root
 
@@ -73,8 +69,8 @@ def test_adapt_msrs_produces_expected_layout_and_counts(
     train_visible = list((dest / "train" / "visible" / "images").iterdir())
     train_infrared = list((dest / "train" / "infrared" / "images").iterdir())
     val_visible = list((dest / "val" / "visible" / "images").iterdir())
-    assert len(train_visible) == len(TRAIN_STEMS) + len(DETECTION_STEMS)
-    assert len(train_infrared) == len(TRAIN_STEMS) + len(DETECTION_STEMS)
+    assert len(train_visible) == len(TRAIN_STEMS)
+    assert len(train_infrared) == len(TRAIN_STEMS)
     assert len(val_visible) == len(TEST_STEMS)
     assert (dest / "data.yaml").is_file()
 
@@ -90,17 +86,6 @@ def test_written_manifest_loads_and_matches_classes(msrs_raw_root: Path, tmp_pat
     assert manifest.pairing == Pairing()
 
 
-def test_detection_label_is_copied_verbatim(msrs_raw_root: Path, tmp_path: Path) -> None:
-    dest = tmp_path / "processed"
-
-    adapt_msrs(msrs_raw_root, dest)
-
-    stem = DETECTION_STEMS[0]
-    source = (msrs_raw_root / "detection" / "labels" / f"{stem}.txt").read_text()
-    copied = (dest / "train" / "visible" / "labels" / f"{stem}.txt").read_text()
-    assert copied == source
-
-
 def test_unlabelled_train_image_has_no_label_file(msrs_raw_root: Path, tmp_path: Path) -> None:
     dest = tmp_path / "processed"
 
@@ -113,13 +98,22 @@ def test_unlabelled_train_image_has_no_label_file(msrs_raw_root: Path, tmp_path:
     assert bboxes.shape == (0, 4)
 
 
-def test_colliding_stems_between_train_and_detection_raises(tmp_path: Path) -> None:
-    raw_root = _build_msrs_raw(
-        tmp_path / "raw", train_stems=[*TRAIN_STEMS, "1"], detection_stems=DETECTION_STEMS
-    )
+def test_detection_stems_never_reach_the_tree(msrs_raw_root: Path, tmp_path: Path) -> None:
+    # 71 of the 80 real ``detection/`` pairs are pixel-identical to MSRS frames (23 of them val),
+    # so reading the folder leaks val into train. See the adapter's module docstring.
+    dest = tmp_path / "processed"
 
-    with pytest.raises(AdapterError, match="both train/ and detection/"):
-        adapt_msrs(raw_root, tmp_path / "processed")
+    adapt_msrs(msrs_raw_root, dest)
+
+    written = {
+        p.stem
+        for split in ("train", "val")
+        for modality in ("visible", "infrared")
+        for kind in ("images", "labels")
+        if (dest / split / modality / kind).is_dir()
+        for p in (dest / split / modality / kind).iterdir()
+    }
+    assert written.isdisjoint(DETECTION_STEMS)
 
 
 def test_adapt_msrs_is_idempotent_against_a_populated_dest(
