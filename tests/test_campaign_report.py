@@ -103,7 +103,19 @@ def test_the_whole_report_renders_for_a_complete_campaign(
     _campaign(tmp_path)
 
     assert (
-        main(["--runs", f"{tmp_path}/e3f-*", "--primary-classes", "bicycle", "car", "person"]) == 0
+        main(
+            [
+                "--campaign",
+                "flir",
+                "--runs",
+                f"{tmp_path}/e3f-*",
+                "--primary-classes",
+                "bicycle",
+                "car",
+                "person",
+            ]
+        )
+        == 0
     )
 
     out = capsys.readouterr().out
@@ -126,6 +138,8 @@ def test_the_whole_report_renders_for_a_complete_campaign(
     assert "pairs split across cards: none" in out
     # primary_n_classes at std 0.0000 is the check that the denominator never moved.
     assert "zero_shot.primary_n_classes" in out
+    assert "bicycle/car/person" in out[out.index("8. PRE-REGISTERED READINGS") :]
+    assert "solo  43.524" in out
 
 
 def test_a_run_one_stage_short_is_reported_not_averaged_over(
@@ -141,7 +155,7 @@ def test_a_run_one_stage_short_is_reported_not_averaged_over(
     _write_run(tmp_path, "e3f-loop-s9", 9, [0.0, 1.0], [0.50, 0.54], scored_stages=())
     _write_run(tmp_path, "e3f-control-s9", 9, [0.0, 0.0], [0.50, 0.51], scored_stages=())
 
-    assert main(["--runs", f"{tmp_path}/e3f-*"]) == 0
+    assert main(["--campaign", "flir", "--runs", f"{tmp_path}/e3f-*"]) == 0
 
     out = capsys.readouterr().out
     assert "<-- INCOMPLETE" in out
@@ -158,7 +172,7 @@ def test_a_config_key_that_drifted_between_shells_is_surfaced(
     """
     _campaign(tmp_path, extra_config="export:\n  normalize: minmax\n")
 
-    assert main(["--runs", f"{tmp_path}/e3f-*"]) == 0
+    assert main(["--campaign", "flir", "--runs", f"{tmp_path}/e3f-*"]) == 0
 
     out = capsys.readouterr().out
     assert "export.normalize   <-- UNEXPECTED" in out
@@ -172,7 +186,7 @@ def test_a_metric_only_some_stages_carry_is_a_blank_cell_not_a_crash(
     normal state of this file. It belongs in the wide table and out of the paired block."""
     _campaign(tmp_path)
 
-    assert main(["--runs", f"{tmp_path}/e3f-*"]) == 0
+    assert main(["--campaign", "flir", "--runs", f"{tmp_path}/e3f-*"]) == 0
 
     out = capsys.readouterr().out
     rows = [line for line in out.splitlines() if line.startswith("e3f-control-s0,")]
@@ -203,7 +217,7 @@ def test_the_wall_clock_ignores_a_metrics_json_rewritten_by_write_back(
         # The write-back, days later.
         os.utime(run_dir / "metrics.json", (100 * hour, 100 * hour))
 
-    assert main(["--runs", f"{tmp_path}/e3f-*"]) == 0
+    assert main(["--campaign", "flir", "--runs", f"{tmp_path}/e3f-*"]) == 0
 
     out = capsys.readouterr().out
     lines = out[out.index("5. WALL CLOCK") :].splitlines()
@@ -215,3 +229,33 @@ def test_the_wall_clock_ignores_a_metrics_json_rewritten_by_write_back(
     # same report once forgot that subtraction and printed 1.00, a stage of training too many.
     stage0 = next(line for line in lines if line.split()[:2] == ["e3f-control-s0", "0"])
     assert stage0.split()[-1] == "0.98"
+
+
+def test_msrs_day_prints_its_own_pre_registration_not_flirs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The report once printed FLIR's block whatever the campaign, under "written before
+    these numbers" -- a pre-registration for classes the msrs-day cell does not have."""
+    _campaign(tmp_path)
+
+    assert main(["--campaign", "msrs-day", "--runs", f"{tmp_path}/e3f-*"]) == 0
+
+    out = capsys.readouterr().out
+    readings = out[out.index("8. PRE-REGISTERED READINGS") :]
+    assert "car_stop/color_cone" in readings
+    assert "T = 0.5628" in readings
+    assert "bicycle" not in readings
+    assert "5.90 px" not in readings
+    # FLIR's solo probe priced FLIR's epochs; a ratio against it here would be noise.
+    assert "no solo probe recorded for this campaign" in out
+    assert "solo  43.524" not in out
+
+
+def test_the_campaign_must_be_named(tmp_path: Path) -> None:
+    """A default would print one campaign's pre-registration under another's numbers."""
+    _campaign(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["--runs", f"{tmp_path}/e3f-*"])
+    with pytest.raises(SystemExit):
+        main(["--campaign", "m3fd", "--runs", f"{tmp_path}/e3f-*"])
