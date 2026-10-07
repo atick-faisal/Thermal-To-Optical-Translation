@@ -97,6 +97,13 @@ the server's existing `dataset/processed/msrs/` must be deleted before re-adapti
 `labels.cache` too: it is keyed on sizes and paths, not contents. The server also needs the raw
 `Segmentation_labels/` folders, which `dataset/` being git-ignored does not carry.
 
+**`gate_table.py` with seeds (-06).** `gate.csv` stays one row per validation pass with its
+schema unchanged; seed means, sample std (ddof=1, `nan` at n = 1, the `aggregate.py:102`
+convention) and the V − T / T − J gaps are derived in the markdown report and log only. J is
+scored once per V checkpoint; gaps are differences of seed means and carry no spread, since T's
+seeds are unpaired. The V − J band is read first on the seed-mean primary headroom; per-class
+passive / domain-gap GO marks print only when it is not KILL.
+
 **goal.md touch-point.** Edited on 2026-10-06 at the human's direction, in the conversation that added the
 headroom bracket: MSRS reads 1,083 / 361 plus `msrs-day` 536 / 179, LLVIP is dropped,
 Consistency needs ≥2 of the 4 datasets, and C2 defines headroom per class as the two gaps
