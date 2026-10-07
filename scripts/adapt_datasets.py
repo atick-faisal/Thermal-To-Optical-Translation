@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 
 from t2o.data.adapters import adapt_flir, adapt_m3fd, adapt_msrs
@@ -35,9 +36,14 @@ DEFAULT_DEST_ROOT = Path("dataset/processed")
 # one-line addition here plus its own `adapters/<name>.py`.
 ADAPTERS: dict[str, Callable[[Path, Path], Path]] = {
     "msrs": adapt_msrs,
+    "msrs-day": partial(adapt_msrs, day_only=True),
     "flir": adapt_flir,
     "m3fd": adapt_m3fd,
 }
+
+# Trees built from another dataset's raw folder; every other name reads `raw_root/<name>`.
+# msrs-day is a daytime view of raw/msrs (adapters/msrs.py), and no raw/msrs-day exists.
+RAW_DIRS: dict[str, str] = {"msrs-day": "msrs"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,7 +79,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
     for name in resolve_names(args.dataset):
-        data_yaml = ADAPTERS[name](args.raw_root / name, args.dest_root / name)
+        data_yaml = ADAPTERS[name](args.raw_root / RAW_DIRS.get(name, name), args.dest_root / name)
         logger.info("%s -> %s", name, data_yaml)
     return 0
 

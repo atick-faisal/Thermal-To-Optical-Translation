@@ -22,6 +22,11 @@ dedicated val split). Every frame is labelled from its segmentation mask by
 :func:`mask_to_yolo_lines`, so the class names are ``KEPT_CLASSES``, not ``detection/``'s
 ``classes.txt``. A mask with no kept-class blob writes no label file: the frame is a negative
 (44 train / 13 val real frames, plan.md Tech Stack / Approach).
+
+``day_only=True`` builds the ``msrs-day`` tree from the same raw folder: only frames whose stem
+ends in ``D`` (536 train / 179 val; night stems end in ``N``). Night is dropped there because
+its median visible luma is 26 against 99 by day, so it gives neither a usable visible ceiling
+nor a translator target (plan.md Tech Stack / Approach, Q1). The plain tree keeps every frame.
 """
 
 from __future__ import annotations
@@ -60,8 +65,11 @@ MASK_TO_CLASS = {1: 0, 2: 1, 3: 2, 5: 3, 7: 4}
 MIN_BLOB_AREA = 10
 
 
-def adapt_msrs(raw_root: Path, dest_root: Path) -> Path:
-    """Convert a ``dataset/raw/msrs``-shaped tree into ``dest_root``. Returns the data.yaml path."""
+def adapt_msrs(raw_root: Path, dest_root: Path, *, day_only: bool = False) -> Path:
+    """Convert a ``dataset/raw/msrs``-shaped tree into ``dest_root``. Returns the data.yaml path.
+
+    ``day_only`` keeps only daytime frames (module docstring).
+    """
     raw_root = Path(raw_root)
     dest_root = Path(dest_root)
 
@@ -71,14 +79,18 @@ def adapt_msrs(raw_root: Path, dest_root: Path) -> Path:
 
     # MSRS has no val split; its test split is ours (module docstring).
     splits = (("train", "train"), ("test", "val"))
+    stems = {raw_split: _frame_stems(raw_root / raw_split, day_only) for raw_split, _ in splits}
     # Checked before any copy: a half-written tree would be skipped as populated on the rerun.
     for raw_split, _ in splits:
-        _require_masks(raw_root / raw_split)
+        _require_masks(raw_root / raw_split, stems[raw_split])
 
     for raw_split, split in splits:
-        frames, labelled, boxes = _adapt_split(raw_root / raw_split, dest_root / split)
+        frames, labelled, boxes = _adapt_split(
+            raw_root / raw_split, dest_root / split, stems[raw_split]
+        )
         logger.info(
-            "msrs %s: %d pairs, %d labelled, %d boxes -> %s",
+            "msrs%s %s: %d pairs, %d labelled, %d boxes -> %s",
+            " (day only)" if day_only else "",
             split,
             frames,
             labelled,
@@ -109,12 +121,11 @@ def mask_to_yolo_lines(mask: np.ndarray) -> list[str]:
     return lines
 
 
-def _adapt_split(raw_split: Path, split_root: Path) -> tuple[int, int, int]:
-    """Copy one raw split's pairs and write their mask-derived labels.
+def _adapt_split(raw_split: Path, split_root: Path, stems: list[str]) -> tuple[int, int, int]:
+    """Copy one raw split's ``stems`` pairs and write their mask-derived labels.
 
     Returns the frame, labelled-frame and box counts for the log line.
     """
-    stems = sorted(_stems(raw_split / "vi"))
     labelled = boxes = 0
     for stem in stems:
         copy_image_pair(
@@ -132,20 +143,21 @@ def _adapt_split(raw_split: Path, split_root: Path) -> tuple[int, int, int]:
     return len(stems), labelled, boxes
 
 
-def _require_masks(raw_split: Path) -> None:
-    """Raise unless every visible frame in ``raw_split`` has its segmentation mask.
+def _require_masks(raw_split: Path, stems: list[str]) -> None:
+    """Raise unless every frame in ``stems`` has its segmentation mask.
 
     A frame without one would otherwise pass as a negative and silently erase its objects.
     """
-    missing = sorted(
-        stem
-        for stem in _stems(raw_split / "vi")
-        if not (raw_split / MASKS_DIRNAME / f"{stem}.png").is_file()
-    )
+    missing = [stem for stem in stems if not (raw_split / MASKS_DIRNAME / f"{stem}.png").is_file()]
     if missing:
         raise AdapterError(
             f"{len(missing)} frame(s) in {raw_split} have no {MASKS_DIRNAME} mask: {missing[:5]}"
         )
+
+
+def _frame_stems(raw_split: Path, day_only: bool) -> list[str]:
+    """The sorted stems to adapt from one raw split: every frame, or only the daytime ones."""
+    return sorted(stem for stem in _stems(raw_split / "vi") if not day_only or stem.endswith("D"))
 
 
 def _stems(images_dir: Path) -> set[str]:
