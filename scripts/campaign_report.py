@@ -30,8 +30,10 @@ second renderer that can disagree with the one a reader reproduces by hand. They
 configuring one here, bare-format onto stdout, is what turns their output into report body
 instead of timestamped terminal chatter.
 
-Campaign-agnostic on purpose: `--runs` plus `--primary-classes` serves the e3b and e3t cells
-and M4's re-reads as well as the FLIR one it was written for.
+The measurement is campaign-agnostic: `--runs` plus `--primary-classes` serves the e3b and e3t
+cells and M4's re-reads as well as the FLIR one it was written for. The *readings* are not --
+a pre-registration and a solo probe belong to one campaign -- so `--campaign` picks them, and
+is required: a default printed FLIR's pre-registration under msrs-day's numbers.
 """
 
 from __future__ import annotations
@@ -42,7 +44,8 @@ import platform
 import statistics
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -68,12 +71,6 @@ logger = logging.getLogger(__name__)
 
 SECONDS_PER_HOUR = 3600.0
 
-# Solo, one card, `--val-loss-images 153`, measured by M3 E9 step 4 (b)'s three-run probe. The
-# cell itself runs two-up, and the difference between these and the campaign's own medians is
-# the contention cost that projection explicitly left unmeasured ("read 77-103 GPU-h as a
-# floor, not a forecast").
-PROBE_EPOCH_SECONDS = {Arm.CONTROL: 43.524, Arm.LOOP: 51.156}
-
 # Keys that MUST differ run to run, or are machine-specific by design. Everything else varying
 # is a confound: `test_control_and_loop_configs_differ_only_by_design` guards the two config
 # files, and nothing guards a flag that arrived differently on one of the two launch shells.
@@ -89,9 +86,20 @@ EXPECTED_VARYING = frozenset(
     }
 )
 
-# Printed verbatim at the end so the numbers are read against what was written before them.
-# Every figure here predates the campaign; none is derived from it.
-PRE_REGISTERED = """\
+
+@dataclass(frozen=True, slots=True)
+class Campaign:
+    """What one campaign wrote down before its numbers existed."""
+
+    # Printed verbatim at the end so the numbers are read against what was written before
+    # them. Every figure here predates the campaign; none is derived from it.
+    pre_registered: str
+    # Solo per-epoch seconds, against which the two-up campaign's medians price contention.
+    # None when no solo probe was run: a ratio against another dataset's probe is noise.
+    probe_epoch_seconds: Mapping[Arm, float] | None
+
+
+FLIR_PRE_REGISTERED = """\
 primary endpoint   paired stage-3 difference in the 3-class mAP50 (bicycle/car/person),
                    exact two-sided sign-flip p over 2^6 assignments. Never a bootstrap CI
                    excluding zero (PLAN.md §12); CIs are descriptive spread only.
@@ -110,6 +118,43 @@ confound           the 5.90 px roll still sits between input and the l2+lpips ta
                    fixed the LABELS, buying an honest floor, not an aligned training set.
                    This confound exists on the public cell and nowhere else.
 """
+
+# Written from records 021-022 before any msrs-day loop run existed.
+MSRS_DAY_PRE_REGISTERED = """\
+primary endpoint   paired stage-3 difference in the 2-class mAP50 (car_stop/color_cone),
+                   exact two-sided sign-flip p over 2^6 assignments. Never a bootstrap CI
+                   excluding zero (PLAN.md §12); CIs are descriptive spread only.
+null control       the stage-0 paired difference -- lambda = 0 in BOTH arms there.
+passive bar        the loop's stage-3 2-class mAP50 is READ against T = 0.5628 (thermal-trained
+                   yolo11s on thermal, F161). A reading, not a second test. Below T, a win over
+                   control is the zero-label route only; the passive claim needs the loop above
+                   T, towards V = 0.8251.
+car_stop           V - T +0.2132; color_cone +0.3114 (F159). Both passive GO.
+warm classes       car/person/bike V - T +0.0323/+0.0650/+0.0999 (F160). Bike sits on the 0.10
+                   line. A gain there is domain gap, not the passive claim.
+noise floor        0.059 mAP50 (custom set, M1.2) and 0.048 (FLIR's A/B probe pair).
+                   An effect below these is not an effect.
+headroom           +0.7725 2-class (ceiling 0.8251 / floor 0.0526), PASS at 1.9x the 0.40
+                   line (F158). FLIR was +0.2066.
+cost               ~117 GPU-h planned; FLIR's 600-pair cell cost 116.8 (F146). 536 pairs here,
+                   all of them, not matched to 600.
+dose               grad_scale 0.15 was calibrated on custom and FLIR (F144). Unmeasured on
+                   msrs-day before loss_share.py's probe; section 7 is the realised dose.
+confound           MSRS registration is assumed, not measured (021). A residual offset hits
+                   car_stop's ~4x7 px boxes hardest and inflates V - T there.
+"""
+
+CAMPAIGNS: dict[str, Campaign] = {
+    "flir": Campaign(
+        pre_registered=FLIR_PRE_REGISTERED,
+        # Solo, one card, `--val-loss-images 153`, measured by M3 E9 step 4 (b)'s three-run
+        # probe. The cell itself runs two-up, and the difference between these and the
+        # campaign's own medians is the contention cost that projection explicitly left
+        # unmeasured ("read 77-103 GPU-h as a floor, not a forecast").
+        probe_epoch_seconds={Arm.CONTROL: 43.524, Arm.LOOP: 51.156},
+    ),
+    "msrs-day": Campaign(pre_registered=MSRS_DAY_PRE_REGISTERED, probe_epoch_seconds=None),
+}
 
 
 def _run(command: Sequence[str]) -> str:
@@ -280,7 +325,7 @@ def _run_end(run: RunRecord) -> float:
     )
 
 
-def _wall_clock(runs: Sequence[RunRecord]) -> None:
+def _wall_clock(runs: Sequence[RunRecord], probe: Mapping[Arm, float] | None) -> None:
     """Training time from the measured per-epoch clock; boundaries from mtimes.
 
     `EpochStats.seconds` accounts for ~99% of in-stage translator time (step 4 (b)), so the
@@ -343,13 +388,16 @@ def _wall_clock(runs: Sequence[RunRecord]) -> None:
             f"{run.name:28} {'TOTAL':>5} span {span:.2f} h (config.yaml -> last stage's last file)"
         )
 
-    print("\ntwo-up contention -- campaign median epoch vs step 4 (b)'s SOLO probe:")
-    for arm, seconds in per_arm_epoch_seconds.items():
-        if not seconds:
-            continue
-        median = statistics.median(seconds)
-        solo = PROBE_EPOCH_SECONDS[arm]
-        print(f"  {arm.value:8} {median:7.3f} s   solo {solo:7.3f} s   x{median / solo:.2f}")
+    if probe is None:
+        print("\ntwo-up contention -- no solo probe recorded for this campaign")
+    else:
+        print("\ntwo-up contention -- campaign median epoch vs the SOLO probe:")
+        for arm, seconds in per_arm_epoch_seconds.items():
+            if not seconds:
+                continue
+            median = statistics.median(seconds)
+            solo = probe[arm]
+            print(f"  {arm.value:8} {median:7.3f} s   solo {solo:7.3f} s   x{median / solo:.2f}")
     if growth:
         print(
             f"\nper-stage growth, last stage's training / stage 0's: median "
@@ -367,6 +415,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="run directories, or globs over them -- quote the glob ('runs/e3f-*')",
     )
     parser.add_argument(
+        "--campaign",
+        required=True,
+        choices=sorted(CAMPAIGNS),
+        help="whose pre-registration and solo probe to print beside these numbers",
+    )
+    parser.add_argument(
         "--stage", type=int, default=3, help="the headline stage every run must have reached"
     )
     parser.add_argument(
@@ -380,6 +434,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    campaign = CAMPAIGNS[args.campaign]
     # Bare format onto stdout, before anything logs: `t2o aggregate`'s and `loss_share`'s own
     # `basicConfig` calls then no-op, and their tables arrive as report body rather than as
     # timestamped lines nobody wants in a paste.
@@ -422,7 +477,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     complete = _completeness(runs, args.stage)
     _config_variance(runs)
     _wide_table(runs, metrics)
-    _wall_clock(runs)
+    _wall_clock(runs, campaign.probe_epoch_seconds)
 
     _section("6. PAIRED STATISTICS (t2o aggregate, verbatim)")
     # `aggregate` drops a stage where only some runs record a metric, but raises when NO shared
@@ -454,7 +509,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         loss_report(stage_shares(chosen))
 
     _section("8. PRE-REGISTERED READINGS -- written before these numbers")
-    print(PRE_REGISTERED)
+    print(campaign.pre_registered)
     return 0
 
 

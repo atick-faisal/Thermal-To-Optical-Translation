@@ -24,6 +24,8 @@
 | [018](018-m1-2-workers-identity.md) | 2026-08-13 | Authoring M1.2 step 2b: the augmentation RNG and `workers`' place in the config | M1.2 | — | Changing `workers` changed the training run and its `config_hash()`; result-neutral since ba6da8e | F151, F152, F153 |
 | [019](019-m1-2-absent-vs-null.md) | 2026-08-23 | Authoring M1.2 step 9's `t2o faithfulness --write-back` | M1.2 | — | An absent metric ("not scored yet") and a null one ("computed nothing") are different facts, and a resume must keep both | F154, F155 |
 | [020](020-e9-faithfulness-list-oom.md) | 2026-10-01 | Fixing E9 step 5's OOM in `t2o faithfulness` | M3 E9 | — | A `list[Path]` source ran FLIR's 1,013-image val as one batch, a 9.89 GiB OOM; chunked in 7a3ca94 | F156, F157 |
+| [021](021-msrs-day-passive-gate.md) | 2026-10-07 | msrs-day passive-class gate: V and T `yolo11s` at three seeds each, J from each V checkpoint, scored by `gate_table.py` on car_stop and color_cone | MSRS-PASSIVE-GATE-06 | Windows server, 2× A100 | 2-class V − J +0.7725 — PASS; V − T car_stop +0.2132, color_cone +0.3114, both passive GO | F158, F159, F160, F161 |
+| [022](022-msrs-day-detector-training.md) | 2026-10-07 | msrs-day V and T `yolo11s` training behind record 021: six 100-epoch runs, visible and thermal manifests, seeds 1–3 | MSRS-PASSIVE-GATE-06 | Windows server, 2× A100 | a 100-epoch `yolo11s` on msrs-day costs 0.20–0.24 h; `best.pt` (epochs 88–100) is at most +0.008 mAP50 over epoch 100 | F162, F163, F164 |
 
 ## Findings
 
@@ -186,3 +188,10 @@
 | F155 | A post-hoc result needs a `StageResult` field, or the next resume silently drops it | 019 | open | |
 | F156 | A `list[Path]` handed to `model.predict` is one batch with `batch=` dropped: FLIR's 1,013-image val asked for 9.89 GiB and OOM'd; chunked in 7a3ca94 | 020 | open | |
 | F157 | The earlier C2 numbers stand: `rect=False` letterboxes each image alone and NMS is per image, so a chunk boundary cannot move a rate | 020 | open | |
+| F158 | msrs-day clears the kill test: 2-class (car_stop, color_cone) V − J +0.7725 (ceiling 0.8251, floor 0.0526), every seed ≥ +0.7539 — 3.7× FLIR's +0.2066 | 021 | open | |
+| F159 | Both passive classes are passive GO: V − T car_stop +0.2132, color_cone +0.3114 vs the 0.10 line; worst V seed beats best T seed by +0.1928 / +0.2616 | 021 | open | |
+| F160 | The sensor gap is a passive-class gap: V − T +0.2623 on passive vs +0.0657 on warm classes (car +0.0323, person +0.0650, bike +0.0999), 4.0× | 021 | open | |
+| F161 | Two thirds of the passive headroom is domain gap: T − J +0.5102 (66%) vs V − T +0.2623 (34%); the passive claim needs the loop above T's 0.5628 | 021 | open | |
+| F162 | A 100-epoch `yolo11s` on msrs-day costs 0.20–0.24 h (1.33 h for six runs), 6–7× under FLIR's 1.43 h judge; a three-seed T arm is ~0.7 GPU-h | 022 | open | |
+| F163 | `best.pt` lands at epochs 88–100 and beats epoch 100 by at most +0.008 all-class mAP50 — no late decay, unlike FLIR's judge (epoch 46, −8.1%) | 022 | open | |
+| F164 | ultralytics' post-training val and `gate_table`'s re-score of the same `best.pt` agree to within 0.0036 mAP50, 16× under the 0.059 noise floor | 022 | open | |
