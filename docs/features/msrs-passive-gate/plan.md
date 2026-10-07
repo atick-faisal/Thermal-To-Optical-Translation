@@ -1,7 +1,7 @@
 ---
 slug: msrs-passive-gate
 title: MSRS passive-class headroom gate
-status: in-progress
+status: shipped
 created: 2026-10-05
 ---
 
