@@ -176,6 +176,32 @@ def test_adapt_msrs_is_idempotent_against_a_populated_dest(
     assert (dest / "sentinel.txt").read_text() == "already adapted"
 
 
+def _image_stems(split_root: Path, modality: str) -> set[str]:
+    return {p.stem for p in (split_root / modality / "images").iterdir()}
+
+
+def test_day_only_keeps_only_stems_ending_in_d(msrs_raw_root: Path, tmp_path: Path) -> None:
+    dest = tmp_path / "processed"
+
+    data_yaml = adapt_msrs(msrs_raw_root, dest, day_only=True)
+
+    for split, stems in (("train", TRAIN_STEMS), ("val", TEST_STEMS)):
+        day = {stem for stem in stems if stem.endswith("D")}
+        assert _image_stems(dest / split, "visible") == day
+        assert _image_stems(dest / split, "infrared") == day
+    assert DatasetManifest.load(data_yaml).class_names == list(KEPT_CLASSES)
+
+
+def test_day_only_ignores_a_missing_night_mask(msrs_raw_root: Path, tmp_path: Path) -> None:
+    # Night frames are not adapted into the day tree, so their masks are not required.
+    (msrs_raw_root / "test" / "Segmentation_labels" / "00902N.png").unlink()
+    dest = tmp_path / "processed"
+
+    adapt_msrs(msrs_raw_root, dest, day_only=True)
+
+    assert _image_stems(dest / "val", "visible") == {"00901D"}
+
+
 REAL_MSRS_RAW = Path("dataset/raw/msrs")
 
 
