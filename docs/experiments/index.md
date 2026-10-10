@@ -26,6 +26,7 @@
 | [020](020-e9-faithfulness-list-oom.md) | 2026-10-01 | Fixing E9 step 5's OOM in `t2o faithfulness` | M3 E9 | — | A `list[Path]` source ran FLIR's 1,013-image val as one batch, a 9.89 GiB OOM; chunked in 7a3ca94 | F156, F157 |
 | [021](021-msrs-day-passive-gate.md) | 2026-10-07 | msrs-day passive-class gate: V and T `yolo11s` at three seeds each, J from each V checkpoint, scored by `gate_table.py` on car_stop and color_cone | MSRS-PASSIVE-GATE-06 | Windows server, 2× A100 | 2-class V − J +0.7725 — PASS; V − T car_stop +0.2132, color_cone +0.3114, both passive GO | F158, F159, F160, F161 |
 | [022](022-msrs-day-detector-training.md) | 2026-10-07 | msrs-day V and T `yolo11s` training behind record 021: six 100-epoch runs, visible and thermal manifests, seeds 1–3 | MSRS-PASSIVE-GATE-06 | Windows server, 2× A100 | a 100-epoch `yolo11s` on msrs-day costs 0.20–0.24 h; `best.pt` (epochs 88–100) is at most +0.008 mAP50 over epoch 100 | F162, F163, F164 |
+| [023](023-msrs-day-dose-probe.md) | 2026-10-07 | msrs-day dose probe: one 25-epoch pix2pix loop run at `grad_scale` 0.15, seed 0, solo, read by `loss_share.py` | MSRS-DAY-CAMPAIGN-01 | Windows server, 1× A100 (`cuda:0`) | detection share 17.4 / 26.6 / 32.0% — stage 3 2.0 points over the band, inside the single-run noise floor | F165, F166, F167 |
 
 ## Findings
 
@@ -195,3 +196,6 @@
 | F162 | A 100-epoch `yolo11s` on msrs-day costs 0.20–0.24 h (1.33 h for six runs), 6–7× under FLIR's 1.43 h judge; a three-seed T arm is ~0.7 GPU-h | 022 | open | |
 | F163 | `best.pt` lands at epochs 88–100 and beats epoch 100 by at most +0.008 all-class mAP50 — no late decay, unlike FLIR's judge (epoch 46, −8.1%) | 022 | open | |
 | F164 | ultralytics' post-training val and `gate_table`'s re-score of the same `best.pt` agree to within 0.0036 mAP50, 16× under the 0.059 noise floor | 022 | open | |
+| F165 | `grad_scale` 0.15 puts msrs-day's detection term at 17.4 / 26.6 / 32.0% at 25 epochs, the hottest pix2pix probe (custom 10.9 / 16.6 / 22.5%); stage 3's 6.7% relative excess is under F32's +7.1% single-run floor | 023 | open | |
+| F166 | Probe-to-campaign stage-3 share has moved ×0.88 (pix2pix, F30→F38) and ×0.53 (turbo, F56→F77): always down, so 32.0% bounds msrs-day from above; ~28% on the pix2pix precedent, a projection | 023 | open | |
+| F167 | A solo msrs-day loop run prices at ~6.2 h (5.55 h training + 0.66 h boundaries), about two thirds of FLIR's realised ~9.7 h; the twelve-run floor is ~70 GPU-h | 023 | open | |
