@@ -31,6 +31,17 @@ means "this whole pipeline, run again from the top".
 **`A0` has no seed dependence** -- one fixed judge on one fixed split -- so it is written once
 with `seed = -1` rather than duplicated across seeds to look symmetric.
 
+**Every row is scored by `evaluate_detector`, trained cells included.** `train_detector`'s
+`DetectorResult` carries no per-class AP, so a trained cell's `best.pt` is re-validated through
+the same single evaluation path the zero-shot arms and the gate table use (PLAN.md invariant 1).
+That is what gives every row its per-class AP50 columns and, under `--primary-classes`, a
+`primary_map50` computed by `metrics.task.primary_mean` -- msrs-day's two-class headline
+(docs/features/msrs-budget-sweep/plan.md Q1). Without the option that cell is blank, not guessed.
+
+**Every trained row also counts its draw's boxes per class** (`n_train_<class>`, plan.md Q6). The
+N images are plain seeded random, unchanged; a draw that holds no passive object is reported, not
+redrawn, so a low-N cell's zero AP on that class can be read for what it is.
+
 **Why a script and not a CLI subcommand.** `t2o evaluate` and `t2o train-detector` only log
 their numbers; a 42-cell sweep through them would leave the result in a terminal scrollback.
 This calls `train_detector`/`evaluate_detector` in-process and appends each row to the CSV as
@@ -54,7 +65,10 @@ from pathlib import Path
 
 from t2o.data.budget import TRAIN_LIST_FILENAME, write_budget_manifest
 from t2o.data.dataset import IMAGE_SUFFIXES
+from t2o.data.labels import load_yolo_labels
 from t2o.data.manifest import DatasetManifest
+from t2o.data.pairing import LABEL_SUFFIX, LABELS_SEGMENT
+from t2o.metrics.task import TaskMetrics, primary_mean
 
 logger = logging.getLogger(__name__)
 
@@ -88,14 +102,44 @@ class Row:
     epochs: int  # 0 on a zero-shot row, so a re-run at other epochs is distinguishable
     precision: float
     recall: float
-    map50: float
+    map50: float  # every class ultralytics scored, its own mean
+    primary_map50: float | None  # the same pass over `--primary-classes` only; None without it
     map50_95: float
     weights: str
     data: str
+    # Written as one `ap50_<class>` column each; a class the val split has no instances of is
+    # absent here and blank there, never 0.0 -- the distinction `primary_mean` relies on.
+    per_class_ap50: dict[str, float]
+    # Written as one `n_train_<class>` column each. None on a zero-shot row, which trained on
+    # nothing, so its columns are blank; a trained row whose draw missed a class writes 0.
+    train_instances: dict[str, int] | None
 
 
 def _count_images(directory: Path) -> int:
     return sum(1 for p in directory.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def _train_instances(data_yaml: Path, class_names: Sequence[str]) -> dict[str, int]:
+    """How many boxes of each class a budget manifest's train images carry.
+
+    A small draw of contiguous video frames can miss a passive class entirely, and a cell
+    that never saw a class scores 0 on it for a reason the AP column alone cannot tell apart
+    from a detector that saw it and failed (docs/features/msrs-budget-sweep/plan.md Q6).
+
+    Labels are found the way ultralytics finds them (`/images/` -> `/labels/`, see
+    `t2o.data.budget`), so arm A's infrared labels and arm B's export labels come through one
+    path. A missing label file is a negative image and counts nothing.
+    """
+    counts = dict.fromkeys(class_names, 0)
+    for line in (data_yaml.parent / TRAIN_LIST_FILENAME).read_text().splitlines():
+        if not line:
+            continue
+        image = Path(line)
+        label = image.parent.parent / LABELS_SEGMENT / f"{image.stem}{LABEL_SUFFIX}"
+        cls, _ = load_yolo_labels(label)
+        for index in cls.flatten().tolist():
+            counts[class_names[int(index)]] += 1
+    return counts
 
 
 def _budget_manifest(
@@ -136,25 +180,79 @@ def _completed(csv_path: Path) -> set[tuple[str, int, int]]:
         }
 
 
-def _append(csv_path: Path, row: Row) -> None:
+def _append(csv_path: Path, row: Row, class_names: Sequence[str]) -> None:
     """Write one row and close the file, every time.
 
     Flushing per cell rather than at the end is the whole resume story: a sweep is hours long
     and an interrupted one must keep the GPU time it has already spent.
+
+    The per-class columns come from the dataset's class list, not from the row, so every row
+    shares one header even when a split scored only some of the classes.
     """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     new = not csv_path.is_file()
+    per_class = ("per_class_ap50", "train_instances")
+    scalars = [f.name for f in fields(Row) if f.name not in per_class]
+    counts = row.train_instances or {}
     with csv_path.open("a", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[f.name for f in fields(Row)])
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                *scalars,
+                *(f"ap50_{name}" for name in class_names),
+                *(f"n_train_{name}" for name in class_names),
+            ],
+        )
         if new:
             writer.writeheader()
-        writer.writerow(asdict(row))
+        values = asdict(row)
+        for name in per_class:
+            del values[name]
+        writer.writerow(
+            values
+            | {f"ap50_{name}": row.per_class_ap50.get(name, "") for name in class_names}
+            | {f"n_train_{name}": counts.get(name, "") for name in class_names}
+        )
+
+
+def _row(
+    metrics: TaskMetrics,
+    primary: Sequence[str],
+    *,
+    arm: str,
+    n: int,
+    seed: int,
+    detector: str,
+    val_pixels: str,
+    epochs: int,
+    weights: Path,
+    data: Path,
+    train_instances: dict[str, int] | None,
+) -> Row:
+    return Row(
+        arm=arm,
+        n_annotated=n,
+        seed=seed,
+        detector=detector,
+        val_pixels=val_pixels,
+        epochs=epochs,
+        precision=metrics.precision,
+        recall=metrics.recall,
+        map50=metrics.map50,
+        primary_map50=primary_mean(metrics.per_class_ap50, primary) if primary else None,
+        map50_95=metrics.map50_95,
+        weights=str(weights),
+        data=str(data),
+        per_class_ap50=dict(metrics.per_class_ap50),
+        train_instances=train_instances,
+    )
 
 
 def _train_cell(
     args: argparse.Namespace, source: DatasetManifest, arm: str, n: int, seed: int
 ) -> Row:
     from t2o.engine.detector_stage import train_detector
+    from t2o.metrics.task import evaluate_detector
 
     out = Path(args.out).resolve()
     name = f"{arm}-n{n}-s{seed}"
@@ -172,19 +270,27 @@ def _train_cell(
         seed=seed,
         device=args.device,
     )
-    return Row(
+    # Re-scored rather than read off `result`, which has no per-class AP. One extra val pass,
+    # about a minute, buys a trained row scored the same way as every zero-shot row.
+    metrics = evaluate_detector(
+        weights=result.weights,
+        data_yaml=data_yaml,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        device=args.device,
+    )
+    return _row(
+        metrics,
+        args.primary_classes or (),
         arm=arm,
-        n_annotated=n,
+        n=n,
         seed=seed,
         detector="finetuned",
         val_pixels="thermal" if infrared else "translated-l0",
         epochs=args.epochs,
-        precision=result.precision,
-        recall=result.recall,
-        map50=result.map50,
-        map50_95=result.map50_95,
-        weights=str(result.weights),
-        data=str(data_yaml),
+        weights=result.weights,
+        data=data_yaml,
+        train_instances=_train_instances(data_yaml, source.class_names),
     )
 
 
@@ -200,19 +306,18 @@ def _zero_shot_cell(
         batch=args.batch,
         device=args.device,
     )
-    return Row(
+    return _row(
+        metrics,
+        args.primary_classes or (),
         arm=arm,
-        n_annotated=n,
+        n=n,
         seed=seed,
         detector="reference",
         val_pixels=val_pixels,
         epochs=0,
-        precision=metrics.precision,
-        recall=metrics.recall,
-        map50=metrics.map50,
-        map50_95=metrics.map50_95,
-        weights=str(args.reference_weights),
-        data=str(data_yaml),
+        weights=Path(args.reference_weights),
+        data=data_yaml,
+        train_instances=None,
     )
 
 
@@ -256,6 +361,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument(
+        "--primary-classes",
+        nargs="+",
+        # Not defaulted to every class, unlike gate_table.py: an all-class mean is already the
+        # `map50` column, and a `primary_map50` that silently equalled it would read as a
+        # headline nobody chose.
+        help="the classes primary_map50 is the mean over, e.g. car_stop color_cone; omitted, "
+        "that column is blank",
+    )
+    parser.add_argument(
         "--control-template",
         default="runs/e3b-control-s{seed}/stage3/translated",
         help="lambda=0 export per seed; '{seed}' is substituted (arms B and C)",
@@ -291,6 +405,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     oversized = [n for n in args.budgets if n > total or n < 1]
     if oversized:
         raise SystemExit(f"budgets {oversized} are not in 1..{total} (the train split's size)")
+    unknown = [name for name in args.primary_classes or () if name not in source.class_names]
+    if unknown:
+        raise SystemExit(f"--primary-classes {unknown} not in {source.class_names}")
 
     # Everything that can be checked without a GPU is checked before the first one starts: a
     # sweep is hours long and discovering a missing export at cell 30 wastes all of them.
@@ -334,15 +451,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             manifest = exports[(arm, seed)]
             pixels = "translated-l0" if arm == "C" else "translated-lpos"
             row = _zero_shot_cell(args, manifest.path, arm, n, seed, pixels)
-        _append(csv_path, row)
+        _append(csv_path, row, source.class_names)
         logger.info(
-            "[%d/%d] arm %s  N=%d  seed=%d  mAP50 %.4f  (%.1f min)",
+            "[%d/%d] arm %s  N=%d  seed=%d  mAP50 %.4f  primary %.4f  (%.1f min)",
             index,
             len(pending),
             arm,
             n,
             seed,
             row.map50,
+            float("nan") if row.primary_map50 is None else row.primary_map50,
             (time.monotonic() - started) / 60.0,
         )
 
