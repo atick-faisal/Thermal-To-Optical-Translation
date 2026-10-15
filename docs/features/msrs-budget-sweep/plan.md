@@ -1,7 +1,7 @@
 ---
 slug: msrs-budget-sweep
 title: msrs-day annotation budget sweep
-status: planned
+status: in-progress
 created: 2026-10-15
 ---
 
