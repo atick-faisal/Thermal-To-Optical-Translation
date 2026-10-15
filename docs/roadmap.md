@@ -29,19 +29,24 @@ here, never a status.
   against a thermal-*trained* detector, the comparison `goal.md`'s Non-Goals concede.
 - **Transfer — not measured.** Every score so far comes from the reference `yolo11s`, the same
   family as the in-loop `yolo11n`. No detector from another family has scored a translation.
-- **Consistency — 2 of 5 datasets.** The loop beats its no-loop control on the custom set (F35;
-  turbo F72) and on FLIR-aligned (F136). LLVIP, M3FD and MSRS have no cell yet. Translation
-  against raw thermal is reported, not graded: above the floor on the custom set (F10), on it on
-  FLIR (F137).
+- **Consistency — 3 of 5 datasets.** The loop beats its no-loop control on the custom set (F35;
+  turbo F72), on FLIR-aligned (F136) and on msrs-day (F168). LLVIP and M3FD have no cell yet.
+  Translation against raw thermal is reported, not graded: above the floor on the custom set
+  (F10), on it on FLIR (F137), 6.8× it on msrs-day (F169).
+- **The passive-class claim is closed, negative (2026-10-15).** On msrs-day the loop stays
+  0.2036 below a thermal-trained detector on the two passive classes, and below it on every
+  class (F169, F170). The within-cell dose ladder is nearly flat (record 024: 0.3243 at λ 1,
+  0.3592 at λ 3), so no further dose or backbone run is planned to chase it. It is reported as
+  part of C2's headroom map, not pursued.
 - **Causality — met on the custom set.** E3 at the calibrated dose (F35), replicated on turbo
   (F72); the earlier null was dose-limited, not a mechanism result (F25).
-- **Stability — met for pix2pix.** F35 and F136 are sign-flip tested over six paired seeds;
+- **Stability — met for pix2pix.** F35, F136 and F168 are sign-flip tested over six paired seeds;
   turbo's three seeds can corroborate but not reach significance (F72). On FLIR, stage 0 —
   identical in both arms — collapsed on two control seeds and no loop seed, by draw rather than
   by arm (F140).
 - **Faithfulness — partial.** C2's insertion and deletion rates favour the loop or match it on
-  every campaign (F49, F76, F143), but they are scored by `yolo11s`, the in-loop family, and no
-  margin has been fixed for the test split.
+  every campaign (F49, F76, F143, F171), but they are scored by `yolo11s`, the in-loop family,
+  and no margin has been fixed for the test split.
 
 ## M2a step 2
 
