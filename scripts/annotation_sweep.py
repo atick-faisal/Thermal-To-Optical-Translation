@@ -38,6 +38,10 @@ That is what gives every row its per-class AP50 columns and, under `--primary-cl
 `primary_map50` computed by `metrics.task.primary_mean` -- msrs-day's two-class headline
 (docs/features/msrs-budget-sweep/plan.md Q1). Without the option that cell is blank, not guessed.
 
+**Every trained row also counts its draw's boxes per class** (`n_train_<class>`, plan.md Q6). The
+N images are plain seeded random, unchanged; a draw that holds no passive object is reported, not
+redrawn, so a low-N cell's zero AP on that class can be read for what it is.
+
 **Why a script and not a CLI subcommand.** `t2o evaluate` and `t2o train-detector` only log
 their numbers; a 42-cell sweep through them would leave the result in a terminal scrollback.
 This calls `train_detector`/`evaluate_detector` in-process and appends each row to the CSV as
@@ -61,7 +65,9 @@ from pathlib import Path
 
 from t2o.data.budget import TRAIN_LIST_FILENAME, write_budget_manifest
 from t2o.data.dataset import IMAGE_SUFFIXES
+from t2o.data.labels import load_yolo_labels
 from t2o.data.manifest import DatasetManifest
+from t2o.data.pairing import LABEL_SUFFIX, LABELS_SEGMENT
 from t2o.metrics.task import TaskMetrics, primary_mean
 
 logger = logging.getLogger(__name__)
@@ -104,10 +110,36 @@ class Row:
     # Written as one `ap50_<class>` column each; a class the val split has no instances of is
     # absent here and blank there, never 0.0 -- the distinction `primary_mean` relies on.
     per_class_ap50: dict[str, float]
+    # Written as one `n_train_<class>` column each. None on a zero-shot row, which trained on
+    # nothing, so its columns are blank; a trained row whose draw missed a class writes 0.
+    train_instances: dict[str, int] | None
 
 
 def _count_images(directory: Path) -> int:
     return sum(1 for p in directory.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def _train_instances(data_yaml: Path, class_names: Sequence[str]) -> dict[str, int]:
+    """How many boxes of each class a budget manifest's train images carry.
+
+    A small draw of contiguous video frames can miss a passive class entirely, and a cell
+    that never saw a class scores 0 on it for a reason the AP column alone cannot tell apart
+    from a detector that saw it and failed (docs/features/msrs-budget-sweep/plan.md Q6).
+
+    Labels are found the way ultralytics finds them (`/images/` -> `/labels/`, see
+    `t2o.data.budget`), so arm A's infrared labels and arm B's export labels come through one
+    path. A missing label file is a negative image and counts nothing.
+    """
+    counts = dict.fromkeys(class_names, 0)
+    for line in (data_yaml.parent / TRAIN_LIST_FILENAME).read_text().splitlines():
+        if not line:
+            continue
+        image = Path(line)
+        label = image.parent.parent / LABELS_SEGMENT / f"{image.stem}{LABEL_SUFFIX}"
+        cls, _ = load_yolo_labels(label)
+        for index in cls.flatten().tolist():
+            counts[class_names[int(index)]] += 1
+    return counts
 
 
 def _budget_manifest(
@@ -159,17 +191,27 @@ def _append(csv_path: Path, row: Row, class_names: Sequence[str]) -> None:
     """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     new = not csv_path.is_file()
-    scalars = [f.name for f in fields(Row) if f.name != "per_class_ap50"]
+    per_class = ("per_class_ap50", "train_instances")
+    scalars = [f.name for f in fields(Row) if f.name not in per_class]
+    counts = row.train_instances or {}
     with csv_path.open("a", newline="") as handle:
         writer = csv.DictWriter(
-            handle, fieldnames=[*scalars, *(f"ap50_{name}" for name in class_names)]
+            handle,
+            fieldnames=[
+                *scalars,
+                *(f"ap50_{name}" for name in class_names),
+                *(f"n_train_{name}" for name in class_names),
+            ],
         )
         if new:
             writer.writeheader()
         values = asdict(row)
-        del values["per_class_ap50"]
+        for name in per_class:
+            del values[name]
         writer.writerow(
-            values | {f"ap50_{name}": row.per_class_ap50.get(name, "") for name in class_names}
+            values
+            | {f"ap50_{name}": row.per_class_ap50.get(name, "") for name in class_names}
+            | {f"n_train_{name}": counts.get(name, "") for name in class_names}
         )
 
 
@@ -185,6 +227,7 @@ def _row(
     epochs: int,
     weights: Path,
     data: Path,
+    train_instances: dict[str, int] | None,
 ) -> Row:
     return Row(
         arm=arm,
@@ -201,6 +244,7 @@ def _row(
         weights=str(weights),
         data=str(data),
         per_class_ap50=dict(metrics.per_class_ap50),
+        train_instances=train_instances,
     )
 
 
@@ -246,6 +290,7 @@ def _train_cell(
         epochs=args.epochs,
         weights=result.weights,
         data=data_yaml,
+        train_instances=_train_instances(data_yaml, source.class_names),
     )
 
 
@@ -272,6 +317,7 @@ def _zero_shot_cell(
         epochs=0,
         weights=Path(args.reference_weights),
         data=data_yaml,
+        train_instances=None,
     )
 
 

@@ -17,7 +17,15 @@ import numpy as np
 import pytest
 import yaml
 from PIL import Image
-from scripts.annotation_sweep import Row, _append, _budget_manifest, _completed, _plan, main
+from scripts.annotation_sweep import (
+    Row,
+    _append,
+    _budget_manifest,
+    _completed,
+    _plan,
+    _train_instances,
+    main,
+)
 
 from t2o.data.manifest import DatasetManifest
 from t2o.engine.detector_stage import DetectorResult
@@ -311,6 +319,7 @@ def test_a_written_row_round_trips_through_the_resume_index(tmp_path: Path) -> N
         weights="w.pt",
         data="d.yaml",
         per_class_ap50={"Fuse": 0.3},
+        train_instances={"Fuse": 7, "Pole": 0},
     )
     _append(csv_path, row, ["Fuse", "Pole"])
     _append(csv_path, row, ["Fuse", "Pole"])  # a duplicate on disk must not confuse the index
@@ -389,3 +398,48 @@ def test_an_unknown_primary_class_fails_before_the_first_gpu_hour(
     with pytest.raises(SystemExit, match="primary-classes"):
         main(argv)
     assert stubbed_gpu == []
+
+
+def test_a_budget_manifest_counts_each_class_its_draw_holds(tmp_path: Path) -> None:
+    """A draw that misses a class must say 0 for it, not leave the reader to guess (Q6).
+
+    Built by hand so every count is known: one image with three boxes over two classes, one
+    with a single box, one with no label file at all (a negative), and a labelled image the
+    draw left out, whose boxes must not leak into the count.
+    """
+    labels = tmp_path / "train" / "infrared" / "labels"
+    labels.mkdir(parents=True)
+    (labels / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n2 0.2 0.2 0.1 0.1\n2 0.7 0.7 0.1 0.1\n")
+    (labels / "b.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+    (labels / "unused.txt").write_text("1 0.5 0.5 0.1 0.1\n")
+    images = tmp_path / "train" / "infrared" / "images"
+    manifest = tmp_path / "manifest"
+    manifest.mkdir()
+    (manifest / "train.txt").write_text("".join(f"{images / s}.png\n" for s in ("a", "b", "c")))
+    data_yaml = manifest / "data.yaml"
+    data_yaml.write_text("train: unused\n")
+
+    counts = _train_instances(data_yaml, ["Fuse", "Pole", "Switch", "Transformer"])
+
+    assert counts == {"Fuse": 2, "Pole": 0, "Switch": 2, "Transformer": 0}
+
+
+def test_trained_rows_carry_their_draws_counts_and_zero_shot_rows_none(
+    tmp_path: Path,
+    thermal_labelled: Path,
+    export_template: str,
+    judge: Path,
+    stubbed_gpu: list[dict[str, Any]],
+) -> None:
+    """Every export image holds one Fuse box, so an N=4 arm-B draw holds exactly four."""
+    out = tmp_path / "sweep"
+    main(_sweep_argv(thermal_labelled, export_template, out, judge, arms="C B", budgets="4"))
+
+    names = ("Fuse", "Pole", "Switch", "Transformer")
+    for row in _rows(out):
+        counts = [row[f"n_train_{name}"] for name in names]
+        if row["arm"] == "B":
+            assert counts == ["4", "0", "0", "0"]
+        else:
+            # Trained on nothing, so blank rather than a column of zeros that reads as a draw.
+            assert counts == ["", "", "", ""]
