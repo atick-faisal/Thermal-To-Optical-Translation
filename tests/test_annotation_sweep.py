@@ -94,8 +94,9 @@ def stubbed_gpu(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
             recall=0.6,
             map50=0.7,
             map50_95=0.8,
-            per_class_ap50={},
-            per_class_ap50_95={},
+            # Two of the fixture's four classes, so a test can tell "scored" from "absent".
+            per_class_ap50={"Fuse": 0.2, "Pole": 0.4},
+            per_class_ap50_95={"Fuse": 0.1, "Pole": 0.2},
         )
 
     monkeypatch.setattr("t2o.engine.detector_stage.train_detector", fake_train)
@@ -143,6 +144,10 @@ def _rows(out: Path) -> list[dict[str, str]]:
 
     with (out / "e8-tidy.csv").open(newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def _trained(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [call for call in calls if call["kind"] == "train"]
 
 
 def test_the_cheap_anchors_run_before_any_fine_tune() -> None:
@@ -199,7 +204,7 @@ def test_arm_a_trains_on_thermal_and_arm_b_on_the_export(
     main(_sweep_argv(thermal_labelled, export_template, out, judge, arms="A B", budgets="4"))
 
     by_arm = {}
-    for call in stubbed_gpu:
+    for call in _trained(stubbed_gpu):
         arm = call["name"].split("-")[0]
         listed = Path(yaml.safe_load(Path(call["data_yaml"]).read_text())["train"]).read_text()
         by_arm.setdefault(arm, []).append([Path(line) for line in listed.splitlines()])
@@ -248,7 +253,7 @@ def test_the_export_seed_is_paired_with_the_detector_seed(
     out = tmp_path / "sweep"
     main(_sweep_argv(thermal_labelled, export_template, out, judge, arms="B", budgets="4"))
 
-    for call in stubbed_gpu:
+    for call in _trained(stubbed_gpu):
         seed = call["seed"]
         listed = Path(yaml.safe_load(Path(call["data_yaml"]).read_text())["train"]).read_text()
         assert all(f"export-s{seed}" in line for line in listed.splitlines())
@@ -301,11 +306,86 @@ def test_a_written_row_round_trips_through_the_resume_index(tmp_path: Path) -> N
         precision=0.1,
         recall=0.2,
         map50=0.3,
+        primary_map50=None,
         map50_95=0.4,
         weights="w.pt",
         data="d.yaml",
+        per_class_ap50={"Fuse": 0.3},
     )
-    _append(csv_path, row)
-    _append(csv_path, row)  # a duplicate on disk must not confuse the index
+    _append(csv_path, row, ["Fuse", "Pole"])
+    _append(csv_path, row, ["Fuse", "Pole"])  # a duplicate on disk must not confuse the index
 
     assert _completed(csv_path) == {("A", 25, 1)}
+
+
+def test_a_trained_cell_is_rescored_on_its_own_checkpoint(
+    tmp_path: Path,
+    thermal_labelled: Path,
+    export_template: str,
+    judge: Path,
+    stubbed_gpu: list[dict[str, Any]],
+) -> None:
+    """`DetectorResult` has no per-class AP, so a trained row's numbers must come from a val pass.
+
+    Reading `result.map50` instead would leave the trained arms on a different scoring path from
+    the zero-shot ones -- and with no two-class score to read against the loop's.
+    """
+    out = tmp_path / "sweep"
+    main(_sweep_argv(thermal_labelled, export_template, out, judge, arms="A", budgets="4"))
+
+    trains = _trained(stubbed_gpu)
+    evaluations = [call for call in stubbed_gpu if call["kind"] == "evaluate"]
+    assert len(trains) == len(evaluations) == 2
+    for train, evaluation in zip(trains, evaluations, strict=True):
+        assert evaluation["weights"] == Path("best.pt")  # the stub's `result.weights`
+        assert evaluation["data_yaml"] == train["data_yaml"]
+    # The val pass's 0.7, not the training stub's 0.3.
+    assert {float(row["map50"]) for row in _rows(out)} == {0.7}
+
+
+def test_every_cell_carries_the_primary_score_and_per_class_columns(
+    tmp_path: Path,
+    thermal_labelled: Path,
+    export_template: str,
+    judge: Path,
+    stubbed_gpu: list[dict[str, Any]],
+) -> None:
+    out = tmp_path / "sweep"
+    argv = _sweep_argv(thermal_labelled, export_template, out, judge, primary_classes="Fuse Pole")
+    main(argv)
+
+    rows = _rows(out)
+    assert {row["arm"] for row in rows} == {"A0", "C", "D", "A", "B"}
+    for row in rows:
+        assert float(row["primary_map50"]) == pytest.approx(0.3)  # mean of 0.2 and 0.4
+        assert (float(row["ap50_Fuse"]), float(row["ap50_Pole"])) == (0.2, 0.4)
+        # A class the split never scored stays blank, not 0.0.
+        assert row["ap50_Switch"] == row["ap50_Transformer"] == ""
+
+
+def test_without_primary_classes_the_primary_score_is_blank(
+    tmp_path: Path,
+    thermal_labelled: Path,
+    export_template: str,
+    judge: Path,
+    stubbed_gpu: list[dict[str, Any]],
+) -> None:
+    """A blank is honest; silently defaulting to every class would just repeat `map50`."""
+    out = tmp_path / "sweep"
+    main(_sweep_argv(thermal_labelled, export_template, out, judge))
+
+    assert {row["primary_map50"] for row in _rows(out)} == {""}
+
+
+def test_an_unknown_primary_class_fails_before_the_first_gpu_hour(
+    tmp_path: Path,
+    thermal_labelled: Path,
+    export_template: str,
+    judge: Path,
+    stubbed_gpu: list[dict[str, Any]],
+) -> None:
+    out = tmp_path / "sweep"
+    argv = _sweep_argv(thermal_labelled, export_template, out, judge, primary_classes="car_stop")
+    with pytest.raises(SystemExit, match="primary-classes"):
+        main(argv)
+    assert stubbed_gpu == []
