@@ -97,3 +97,23 @@ def detector_weights(tmp_path_factory: pytest.TempPathFactory) -> Path:
         path,
     )
     return path
+
+
+@pytest.fixture(scope="session")
+def rtdetr_weights(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A randomly-initialised RT-DETR-l, the out-of-family judge, in the same checkpoint format.
+
+    Same shape as `detector_weights` above, and built locally for the same reason. What it
+    stands in for is a judge trained with `t2o train-detector --init-weights rtdetr-l.pt`.
+    """
+    from ultralytics.nn.tasks import RTDETRDetectionModel
+
+    torch.manual_seed(0)
+    model = RTDETRDetectionModel(cfg="rtdetr-l.yaml", ch=3, nc=len(NAMES), verbose=False)
+    model.names = dict(enumerate(NAMES))  # type: ignore[assignment]
+    path = tmp_path_factory.mktemp("judge") / "rtdetr_random.pt"
+    torch.save(
+        {"model": model, "epoch": -1, "best_fitness": None, "train_args": {"data": "synthetic"}},
+        path,
+    )
+    return path
