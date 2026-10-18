@@ -28,6 +28,7 @@
 | [022](022-msrs-day-detector-training.md) | 2026-10-07 | msrs-day V and T `yolo11s` training behind record 021: six 100-epoch runs, visible and thermal manifests, seeds 1–3 | MSRS-PASSIVE-GATE-06 | Windows server, 2× A100 | a 100-epoch `yolo11s` on msrs-day costs 0.20–0.24 h; `best.pt` (epochs 88–100) is at most +0.008 mAP50 over epoch 100 | F162, F163, F164 |
 | [023](023-msrs-day-dose-probe.md) | 2026-10-07 | msrs-day dose probe: one 25-epoch pix2pix loop run at `grad_scale` 0.15, seed 0, solo, read by `loss_share.py` | MSRS-DAY-CAMPAIGN-01 | Windows server, 1× A100 (`cuda:0`) | detection share 17.4 / 26.6 / 32.0% — stage 3 2.0 points over the band, inside the single-run noise floor | F165, F166, F167 |
 | [024](024-msrs-day-twelve-run-cell.md) | 2026-10-15 | msrs-day twelve-run cell: pix2pix control vs the λ ramp at `grad_scale` 0.15, six paired seeds on all 536 pairs, two-up on both cards; C2 under the reference judge; read through `campaign_report.py --campaign msrs-day` | MSRS-DAY-CAMPAIGN-01 | VSIBMEOT05, 2× A100 (two-up) | 2-class (car_stop, color_cone) mAP50 loop − control +0.1672 (p = .031), but the loop's 0.3592 sits 0.2036 below the thermal-trained T = 0.5628 | F168, F169, F170, F171, F172, F173, F174, F175, F176 |
+| [025](025-msrs-day-budget-sweep.md) | 2026-10-15 | msrs-day annotation budget sweep, pass 1: direct-thermal `yolo11s` (A) at N ∈ {25, 50, 100, 200, 536}, three seeds, against the reference judge's zero-annotation anchors A0 / C / D at n = 3, scored on car_stop and color_cone | MSRS-BUDGET-SWEEP-02 | VSIBMEOT05, 1× A100 (`device=0`) | a thermal-trained detector needs ≈173 labelled images (bracket 100–200, A ± 1 sd [143, 203]) to match the loop's zero-label 2-class 0.3649 | F177, F178, F179, F180 |
 
 ## Findings
 
@@ -113,14 +114,14 @@
 | F78 | Turbo loss-space figures are weak at n = 3: resumed stages pool stumps, only stage 2 is clean in both arms, and control `loss_gan` spans 1.55–4.42 across seeds | 010 | open | |
 | F79 | The resume audit is balanced: ~2–3 degraded endpoint epochs on two control runs vs ~3 on one loop run, opposite pairs — M2a's caveat closed; `AdamW` now checkpointed (e210b13) | 010 | open | acts on F68 |
 | F80 | Reading (a) partially replicates: loop/control sd 0.71 / 0.40 / 0.54 / 0.25× on mAP50, LPIPS, missed, consistency, but 1.07× on false-object — 2-dof, a direction | 010 | open | acts on F42, F52 |
-| F81 | Annotation-free translation (C) is worth ≈150 annotated thermal images, interval [114, 185]; spending them inside the loop (D) raises it to ≈214 | 011 | open | |
+| F81 | Annotation-free translation (C) is worth ≈150 annotated thermal images, interval [114, 185]; spending them inside the loop (D) raises it to ≈214 | 011 | open | F178, F179 |
 | F82 | Direct thermal wins at full annotation (0.9300 vs C 0.7975, D 0.8487): criterion 1 is measured, not met — +0.642 at N = 0, −0.133 at N = 600 | 011 | open | |
 | F83 | Translate-then-fine-tune (B) loses to thermal at every N ≥ 50, 3/3 seeds, by +0.032 to +0.059; translation's value is entirely annotation-free transfer | 011 | open | |
 | F84 | N = 10 is degenerate: both trained arms fall below A0's 0.155 floor at precision ≈0.01 — never read as "what 10 images buy" | 011 | open | |
 | F85 | A's sd collapses ±0.082 → ±0.010 from N = 50 to 600; n = 3 floors p at 0.25, so the curve reports sign consistency (3/3 at N ≥ 50), never significance | 011 | open | |
 | F86 | A0's 0.1552 reproduces the clean-judge thermal floor to four decimals, and C / D land on its λ=0 / stage-3 rows — nothing drifted between campaigns | 011 | open | acts on F10 |
 | F87 | D − C at n = 6 reproduces E3's +0.0512 (6/6, p = .031) to every digit — the same computation, a reproduction never counted as second evidence | 011 | open | acts on F35 |
-| F88 | The crossover's width is C's translator-seed spread, not A's resolution: n = 3 → 6 nearly halved C's sem and narrowed [111, 214] to [114, 185]; infilling A not worth it | 011 | open | |
+| F88 | The crossover's width is C's translator-seed spread, not A's resolution: n = 3 → 6 nearly halved C's sem and narrowed [111, 214] to [114, 185]; infilling A not worth it | 011 | open | F178 |
 | F89 | A pix2pix stage is not a constant: interval medians 2.40 / 2.83 / 3.37 h, ~+20% a stage, ±8% within a boundary; stage 0 ≈ 1.79 h | 012 | confirmed | F128, F129, F145 |
 | F90 | A 4-stage pix2pix run costs 10.18 h control / 10.75 h loop (coupling +0.57 h, +6.8%); the twelve-run cell is ~126 GPU-h, and the parts predict 62.8 h of a 63.0 h observed span | 012 | open | F126, F128 |
 | F91 | "~6 h per 4-stage run" was low by 1.7× and "~72 GPU-h" by 1.75×; a full-corpus FLIR cell is ~870 GPU-h, not ~496 — the 600-pair matched cell holds | 012 | open | |
@@ -201,7 +202,7 @@
 | F166 | Probe-to-campaign stage-3 share has moved ×0.88 (pix2pix, F30→F38) and ×0.53 (turbo, F56→F77): always down, so 32.0% bounds msrs-day from above; ~28% on the pix2pix precedent, a projection | 023 | refuted | F175 |
 | F167 | A solo msrs-day loop run prices at ~6.2 h (5.55 h training + 0.66 h boundaries), about two thirds of FLIR's realised ~9.7 h; the twelve-run floor is ~70 GPU-h | 023 | superseded | F176 |
 | F168 | 2-class (car_stop, color_cone) mAP50 loop − control +0.1672, p = .031 (the n = 6 floor), CI [+.158, +.177], 20× a stage-0 null of −0.0083 that held; every loop seed beats every control seed | 024 | open | acts on F35, F136 |
-| F169 | The passive bar is not met: the loop's 0.3592 sits 0.2036 below T = 0.5628 (best seed 0.3815); 40% of V − J vs T's 66% — the zero-label route only, 6.8× the raw-thermal floor | 024 | open | acts on F137, F161 |
+| F169 | The passive bar is not met: the loop's 0.3592 sits 0.2036 below T = 0.5628 (best seed 0.3815); 40% of V − J vs T's 66% — the zero-label route only, 6.8× the raw-thermal floor | 024 | open | acts on F137, F161; F178 |
 | F170 | The gain is not passive-specific: the loop recovers 64% / 54% of T − J on car_stop / color_cone vs 91 / 69 / 74% on car / person / bike, and is below T on every class | 024 | open | acts on F160 |
 | F171 | C2 favours the loop on all three rates (p = .031 each; false −0.0867, missed −0.1440, consistency +0.1463), worst loop beating best control; still 33% false, 43% missed | 024 | open | acts on F143 |
 | F172 | No λ fidelity cost on LPIPS (p = .94), FID (p = .0625) or PSNR (p = .125); SSIM −0.0212 (p = .031) with a null trajectory; every stage-0 fidelity null held | 024 | open | acts on F141 |
@@ -209,3 +210,7 @@
 | F174 | Seed 2 degrades at stage 0 in both arms (`loop-s2` 0.0005, `control-s2` 0.0704) and recovers; at stage 3 the control is tighter (sd 0.0102 vs 0.0182), unlike F139 and F42 | 024 | open | acts on F42, F139, F140 |
 | F175 | Realised share 13.4 / 16.7 / 18.5%, under the band: ×0.58 from the probe at stage 3 (turbo-like), refuting the ~28% projection; the 32.0% bound held; beside custom 19.8% and FLIR 21.1% | 024 | open | acts on F38, F144, F165, F166 |
 | F176 | The cell cost 101.6 GPU-h, 7% over the 70–95 prediction, 1.45× the floor; two-up ×1.14 at stage 0, growth ×2.01 in both arms; loop +6.0% a run over control | 024 | open | acts on F126, F145, F146, F167 |
+| F177 | The sweep reproduces its anchors: A0 = J s1 to every printed digit, C / D = record 024's stage-3 rows to six decimals, A at N = 536 2-class 0.5493 vs T 0.5628 | 025 | open | |
+| F178 | On the passive classes a thermal-trained detector needs ≈173 labels (bracket 100–200; A ± 1 sd [143, 203]) to match the loop's 0.3649; the width is A's spread, not the flat line's (D ± 1 sd [172, 174]) | 025 | open | acts on F81, F88, F169 |
+| F179 | Annotation-free translation without the loop (C, 0.1888) is worth ≈48 labelled thermal images on the passive classes, [43, 59]; the loop turns 9% of the split into 32% | 025 | open | acts on F81 |
+| F180 | Every draw held both passive classes down to N = 25 (fewest 15 car_stop, 5 color_cone); the 5-cone draw scored 0.0007 color_cone AP, most of N = 25's sd | 025 | open | |
