@@ -37,7 +37,9 @@ here, never a status.
   0.2036 below a thermal-trained detector on the two passive classes, and below it on every
   class (F169, F170). The within-cell dose ladder is nearly flat (record 024: 0.3243 at λ 1,
   0.3592 at λ 3), so no further dose or backbone run is planned to chase it. It is reported as
-  part of C2's headroom map, not pursued.
+  part of C2's headroom map, not pursued. Its price on C2's annotation-budget axis is measured:
+  a thermal-trained detector needs ≈173 labelled images, bracket 100–200, to match the loop on
+  the passive classes (F178), and ≈48 to match translation without it (F179).
 - **Causality — met on the custom set.** E3 at the calibrated dose (F35), replicated on turbo
   (F72); the earlier null was dose-limited, not a mechanism result (F25).
 - **Stability — met for pix2pix.** F35, F136 and F168 are sign-flip tested over six paired seeds;
@@ -112,6 +114,9 @@ locates its seam.
 
 `TASKS.md:3899-3913`. The sweep is record [011](experiments/011-e8-annotation-sweep.md); this is
 the one decision it left open. The public-dataset cell it waited on is E9, records 012–016.
+msrs-day has its own budget curve, record [025](experiments/025-msrs-day-budget-sweep.md): the
+loop is worth ≈173 of 536 labelled thermal images there, two-class and all-class alike (F178),
+against ≈214 of 600 all-class on the custom set (F81).
 
 - [ ] **Deferred: `RESEARCH_FINDINGS.md` §10 criterion 1 is not edited yet.** E8 makes the
       margin *measured and conditional* (+0.650 at `N`=0, −0.125 at `N`=600) rather than
