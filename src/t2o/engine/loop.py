@@ -71,7 +71,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,22 @@ from t2o.tracking import RunTracker
 logger = logging.getLogger(__name__)
 
 METRICS_FILENAME = "metrics.json"
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeScores:
+    """One extra reference detector's post-hoc scores on a stage's export.
+
+    A judge is a second *reference* detector under invariant 7 -- never trained on project
+    outputs, only scoring zero-shot -- from a family other than the yolo11s reference behind
+    `StageResult.zero_shot` and `.faithfulness`. Its scores live beside those, never over them,
+    so the findings already built on the yolo11s numbers keep their inputs.
+    """
+
+    # None means "this judge has not run that pass yet", so it is omitted from the file
+    # rather than written as null -- the same reason `StageResult.faithfulness` is.
+    zero_shot: TaskMetrics | None = None
+    faithfulness: FaithfulnessMetrics | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +135,9 @@ class StageResult:
     # StageResult from disk and `_write_metrics` writes them all back, so a key with no field
     # to land in would be silently dropped by the next resumed stage.
     faithfulness: FaithfulnessMetrics | None = None
+    # Out-of-family judges' scores, keyed by judge name (`record_judge` below). Never filled by
+    # `run_loop`, and a field for the same resume reason as `faithfulness`.
+    judges: dict[str, JudgeScores] = field(default_factory=dict)
 
 
 def run_loop(
@@ -336,6 +356,13 @@ def _stage_result_to_json(result: StageResult) -> dict[str, Any]:
     # distinction).
     if data["faithfulness"] is None:
         del data["faithfulness"]
+    # Same reasoning, one level down: no judge yet, or a judge missing one of its two passes.
+    data["judges"] = {
+        name: {key: value for key, value in scores.items() if value is not None}
+        for name, scores in data["judges"].items()
+    }
+    if not data["judges"]:
+        del data["judges"]
     return data
 
 
@@ -354,6 +381,7 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
     zero_shot = data.get("zero_shot")
     fidelity = data.get("fidelity")
     faithfulness = data.get("faithfulness")
+    judges = data.get("judges", {})
     return StageResult(
         stage=data["stage"],
         task_weight=data["task_weight"],
@@ -363,6 +391,16 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
         else None,
         zero_shot=TaskMetrics(**zero_shot) if zero_shot is not None else None,
         fidelity=FidelityMetrics(**fidelity) if fidelity is not None else None,
+        faithfulness=FaithfulnessMetrics(**faithfulness) if faithfulness is not None else None,
+        judges={name: _judge_scores_from_json(scores) for name, scores in judges.items()},
+    )
+
+
+def _judge_scores_from_json(data: dict[str, Any]) -> JudgeScores:
+    zero_shot = data.get("zero_shot")
+    faithfulness = data.get("faithfulness")
+    return JudgeScores(
+        zero_shot=TaskMetrics(**zero_shot) if zero_shot is not None else None,
         faithfulness=FaithfulnessMetrics(**faithfulness) if faithfulness is not None else None,
     )
 
@@ -381,6 +419,53 @@ def record_faithfulness(run_dir: Path, stage: int, metrics: FaithfulnessMetrics)
     appended: a rate filed under a stage the run never trained would be invisible in the file
     and wrong in the table.
     """
+
+    def update(entry: dict[str, Any]) -> None:
+        entry["faithfulness"] = asdict(metrics)
+
+    _update_stage_entry(run_dir, stage, update)
+    logger.info("recorded faithfulness into %s stage %d", run_dir / METRICS_FILENAME, stage)
+
+
+def record_judge(
+    run_dir: Path,
+    stage: int,
+    name: str,
+    *,
+    zero_shot: TaskMetrics | None = None,
+    faithfulness: FaithfulnessMetrics | None = None,
+) -> None:
+    """Fold one out-of-family judge's scores into ``judges.<name>`` of a stage entry.
+
+    The zero-shot and faithfulness passes are separate commands, so this merges: a pass left
+    as None keeps whatever that judge already has. The yolo11s ``zero_shot``/``faithfulness``
+    keys and every other judge are never touched. Stage lookup and its refusals are
+    ``record_faithfulness``'s, for the same reasons.
+
+    A dotted ``name`` is refused because ``t2o aggregate`` addresses metrics by dotted path:
+    ``judges.rtdetr.l.zero_shot.map50`` would point at a judge called ``rtdetr`` and silently
+    find nothing.
+    """
+    if not name or "." in name:
+        raise ValueError(f"judge name {name!r} must be non-empty and contain no '.'")
+    if zero_shot is None and faithfulness is None:
+        raise ValueError(f"record_judge({name!r}) was given no scores to record")
+
+    def update(entry: dict[str, Any]) -> None:
+        scores = entry.setdefault("judges", {}).setdefault(name, {})
+        if zero_shot is not None:
+            scores["zero_shot"] = asdict(zero_shot)
+        if faithfulness is not None:
+            scores["faithfulness"] = asdict(faithfulness)
+
+    _update_stage_entry(run_dir, stage, update)
+    logger.info("recorded judge %s into %s stage %d", name, run_dir / METRICS_FILENAME, stage)
+
+
+def _update_stage_entry(
+    run_dir: Path, stage: int, update: Callable[[dict[str, Any]], None]
+) -> None:
+    """Apply ``update`` to one stage's raw ``metrics.json`` entry and write the file back."""
     path = run_dir / METRICS_FILENAME
     if not path.is_file():
         raise FileNotFoundError(f"{run_dir} has no {METRICS_FILENAME}; it is not a finished run")
@@ -388,11 +473,10 @@ def record_faithfulness(run_dir: Path, stage: int, metrics: FaithfulnessMetrics)
     entries = json.loads(path.read_text())
     for entry in entries:
         if int(entry["stage"]) == stage:
-            entry["faithfulness"] = asdict(metrics)
+            update(entry)
             break
     else:
         recorded = ", ".join(str(entry["stage"]) for entry in entries) or "none"
         raise ValueError(f"{path} records no stage {stage} (has: {recorded})")
 
     path.write_text(json.dumps(entries, indent=2))
-    logger.info("recorded faithfulness into %s stage %d", path, stage)
