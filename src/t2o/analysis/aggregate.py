@@ -31,7 +31,7 @@ import itertools
 import json
 import logging
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -376,8 +376,8 @@ def add_primary_mean(runs: Sequence[RunRecord], primary: Sequence[str]) -> None:
     """
     for run in runs:
         for stage in run.stages:
-            for section in stage.values():
-                if not isinstance(section, dict) or "per_class_ap50" not in section:
+            for section in _sections(stage):
+                if "per_class_ap50" not in section:
                     continue
                 try:
                     section[PRIMARY_AP50] = primary_mean(section["per_class_ap50"], primary)
@@ -389,6 +389,22 @@ def add_primary_mean(runs: Sequence[RunRecord], primary: Sequence[str]) -> None:
                 section[PRIMARY_N_CLASSES] = float(
                     sum(1 for name in primary if name in section["per_class_ap50"])
                 )
+
+
+def _sections(stage: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Every metric section of a stage record: its own, then each judge's under ``judges``.
+
+    The judges are one level deeper (``judges.<name>.zero_shot``), so a scan of the top level
+    alone would give a judge no primary mean -- and `metric_value` would then report the key
+    as missing rather than say why.
+    """
+    for section in stage.values():
+        if isinstance(section, dict):
+            yield section
+    for judge in stage.get("judges", {}).values():
+        for section in judge.values():
+            if isinstance(section, dict):
+                yield section
 
 
 def common_stages(runs: Sequence[RunRecord]) -> tuple[int, ...]:

@@ -718,3 +718,46 @@ def test_an_unscorable_stage_names_the_run_and_the_stage(tmp_path: Path) -> None
 
     with pytest.raises(AggregationError, match=r"stage 1: none of the primary classes"):
         add_primary_mean([run], ["Switch", "Pole"])
+
+
+def _add_judge(run_dir: Path, name: str, per_class_ap50: dict[str, float]) -> None:
+    """File a judge's zero-shot pass into every stage, where `record_judge` would put it."""
+    path = run_dir / "metrics.json"
+    stages = json.loads(path.read_text())
+    for stage in stages:
+        stage["judges"] = {
+            name: {
+                "zero_shot": {
+                    "precision": 0.8,
+                    "recall": 0.8,
+                    "map50": 0.5,
+                    "map50_95": 0.3,
+                    "per_class_ap50": per_class_ap50,
+                    "per_class_ap50_95": {key: ap * 0.7 for key, ap in per_class_ap50.items()},
+                }
+            }
+        }
+    path.write_text(json.dumps(stages))
+
+
+def test_the_primary_mean_reaches_a_judge_section(tmp_path: Path) -> None:
+    """A judge sits one level below the stage's own sections, and must not be skipped there."""
+    paths = _campaign(tmp_path, [0, 1, 2], [0.80, 0.81, 0.82])
+    for path in paths:
+        _add_judge(path, "rtdetr", {"Switch": 0.4, "Pole": 0.8, "dog": 0.1})
+
+    report = aggregate(
+        paths, metrics=["judges.rtdetr.zero_shot.primary_map50"], primary_classes=["Switch", "Pole"]
+    )
+
+    # (0.4 + 0.8) / 2, with dog left out: the judge's mean is over the primaries only.
+    assert report.summaries
+    assert all(summary.mean == pytest.approx(0.6) for summary in report.summaries)
+
+
+def test_a_judge_section_without_a_primary_class_still_raises(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "r", 0, [0.0, 1.0], [0.70, 0.80])
+    _add_judge(run_dir, "rtdetr", {"dog": 0.1})
+
+    with pytest.raises(AggregationError, match=r"stage 0: none of the primary classes"):
+        add_primary_mean([load_run(run_dir)], ["Switch", "Pole"])
