@@ -406,6 +406,45 @@ def _wall_clock(runs: Sequence[RunRecord], probe: Mapping[Arm, float] | None) ->
         )
 
 
+def _find(record: dict[str, Any], path: str) -> dict[str, Any]:
+    """The dict at a dotted path in one stage record, or an empty one where any step is absent."""
+    node: Any = record
+    for key in path.split("."):
+        node = node.get(key) if isinstance(node, dict) else None
+    return node if isinstance(node, dict) else {}
+
+
+def _zero_shot_metrics(
+    runs: Sequence[RunRecord], section: str, primary: Sequence[str]
+) -> list[str]:
+    """One detector's zero-shot rows: the primary headline first, then every class it scored."""
+    classes = sorted(
+        {
+            name
+            for run in runs
+            for record in run.stages
+            for name in _find(record, section).get("per_class_ap50", {})
+        }
+    )
+    headline = [f"{section}.primary_map50", f"{section}.primary_n_classes"] if primary else []
+    return [
+        *headline,
+        f"{section}.map50",
+        f"{section}.map50_95",
+        f"{section}.precision",
+        f"{section}.recall",
+        *(f"{section}.per_class_ap50.{name}" for name in classes),
+    ]
+
+
+def _faithfulness_metrics(section: str) -> list[str]:
+    return [
+        f"{section}.false_object_rate",
+        f"{section}.missed_object_rate",
+        f"{section}.detection_consistency",
+    ]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -429,11 +468,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="derive the class-subset mAP headline over these classes, e.g. bicycle car person",
     )
     parser.add_argument("--data", type=Path, help="the dataset data.yaml, for the provenance block")
+    parser.add_argument(
+        "--judge",
+        help="also report this out-of-family judge's zero-shot and faithfulness rows, as filed "
+        "by `t2o evaluate`/`t2o faithfulness --write-back --judge <name>`, e.g. rtdetr",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     campaign = CAMPAIGNS[args.campaign]
     # Bare format onto stdout, before anything logs: `t2o aggregate`'s and `loss_share`'s own
     # `basicConfig` calls then no-op, and their tables arrive as report body rather than as
@@ -446,30 +491,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     if primary:
         add_primary_mean(runs, primary)
 
-    classes = sorted(
-        {
-            name
-            for run in runs
-            for record in run.stages
-            for name in (record.get("zero_shot") or {}).get("per_class_ap50", {})
-        }
-    )
-    headline = ["zero_shot.primary_map50", "zero_shot.primary_n_classes"] if primary else []
+    # A judge's scores sit beside yolo11s's own, never in place of them: every finding so far
+    # reads the top-level keys, and the judge is the out-of-family read of the same exports.
+    judge = f"judges.{args.judge}" if args.judge else None
+    records = [record for run in runs for record in run.stages]
+    if judge is not None and not any(_find(record, judge) for record in records):
+        found = sorted({name for record in records for name in _find(record, "judges")})
+        # Blank columns would read as "not scored yet", which hides a mistyped name.
+        parser.error(
+            f"no run records judge '{args.judge}'; judges found: {', '.join(found) or 'none'}"
+        )
+
     metrics = [
-        *headline,
-        "zero_shot.map50",
-        "zero_shot.map50_95",
-        "zero_shot.precision",
-        "zero_shot.recall",
-        *(f"zero_shot.per_class_ap50.{name}" for name in classes),
+        *_zero_shot_metrics(runs, "zero_shot", primary),
+        *(_zero_shot_metrics(runs, f"{judge}.zero_shot", primary) if judge else ()),
         "fidelity.lpips",
         "fidelity.fid",
         "fidelity.psnr",
         "fidelity.ssim",
         "detector.map50",
-        "faithfulness.false_object_rate",
-        "faithfulness.missed_object_rate",
-        "faithfulness.detection_consistency",
+        *_faithfulness_metrics("faithfulness"),
+        *(_faithfulness_metrics(f"{judge}.faithfulness") if judge else ()),
     ]
 
     print(f"CAMPAIGN REPORT -- {', '.join(args.runs)}")
