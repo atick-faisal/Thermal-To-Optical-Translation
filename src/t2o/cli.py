@@ -106,6 +106,15 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--imgsz", type=int, default=640)
     evaluate.add_argument("--batch", type=int, default=16)
     evaluate.add_argument("--device", help="null/auto, 'cpu', '0', or '0,1'")
+    evaluate.add_argument(
+        "--write-back",
+        action="store_true",
+        help="also record the score into the scored run's metrics.json under --judge, making "
+        "it reachable as `t2o aggregate --metric judges.<name>.zero_shot.map50`. The run "
+        "directory and stage are read off --data, which must therefore be the export's own "
+        "data.yaml in place under <run_dir>/stage<N>/",
+    )
+    _add_judge_argument(evaluate)
 
     fidelity = subparsers.add_parser(
         "fidelity",
@@ -164,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
         "directory and stage are read off --translated, which must therefore be the export "
         "in place under <run_dir>/stage<N>/",
     )
+    _add_judge_argument(faithfulness)
 
     train_detector = subparsers.add_parser(
         "train-detector",
@@ -239,6 +249,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_judge_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--judge",
+        help="file a --write-back under judges.<name> instead of the yolo11s reference's keys, "
+        "e.g. `rtdetr` for an out-of-family judge's --weights. No '.' in the name",
+    )
+
+
+def _check_write_back(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse a --judge/--write-back pairing that would lose or overwrite scores.
+
+    Checked before any scoring starts, because a refusal after a full-split pass on the
+    server wastes the pass.
+    """
+    if getattr(args, "judge", None) is not None and not args.write_back:
+        parser.error("--judge only says where --write-back files the scores; add --write-back")
+    # `zero_shot` is the gate metric run_loop scored with the yolo11s reference, and every
+    # finding on it reads that key -- a re-score must land beside it, never over it.
+    if args.command == "evaluate" and args.write_back and args.judge is None:
+        parser.error("evaluate --write-back needs --judge; the run's zero_shot is never rewritten")
+
+
 def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path, help="YAML config; flags below override it")
     # Resolved by engine.trainer.resolve_device -- a single torch.device, never a
@@ -305,7 +337,9 @@ def config_from_args(args: argparse.Namespace) -> Config:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _check_write_back(parser, args)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format=LOG_FORMAT,
@@ -431,6 +465,8 @@ def _run_export(args: argparse.Namespace, config: Config) -> int:
 def _run_evaluate(args: argparse.Namespace) -> int:
     from t2o.metrics.task import evaluate_detector
 
+    # Resolved before scoring, so a path outside a run fails in a second, not after the pass.
+    target = _export_run_and_stage(Path(args.data)) if args.write_back else None
     metrics = evaluate_detector(
         args.weights,
         args.data,
@@ -440,6 +476,12 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     )
     for name, ap50 in sorted(metrics.per_class_ap50.items()):
         logger.info("  %-20s AP50=%.4f", name, ap50)
+
+    if target is not None:
+        from t2o.engine.loop import record_judge
+
+        run_dir, stage = target
+        record_judge(run_dir, stage, args.judge, zero_shot=metrics)
     return 0
 
 
@@ -486,6 +528,8 @@ def _run_faithfulness(args: argparse.Namespace) -> int:
     if (translated / args.split / "images").is_dir():
         translated = translated / args.split / "images"
 
+    # Same fail-before-scoring order as `_run_evaluate`.
+    target = _export_run_and_stage(Path(args.translated)) if args.write_back else None
     metrics = evaluate_faithfulness(
         translated,
         visible,
@@ -501,11 +545,14 @@ def _run_faithfulness(args: argparse.Namespace) -> int:
     logger.info("  missed-object rate      %.4f  (LOWER better)", metrics.missed_object_rate)
     logger.info("  detection-consistency   %.4f  (higher better)", metrics.detection_consistency)
 
-    if args.write_back:
-        from t2o.engine.loop import record_faithfulness
+    if target is not None:
+        from t2o.engine.loop import record_faithfulness, record_judge
 
-        run_dir, stage = _export_run_and_stage(Path(args.translated))
-        record_faithfulness(run_dir, stage, metrics)
+        run_dir, stage = target
+        if args.judge is None:
+            record_faithfulness(run_dir, stage, metrics)
+        else:
+            record_judge(run_dir, stage, args.judge, faithfulness=metrics)
     return 0
 
 
