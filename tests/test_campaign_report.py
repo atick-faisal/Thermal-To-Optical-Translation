@@ -10,6 +10,7 @@ all; it cost ~80 GPU-hours.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -17,6 +18,8 @@ import pytest
 from scripts.campaign_report import main
 
 FLIR_CLASSES = {"bicycle": 0.30, "car": 0.60, "person": 0.90, "dog": 0.02}
+# Different from yolo11s's on purpose, so a judge cell can only have come from the judge.
+JUDGE_CLASSES = {"bicycle": 0.20, "car": 0.50, "person": 0.80, "dog": 0.05}
 
 
 def _write_run(
@@ -28,6 +31,7 @@ def _write_run(
     *,
     extra_config: str = "",
     scored_stages: tuple[int, ...] = (3,),
+    judged_stages: tuple[int, ...] = (),
 ) -> Path:
     run_dir = root / name
     run_dir.mkdir(parents=True)
@@ -72,6 +76,26 @@ def _write_run(
                 "missed_object_rate": 0.19,
                 "detection_consistency": 0.77,
             }
+        # What `--write-back --judge rtdetr` files: stage 3 only, since only the stage-3
+        # exports are re-scored.
+        if index in judged_stages:
+            record["judges"] = {
+                "rtdetr": {
+                    "zero_shot": {
+                        "precision": 0.7,
+                        "recall": 0.7,
+                        "map50": value - 0.1,
+                        "map50_95": value * 0.5,
+                        "per_class_ap50": dict(JUDGE_CLASSES),
+                        "per_class_ap50_95": dict(JUDGE_CLASSES),
+                    },
+                    "faithfulness": {
+                        "false_object_rate": 0.11,
+                        "missed_object_rate": 0.22,
+                        "detection_consistency": 0.66,
+                    },
+                }
+            }
         stages.append(record)
     (run_dir / "metrics.json").write_text(json.dumps(stages))
     (run_dir / "config.yaml").write_text(
@@ -83,16 +107,24 @@ def _write_run(
     return run_dir
 
 
-def _campaign(root: Path, **kwargs: object) -> None:
+def _campaign(root: Path, *, judged_stages: tuple[int, ...] = (), **kwargs: object) -> None:
     """Twelve runs, six paired seeds -- the real shape of an E3 cell."""
     for seed in range(6):
-        _write_run(root, f"e3f-control-s{seed}", seed, [0.0] * 4, [0.50, 0.51, 0.52, 0.53])
+        _write_run(
+            root,
+            f"e3f-control-s{seed}",
+            seed,
+            [0.0] * 4,
+            [0.50, 0.51, 0.52, 0.53],
+            judged_stages=judged_stages,
+        )
         _write_run(
             root,
             f"e3f-loop-s{seed}",
             seed,
             [0.0, 1.0, 2.0, 3.0],
             [0.50, 0.54, 0.56, 0.58],
+            judged_stages=judged_stages,
             **kwargs,  # type: ignore[arg-type]
         )
 
@@ -249,6 +281,66 @@ def test_msrs_day_prints_its_own_pre_registration_not_flirs(
     # FLIR's solo probe priced FLIR's epochs; a ratio against it here would be noise.
     assert "no solo probe recorded for this campaign" in out
     assert "solo  43.524" not in out
+
+
+def test_a_judge_is_reported_beside_the_reference(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The Transfer test is the judge's paired block; the yolo11s rows must survive beside it."""
+    _campaign(tmp_path, judged_stages=(3,))
+    caplog.set_level(logging.INFO)
+
+    argv = ["--campaign", "flir", "--runs", f"{tmp_path}/e3f-*", "--judge", "rtdetr"]
+    assert main([*argv, "--primary-classes", "bicycle", "car", "person"]) == 0
+
+    out = capsys.readouterr().out
+    header = next(line for line in out.splitlines() if line.startswith("run,seed,arm,"))
+    columns = header.split(",")
+    judge = "judges.rtdetr"
+    # Each judge block follows the yolo11s block it re-scores.
+    assert columns.index(f"{judge}.zero_shot.primary_map50") == (
+        columns.index("zero_shot.per_class_ap50.person") + 1
+    )
+    assert columns.index(f"{judge}.faithfulness.false_object_rate") == (
+        columns.index("faithfulness.detection_consistency") + 1
+    )
+
+    rows = [line.split(",") for line in out.splitlines() if line.startswith("e3f-loop-s0,")]
+    judge_primary = columns.index(f"{judge}.zero_shot.primary_map50")
+    # Absent at stage 0, where nothing was re-scored: a blank cell, not a null.
+    assert rows[0][judge_primary] == ""
+    # (0.20 + 0.50 + 0.80) / 3 at stage 3 -- the judge's own classes, dog left out.
+    assert rows[3][judge_primary] == "0.500000"
+    assert rows[3][columns.index("zero_shot.primary_map50")] == "0.600000"
+
+    # `aggregate`'s own tables, not the `$ t2o aggregate` line echoing the request. They log,
+    # and under pytest the root logger is caplog's, so `basicConfig` never routes them to stdout.
+    lines = "\n".join(caplog.messages).splitlines()
+    summarised = {line.split()[0] for line in lines if line.split()}
+    assert f"{judge}.zero_shot.primary_map50" in summarised
+    assert f"{judge}.faithfulness.false_object_rate" in summarised
+
+
+def test_no_judge_rows_unless_one_is_named(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _campaign(tmp_path, judged_stages=(3,))
+
+    assert main(["--campaign", "flir", "--runs", f"{tmp_path}/e3f-*"]) == 0
+
+    assert "judges." not in capsys.readouterr().out
+
+
+def test_a_judge_no_run_records_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A mistyped name would otherwise print as columns the re-scoring has not reached yet."""
+    _campaign(tmp_path, judged_stages=(3,))
+
+    with pytest.raises(SystemExit):
+        main(["--campaign", "flir", "--runs", f"{tmp_path}/e3f-*", "--judge", "rtdert"])
+
+    assert "judges found: rtdetr" in capsys.readouterr().err
 
 
 def test_the_campaign_must_be_named(tmp_path: Path) -> None:
