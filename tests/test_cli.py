@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from t2o.cli import (
 )
 from t2o.config import Config
 from t2o.metrics.faithfulness import FaithfulnessMetrics
+from t2o.metrics.task import TaskMetrics
 from t2o.translators import StubTranslator, build_translator
 
 
@@ -445,6 +447,150 @@ def test_write_back_records_the_rates_into_metrics_json(
     entries = json.loads((run_dir / "metrics.json").read_text())
     assert "faithfulness" not in entries[0]
     assert entries[1]["faithfulness"]["false_object_rate"] == pytest.approx(0.125)
+
+
+# --- --judge: an out-of-family judge's scores land beside the yolo11s keys -----------------
+
+
+def _stub_scoring(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Both scoring passes replaced by fixed numbers: the tests below pin the wiring only."""
+    monkeypatch.setattr(
+        "t2o.data.manifest.DatasetManifest.load",
+        classmethod(lambda cls, path: SimpleNamespace(val_images=tmp_path, pairing=None)),
+    )
+    monkeypatch.setattr(
+        "t2o.metrics.faithfulness.evaluate_faithfulness",
+        lambda *args, **kwargs: FaithfulnessMetrics(0.125, 0.25, 0.75),
+    )
+    monkeypatch.setattr(
+        "t2o.metrics.task.evaluate_detector",
+        lambda *args, **kwargs: TaskMetrics(0.5, 0.5, 0.375, 0.25, {"Switch": 0.375}, {}),
+    )
+
+
+def _evaluate_argv(
+    run_dir: Path, *extra: str, weights: Path | str = "w.pt", data: Path | str = "d.yaml"
+) -> list[str]:
+    """`data` is unused: evaluate's --data is the export's own data.yaml, under `run_dir`."""
+    export_yaml = run_dir / "stage3" / "translated" / "data.yaml"
+    return ["evaluate", "--weights", str(weights), "--data", str(export_yaml), *extra]
+
+
+def _faithfulness_argv(
+    run_dir: Path, *extra: str, weights: Path | str = "w.pt", data: Path | str = "d.yaml"
+) -> list[str]:
+    translated = run_dir / "stage3" / "translated"
+    return [
+        "faithfulness",
+        "--translated",
+        str(translated),
+        "--data",
+        str(data),
+        "--weights",
+        str(weights),
+        *extra,
+    ]
+
+
+def test_evaluate_write_back_records_the_judge_zero_shot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run and stage are read off `--data`, the export's own data.yaml in place."""
+    run_dir = _finished_run(tmp_path, [0, 3])
+    _stub_scoring(monkeypatch, tmp_path)
+
+    assert main(_evaluate_argv(run_dir, "--write-back", "--judge", "rtdetr")) == 0
+
+    entries = json.loads((run_dir / "metrics.json").read_text())
+    assert "judges" not in entries[0]
+    assert "zero_shot" not in entries[1]
+    assert entries[1]["judges"]["rtdetr"]["zero_shot"]["map50"] == pytest.approx(0.375)
+
+
+def test_faithfulness_judge_records_beside_the_reference_rates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With `--judge`, the yolo11s `faithfulness` key behind F49/F76/F143/F171 is untouched."""
+    run_dir = _finished_run(tmp_path, [0, 3])
+    _stub_scoring(monkeypatch, tmp_path)
+
+    assert main(_faithfulness_argv(run_dir, "--write-back", "--judge", "rtdetr")) == 0
+
+    entry = json.loads((run_dir / "metrics.json").read_text())[1]
+    assert "faithfulness" not in entry
+    assert entry["judges"]["rtdetr"]["faithfulness"]["false_object_rate"] == pytest.approx(0.125)
+
+
+def test_evaluate_write_back_without_a_judge_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused before scoring: the gate metric `zero_shot` must never be overwritten."""
+    run_dir = _finished_run(tmp_path, [0, 3])
+    before = (run_dir / "metrics.json").read_text()
+    monkeypatch.setattr("t2o.metrics.task.evaluate_detector", _must_not_score)
+
+    with pytest.raises(SystemExit):
+        main(_evaluate_argv(run_dir, "--write-back"))
+
+    assert "needs --judge" in capsys.readouterr().err
+    assert (run_dir / "metrics.json").read_text() == before
+
+
+@pytest.mark.parametrize("argv", [_evaluate_argv, _faithfulness_argv])
+def test_judge_without_write_back_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], argv: Callable[..., list[str]]
+) -> None:
+    """Without `--write-back` a judge name would be silently ignored and the scores lost."""
+    with pytest.raises(SystemExit):
+        main(argv(_finished_run(tmp_path, [3]), "--judge", "rtdetr"))
+
+    assert "add --write-back" in capsys.readouterr().err
+
+
+def test_evaluate_write_back_refuses_a_data_yaml_outside_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lookup runs before the scoring pass, so a wrong path costs no GPU time."""
+    monkeypatch.setattr("t2o.metrics.task.evaluate_detector", _must_not_score)
+
+    with pytest.raises(FileNotFoundError, match="cannot tell which run and stage"):
+        main(_evaluate_argv(tmp_path, "--write-back", "--judge", "rtdetr"))
+
+
+def _must_not_score(*args: object, **kwargs: object) -> None:
+    raise AssertionError("scored before the write-back target was checked")
+
+
+@pytest.mark.slow
+def test_main_judge_passes_merge_into_one_entry(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """Both re-scoring passes, for real, on one export in place under a run.
+
+    conftest's yolo11n stands in for the judge -- the name is only a key -- so the scores are
+    arbitrary. What this pins is that the export `run_loop` writes is one `--write-back` can
+    find from both commands, and that the second pass merges rather than replaces.
+    """
+    from t2o.engine.export import export_translated
+
+    run_dir = tmp_path / "runs" / "e3b-loop-s0"
+    config = Config.load(
+        overrides={
+            "data": {"manifest": str(data_yaml)},
+            "translator": {"backbone": "stub", "hidden_channels": 4},
+            "runtime": {"device": "cpu"},
+        }
+    )
+    export_translated(build_translator(config), config, run_dir / "stage3" / "translated")
+    (run_dir / "metrics.json").write_text(json.dumps([{"stage": 3, "task_weight": 1.0}]))
+    common = ["--write-back", "--judge", "rtdetr", "--imgsz", "64", "--device", "cpu"]
+    paths = {"weights": detector_weights, "data": data_yaml}
+
+    assert main(_evaluate_argv(run_dir, *common, **paths)) == 0
+    assert main(_faithfulness_argv(run_dir, *common, **paths)) == 0
+
+    judge = json.loads((run_dir / "metrics.json").read_text())[0]["judges"]["rtdetr"]
+    assert set(judge) == {"zero_shot", "faithfulness"}
 
 
 def test_faithfulness_write_back_is_off_by_default(tmp_path: Path) -> None:
