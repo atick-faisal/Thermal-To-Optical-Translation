@@ -25,12 +25,15 @@ import torch
 from t2o.config import Config
 from t2o.engine.loop import (
     METRICS_FILENAME,
+    JudgeScores,
     _load_existing_results,
     _resolve_reference_weights,
     record_faithfulness,
+    record_judge,
     run_loop,
 )
 from t2o.metrics.faithfulness import FaithfulnessMetrics
+from t2o.metrics.task import TaskMetrics
 from t2o.translators import StubTranslator, build_translator
 
 
@@ -407,6 +410,115 @@ def test_recorded_faithfulness_survives_a_resume(
     }
 
 
+# --- record_judge: out-of-family judges beside the yolo11s reference --------------------------
+
+
+def _stub_task_metrics() -> TaskMetrics:
+    return TaskMetrics(
+        precision=0.5,
+        recall=0.5,
+        map50=0.375,
+        map50_95=0.25,
+        per_class_ap50={"insulator": 0.375},
+        per_class_ap50_95={"insulator": 0.25},
+    )
+
+
+def _finished_run(data_yaml: Path, detector_weights: Path, run_dir: Path) -> None:
+    config = _config(data_yaml, detector_weights)
+    run_loop(config, build_translator(config), run_dir=run_dir, train_detector_stages=False)
+
+
+def test_record_judge_merges_into_one_judge_and_leaves_the_others_alone(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """Zero-shot and faithfulness are separate re-scoring passes, so the second must not erase
+    the first, and scoring one judge must not touch another judge already recorded.
+    """
+    run_dir = tmp_path / "run"
+    _finished_run(data_yaml, detector_weights, run_dir)
+
+    record_judge(run_dir, 1, "rtdetr", zero_shot=_stub_task_metrics())
+    record_judge(run_dir, 1, "other", faithfulness=_stub_rates())
+    record_judge(run_dir, 1, "rtdetr", faithfulness=_stub_rates())
+
+    entries = _metrics_json(run_dir)
+    assert "judges" not in entries[0]
+    judges = entries[1]["judges"]
+    assert isinstance(judges, dict)
+    assert set(judges) == {"rtdetr", "other"}
+    assert judges["rtdetr"]["zero_shot"]["map50"] == 0.375
+    assert judges["rtdetr"]["faithfulness"]["false_object_rate"] == 0.125
+    assert judges["other"] == {
+        "faithfulness": {
+            "false_object_rate": 0.125,
+            "missed_object_rate": 0.25,
+            "detection_consistency": 0.75,
+        }
+    }
+
+
+def test_record_judge_leaves_the_yolo11s_keys_byte_identical(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """The findings already built on the yolo11s reference read `zero_shot` and
+    `faithfulness`; a judge pass must add beside them and change nothing else in the file.
+    """
+    run_dir = tmp_path / "run"
+    _finished_run(data_yaml, detector_weights, run_dir)
+    record_faithfulness(run_dir, 1, _stub_rates())
+    before = (run_dir / METRICS_FILENAME).read_text()
+
+    record_judge(run_dir, 1, "rtdetr", zero_shot=_stub_task_metrics(), faithfulness=_stub_rates())
+
+    entries = _metrics_json(run_dir)
+    for entry in entries:
+        entry.pop("judges", None)
+    assert json.dumps(entries, indent=2) == before
+
+
+def test_record_judge_refuses_a_stage_the_run_never_trained(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    run_dir = tmp_path / "run"
+    _finished_run(data_yaml, detector_weights, run_dir)
+
+    with pytest.raises(ValueError, match="records no stage 3"):
+        record_judge(run_dir, 3, "rtdetr", zero_shot=_stub_task_metrics())
+
+
+@pytest.mark.parametrize("name", ["rtdetr.l", ""])
+def test_record_judge_refuses_a_name_aggregate_cannot_address(tmp_path: Path, name: str) -> None:
+    """Checked before the file is even opened: a bad name is wrong whatever the run holds."""
+    with pytest.raises(ValueError, match=r"contain no '\.'"):
+        record_judge(tmp_path, 0, name, zero_shot=_stub_task_metrics())
+
+
+def test_recorded_judge_scores_survive_a_resume(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """The `StageResult.judges` field's reason to exist, as for `faithfulness` above."""
+    run_dir = tmp_path / "run"
+    full_config = _config(data_yaml, detector_weights)
+    stage0_only_config = _config(data_yaml, detector_weights, task_weights=(0.0,))
+    translator = build_translator(full_config)
+
+    run_loop(
+        stage0_only_config, translator, run_dir=run_dir, train_detector_stages=False
+    )  # simulated crash point
+    record_judge(run_dir, 0, "rtdetr", zero_shot=_stub_task_metrics())
+    judged = _metrics_json(run_dir)[0]["judges"]
+    results = run_loop(
+        full_config, translator, run_dir=run_dir, train_detector_stages=False, resume=True
+    )
+
+    assert results[0].judges == {"rtdetr": JudgeScores(zero_shot=_stub_task_metrics())}
+    assert results[1].judges == {}
+    entries = _metrics_json(run_dir)
+    assert entries[0]["judges"] == judged
+    assert "judges" not in entries[1]
+
+
 def test_a_metrics_json_without_epoch_seconds_still_loads(tmp_path: Path) -> None:
     """Every run finished before `EpochStats.seconds` existed must still resume and aggregate.
 
@@ -432,3 +544,5 @@ def test_a_metrics_json_without_epoch_seconds_still_loads(tmp_path: Path) -> Non
 
     assert result.stage == 0
     assert result.epochs[0].seconds == 0.0
+    # Written before judges existed, and the same `.get` reasoning: no KeyError, no judges.
+    assert result.judges == {}
