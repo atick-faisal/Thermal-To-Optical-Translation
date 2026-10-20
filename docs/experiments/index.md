@@ -29,6 +29,7 @@
 | [023](023-msrs-day-dose-probe.md) | 2026-10-07 | msrs-day dose probe: one 25-epoch pix2pix loop run at `grad_scale` 0.15, seed 0, solo, read by `loss_share.py` | MSRS-DAY-CAMPAIGN-01 | Windows server, 1× A100 (`cuda:0`) | detection share 17.4 / 26.6 / 32.0% — stage 3 2.0 points over the band, inside the single-run noise floor | F165, F166, F167 |
 | [024](024-msrs-day-twelve-run-cell.md) | 2026-10-15 | msrs-day twelve-run cell: pix2pix control vs the λ ramp at `grad_scale` 0.15, six paired seeds on all 536 pairs, two-up on both cards; C2 under the reference judge; read through `campaign_report.py --campaign msrs-day` | MSRS-DAY-CAMPAIGN-01 | VSIBMEOT05, 2× A100 (two-up) | 2-class (car_stop, color_cone) mAP50 loop − control +0.1672 (p = .031), but the loop's 0.3592 sits 0.2036 below the thermal-trained T = 0.5628 | F168, F169, F170, F171, F172, F173, F174, F175, F176 |
 | [025](025-msrs-day-budget-sweep.md) | 2026-10-15 | msrs-day annotation budget sweep, pass 1: direct-thermal `yolo11s` (A) at N ∈ {25, 50, 100, 200, 536}, three seeds, against the reference judge's zero-annotation anchors A0 / C / D at n = 3, scored on car_stop and color_cone | MSRS-BUDGET-SWEEP-02 | VSIBMEOT05, 1× A100 (`device=0`) | a thermal-trained detector needs ≈173 labelled images (bracket 100–200, A ± 1 sd [143, 203]) to match the loop's zero-label 2-class 0.3649 | F177, F178, F179, F180 |
+| [026](026-out-of-family-rtdetr-judge.md) | 2026-10-19 | Out-of-family RT-DETR-l judge: one per dataset (FLIR, msrs-day, custom), trained on visible and gated at 90% of the yolo11s reference, then every E3 stage-3 export (e3b, e3t, e3f, e3md) re-scored for zero-shot mAP and C2 | OUT-OF-FAMILY-JUDGE-05 | VSIBMEOT05, 2× A100 | RT-DETR keeps 85–99% of the yolo11s stage-3 gain on all four cells: FLIR 3-class +0.3051, msrs-day 2-class +0.1451, e3b +0.0435 (p = .031 each), e3t +0.0304 (p = .25, the n = 3 floor) | F181, F182, F183, F184, F185, F186, F187, F188 |
 
 ## Findings
 
@@ -68,7 +69,7 @@
 | F32 | Two GPU runs at one seed do not reproduce, by design: the single-run loss-space floor is +3.4 / +3.6 / +11.8 / +7.1% (l2 / lpips / gan / total) | 007 | superseded | F44 |
 | F33 | Under 15× the weight, raw `L_det` does not detectably move at 25 epochs: −5.0 / +3.9 / +1.4%, all inside the floor | 007 | superseded | F37 |
 | F34 | The dose trades fidelity improvement: within-run `loss_lpips` falls 25.2% at `grad_scale` 0.01 vs 9.5% at 0.15 (withdrawn in the source) | 007 | refuted | F43 |
-| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | open | acts on F15, F25; F72, F87, F136, F168 |
+| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | confirmed | acts on F15, F25; F72, F87, F136, F168, F182 |
 | F36 | Dose-response appeared: paired difference 0 → +0.0280 → +0.0357 → +0.0512, monotone in λ | 007 | open | acts on F19, F28; F77 |
 | F37 | Raw detection loss falls 2.56 → 2.12 → 1.84 across stages 1–3, stage 3 ~30% below the uncalibrated campaign's 2.61 | 007 | open | acts on F33 |
 | F38 | Achieved share at 100 epochs 10.0 / 16.1 / 19.8%, just under the 20–30% band; not re-tuned after seeing mAP | 007 | open | acts on F29, F30; F144, F175 |
@@ -83,7 +84,7 @@
 | F47 | PLAN.md §16's causality criterion is satisfied for pix2pix, with F40/F41 and F43 as its caveats; F25's dose caveat resolved | 007 | open | acts on F07, F25 |
 | F48 | Without `--resume`, `run_loop` rewrites `metrics.json` from `results = []`: no `config_hash` guard on a run dir, so a reused name destroys the earlier run | 007 | open | |
 | F49 | C2's pre-registered discriminator is met: stage-3 false-object rate fell −0.0289 (−15.1%), loop 0.1629 vs control 0.1918, while mAP50 rose +0.0512 | 008 | open | F76, F143 |
-| F50 | False-object rate is the only rate independent of the gain and is not significant (p = .156, CI [−.0559, +.0039]); missed-object −0.0370 and consistency +0.0291 (both p = .031) corroborate the endpoint, not hallucination | 008 | open | F76 |
+| F50 | False-object rate is the only rate independent of the gain and is not significant (p = .156, CI [−.0559, +.0039]); missed-object −0.0370 and consistency +0.0291 (both p = .031) corroborate the endpoint, not hallucination | 008 | confirmed | F76, F184 |
 | F51 | No per-metric claim survives multiplicity: Bonferroni α = 0.0167 is below the n = 6 sign-flip floor of 0.031; false-object rate was designated primary before the numbers | 008 | open | |
 | F52 | The loop arm is less variable on all three rates (sd ratio loop/control 0.69 / 0.52 / 0.41); untested, an observation to pre-register for turbo | 008 | open | F80 |
 | F53 | F43's +0.0097 LPIPS gap is bounded from both sides — no training-loss cost, better object-level faithfulness — so `reward_target` stays null and the turbo hold is released | 008 | open | acts on F43; F76 |
@@ -105,11 +106,11 @@
 | F69 | Turbo's control starts far above pix2pix's: stage-0 mAP50 0.8889 vs 0.7579 ± .0372 (~3.5 sd), LPIPS ~5 sd better at stage 3 — n = 1, most-disturbed run | 010 | open | |
 | F70 | Prediction from one run: turbo's control declines monotonically under warm-started training (0.8889 → 0.8293); the other two controls will too | 010 | refuted | F73 |
 | F71 | Globbing `runs/e3t-*` pulls in six stumps, collapses `common_stages` to [0] and yields a plausible, wrong n = 6 stage-0 table; `--stage` outside it is now fatal (f6ee35e) | 010 | open | |
-| F72 | E3 replicates on turbo: stage-3 paired zero-shot mAP50 +0.0306, p = .250 (the n = 3 floor), CI [+.0121, +.0459], 9/9 coupled-stage wins, level stage-0 null −0.0023 | 010 | open | acts on F35 |
+| F72 | E3 replicates on turbo: stage-3 paired zero-shot mAP50 +0.0306, p = .250 (the n = 3 floor), CI [+.0121, +.0459], 9/9 coupled-stage wins, level stage-0 null −0.0023 | 010 | confirmed | acts on F35; F182 |
 | F73 | Observation B falsified per run: only `control-s3` is monotone, its −.0596 five times the others; all three controls do finish below their start | 010 | open | acts on F70 |
 | F74 | The stage-3 trajectory statistic (+0.0329, p = .75) is the s3 pair's −0.0601 baseline draw; with a level stage-0 the raw contrast governs (3/3) | 010 | open | |
 | F75 | Turbo `fidelity.lpips` is null: stage-0 null −0.0117 (3/3) is not level, so the trajectory governs, −0.0080, p = .500; not a device confound | 010 | open | |
-| F76 | C2 clean on turbo: false-object −0.0193 (p = .500), missed-object −0.0386 and consistency +0.0319 at the p = .250 floor — recall, not precision; `reward_target` stays null | 010 | open | acts on F49, F50, F53; F143 |
+| F76 | C2 clean on turbo: false-object −0.0193 (p = .500), missed-object −0.0386 and consistency +0.0319 at the p = .250 floor — recall, not precision; `reward_target` stays null | 010 | confirmed | acts on F49, F50, F53; F143, F184 |
 | F77 | No dose-response on turbo (0 → +.0274 → +.0235 → +.0306): share plateaus 8.8 / 12.3 / 12.9% as backbone-intrinsic `loss_gan` inflates 2.47 → 4.51 | 010 | open | acts on F36, F56, F61 |
 | F78 | Turbo loss-space figures are weak at n = 3: resumed stages pool stumps, only stage 2 is clean in both arms, and control `loss_gan` spans 1.55–4.42 across seeds | 010 | open | |
 | F79 | The resume audit is balanced: ~2–3 degraded endpoint epochs on two control runs vs ~3 on one loop run, opposite pairs — M2a's caveat closed; `AdamW` now checkpointed (e210b13) | 010 | open | acts on F68 |
@@ -169,14 +170,14 @@
 | F133 | Two-up at `workers 8` (26 processes, ~28 GB a run); `workers 16` two-up rejected unattempted (~105 GB, 100 processes on 64 CPUs); the translator pays nothing | 015 | open | acts on F96, F97 |
 | F134 | A and B differ only by an inert val cut, and their detector mAP50s differ by 0.048 — a second noise-floor estimate, under F13's 0.059 | 015 | open | acts on F13 |
 | F135 | `--resume` is safe on a fresh run dir, so every run in the cell carries it and a crash costs at most one epoch | 015 | open |  |
-| F136 | 3-class mAP50 loop − control +0.3512, p = .031 (the n = 6 floor), CI [+.292, +.405]: 13× a stage-0 null of +0.0266 that held; trajectory +0.3247 | 016 | open | acts on F35; F168 |
-| F137 | The loop lands on the raw-thermal floor (0.4415 vs 0.4499) and the control 0.360 below it: the loss prevents a loss plain translation incurs, never "translation beats thermal" | 016 | open | acts on F115; F169 |
+| F136 | 3-class mAP50 loop − control +0.3512, p = .031 (the n = 6 floor), CI [+.292, +.405]: 13× a stage-0 null of +0.0266 that held; trajectory +0.3247 | 016 | confirmed | acts on F35; F168, F182 |
+| F137 | The loop lands on the raw-thermal floor (0.4415 vs 0.4499) and the control 0.360 below it: the loss prevents a loss plain translation incurs, never "translation beats thermal" | 016 | open | acts on F115; F169, F183 |
 | F138 | Per class, car (+0.0905) and person (+0.0401) clear the floor, bicycle loses 42% of it (−0.1558); thin structures plus the 5.90 px roll is an untested hypothesis | 016 | open | acts on F107, F108, F119 |
-| F139 | The control collapses on 7 of 24 stage-rows (< 0.02 mAP50), the loop on 0; the worst loop seed (0.414) beats the best control (0.249); loop sd 3.7× tighter | 016 | open | acts on F42; F174 |
+| F139 | The control collapses on 7 of 24 stage-rows (< 0.02 mAP50), the loop on 0; the worst loop seed (0.414) beats the best control (0.249); loop sd 3.7× tighter | 016 | confirmed | acts on F42; F174, F183 |
 | F140 | Stage 0 collapses by draw, not by arm: `control-s4` collapsed where `loop-s4` did not (2/6 vs 0/6, Fisher p ≈ 0.45); a single-seed FLIR pix2pix number is near meaningless | 016 | open | acts on F40; F174 |
 | F141 | The fidelity null failed (stage-0 LPIPS, SSIM, FID all p = .031 on a heavy tail) and every fidelity trajectory is null: no λ-attributable fidelity cost or gain | 016 | open | acts on F43; F172 |
 | F142 | `detector.map50` is not a λ effect: stage 3 +0.0986 against a +0.1055 stage-0 null, trajectory −0.0070, p = 1.000 | 016 | open | F173 |
-| F143 | C2 favours the loop on all three rates (p = .031 each), worst loop beating best control on each; no stage-0 null, and "low" is not met (57% missed, 19% false) | 016 | open | acts on F49, F76; F171 |
+| F143 | C2 favours the loop on all three rates (p = .031 each), worst loop beating best control on each; no stage-0 null, and "low" is not met (57% missed, 19% false) | 016 | confirmed | acts on F49, F76; F171, F184 |
 | F144 | The dose landed in the band: share 12.4 / 17.7 / 21.1%; raw `loss_det` −37% vs e3b's −28%; `loss_gan` +27% control / +17% loop | 016 | open | acts on F38, F126; F175 |
 | F145 | Per-stage growth is ×2.03 (~27%/stage) in the control arm too, so not coupling; two-up contention is ×1.16, and the report's ×1.64 folds the growth in | 016 | open | acts on F89, F129; F176 |
 | F146 | The cell cost ~116.8 GPU-h (102.3 h training, boundaries 0.27–0.35 h flat), 13% over the 77–103 floor, for the two terms the floor disclaimed | 016 | open | acts on F128; F176 |
@@ -201,10 +202,10 @@
 | F165 | `grad_scale` 0.15 puts msrs-day's detection term at 17.4 / 26.6 / 32.0% at 25 epochs, the hottest pix2pix probe (custom 10.9 / 16.6 / 22.5%); stage 3's 6.7% relative excess is under F32's +7.1% single-run floor | 023 | open | F175 |
 | F166 | Probe-to-campaign stage-3 share has moved ×0.88 (pix2pix, F30→F38) and ×0.53 (turbo, F56→F77): always down, so 32.0% bounds msrs-day from above; ~28% on the pix2pix precedent, a projection | 023 | refuted | F175 |
 | F167 | A solo msrs-day loop run prices at ~6.2 h (5.55 h training + 0.66 h boundaries), about two thirds of FLIR's realised ~9.7 h; the twelve-run floor is ~70 GPU-h | 023 | superseded | F176 |
-| F168 | 2-class (car_stop, color_cone) mAP50 loop − control +0.1672, p = .031 (the n = 6 floor), CI [+.158, +.177], 20× a stage-0 null of −0.0083 that held; every loop seed beats every control seed | 024 | open | acts on F35, F136 |
+| F168 | 2-class (car_stop, color_cone) mAP50 loop − control +0.1672, p = .031 (the n = 6 floor), CI [+.158, +.177], 20× a stage-0 null of −0.0083 that held; every loop seed beats every control seed | 024 | confirmed | acts on F35, F136; F182 |
 | F169 | The passive bar is not met: the loop's 0.3592 sits 0.2036 below T = 0.5628 (best seed 0.3815); 40% of V − J vs T's 66% — the zero-label route only, 6.8× the raw-thermal floor | 024 | open | acts on F137, F161; F178 |
 | F170 | The gain is not passive-specific: the loop recovers 64% / 54% of T − J on car_stop / color_cone vs 91 / 69 / 74% on car / person / bike, and is below T on every class | 024 | open | acts on F160 |
-| F171 | C2 favours the loop on all three rates (p = .031 each; false −0.0867, missed −0.1440, consistency +0.1463), worst loop beating best control; still 33% false, 43% missed | 024 | open | acts on F143 |
+| F171 | C2 favours the loop on all three rates (p = .031 each; false −0.0867, missed −0.1440, consistency +0.1463), worst loop beating best control; still 33% false, 43% missed | 024 | confirmed | acts on F143; F184 |
 | F172 | No λ fidelity cost on LPIPS (p = .94), FID (p = .0625) or PSNR (p = .125); SSIM −0.0212 (p = .031) with a null trajectory; every stage-0 fidelity null held | 024 | open | acts on F141 |
 | F173 | `detector.map50` +0.0239 at stage 3 (p = .031) against a −0.0318 stage-0 null, trajectory +0.0556 (p = .0625); with labels the zero-shot gap shrinks to a sixth | 024 | open | acts on F142 |
 | F174 | Seed 2 degrades at stage 0 in both arms (`loop-s2` 0.0005, `control-s2` 0.0704) and recovers; at stage 3 the control is tighter (sd 0.0102 vs 0.0182), unlike F139 and F42 | 024 | open | acts on F42, F139, F140 |
@@ -214,3 +215,11 @@
 | F178 | On the passive classes a thermal-trained detector needs ≈173 labels (bracket 100–200; A ± 1 sd [143, 203]) to match the loop's 0.3649; the width is A's spread, not the flat line's (D ± 1 sd [172, 174]) | 025 | open | acts on F81, F88, F169 |
 | F179 | Annotation-free translation without the loop (C, 0.1888) is worth ≈48 labelled thermal images on the passive classes, [43, 59]; the loop turns 9% of the split into 32% | 025 | open | acts on F81 |
 | F180 | Every draw held both passive classes down to N = 25 (fewest 15 car_stop, 5 color_cone); the 5-cone draw scored 0.0007 color_cone AP, most of N = 25's sd | 025 | open | |
+| F181 | Every RT-DETR-l judge clears the 90% gate: visible-val mAP50 FLIR 0.6009 vs yolo11s 0.5523, msrs-day 0.7979 vs 0.7841, custom 0.9368 vs 0.9366; smallest margin +0.0922, 2.8× the smoke spread; level with yolo11s on the primary classes | 026 | open | |
+| F182 | Transfer holds on all four cells: RT-DETR stage-3 loop − control e3b +0.0435, e3f 3-class +0.3051, e3md 2-class +0.1451 (p = .031 each), e3t +0.0304 (p = .25, n = 3); 85–99% of the yolo11s gain, smaller on every cell | 026 | open | acts on F35, F72, F136, F168 |
+| F183 | On FLIR RT-DETR lifts both arms (control 0.2247 vs 0.0902, loop 0.5298 vs 0.4415, 3-class); worst loop 0.5035 beats best control 0.3866; RT-DETR's raw-thermal floor is unmeasured, so F137 is not re-read | 026 | open | acts on F137, F139 |
+| F184 | C2 under RT-DETR: no rate significantly worse for the loop on any cell; FLIR and msrs-day favour it on all three (p = .031); e3b's false-object −0.0177 (p = .156) repeats F50; e3t false-object +0.0040 (p = .75) | 026 | open | acts on F50, F76, F143, F171 |
+| F185 | Absolute C2 rates are judge-specific: on the same loop exports RT-DETR's false-object rate is 3.3× yolo11s's on FLIR (0.6171 vs 0.1874) and 1.6× on msrs-day, while its FLIR missed-object rate is lower (0.3329 vs 0.5671) | 026 | open | |
+| F186 | Control-arm seed sd under RT-DETR (Q4's margin) is 0.004–0.032 on every rate except FLIR missed-object 0.1708 and consistency 0.1222, about 12× msrs-day's, from a control mixing working and collapsed seeds; e3t has n = 3 | 026 | open | |
+| F187 | The FLIR RT-DETR judge is its epoch-1 checkpoint (0.601 / 0.278): mAP50 drifted to 0.504 by epoch 46, losses went NaN at 47, every later validation is 0, and 24 NaN recoveries restored nothing | 026 | open | |
+| F188 | RT-DETR training is not reproducible under `deterministic=True`: same command, seed and card give 0.6798 vs 0.6468 mAP50 after 3 epochs (`grid_sampler_2d_backward_cuda` has no deterministic implementation) | 026 | open | |
