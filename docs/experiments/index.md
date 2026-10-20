@@ -30,6 +30,7 @@
 | [024](024-msrs-day-twelve-run-cell.md) | 2026-10-15 | msrs-day twelve-run cell: pix2pix control vs the λ ramp at `grad_scale` 0.15, six paired seeds on all 536 pairs, two-up on both cards; C2 under the reference judge; read through `campaign_report.py --campaign msrs-day` | MSRS-DAY-CAMPAIGN-01 | VSIBMEOT05, 2× A100 (two-up) | 2-class (car_stop, color_cone) mAP50 loop − control +0.1672 (p = .031), but the loop's 0.3592 sits 0.2036 below the thermal-trained T = 0.5628 | F168, F169, F170, F171, F172, F173, F174, F175, F176 |
 | [025](025-msrs-day-budget-sweep.md) | 2026-10-15 | msrs-day annotation budget sweep, pass 1: direct-thermal `yolo11s` (A) at N ∈ {25, 50, 100, 200, 536}, three seeds, against the reference judge's zero-annotation anchors A0 / C / D at n = 3, scored on car_stop and color_cone | MSRS-BUDGET-SWEEP-02 | VSIBMEOT05, 1× A100 (`device=0`) | a thermal-trained detector needs ≈173 labelled images (bracket 100–200, A ± 1 sd [143, 203]) to match the loop's zero-label 2-class 0.3649 | F177, F178, F179, F180 |
 | [026](026-out-of-family-rtdetr-judge.md) | 2026-10-19 | Out-of-family RT-DETR-l judge: one per dataset (FLIR, msrs-day, custom), trained on visible and gated at 90% of the yolo11s reference, then every E3 stage-3 export (e3b, e3t, e3f, e3md) re-scored for zero-shot mAP and C2 | OUT-OF-FAMILY-JUDGE-05 | VSIBMEOT05, 2× A100 | RT-DETR keeps 85–99% of the yolo11s stage-3 gain on all four cells: FLIR 3-class +0.3051, msrs-day 2-class +0.1451, e3b +0.0435 (p = .031 each), e3t +0.0304 (p = .25, the n = 3 floor) | F181, F182, F183, F184, F185, F186, F187, F188 |
+| [027](027-margin-resolvability-gate.md) | 2026-10-20 | Margin resolvability gate: every E3 custom-set seed (e3b 0–5, e3t 0, 1, 3) scored per image by the reference `yolo11s` on loop, control and raw thermal, then a paired image bootstrap at n = 100 of the 153 val images, loop vs control and loop vs thermal | MARGIN-GATE-04 | VSIBMEOT05, 2× A100 (e3b `cuda:0`, e3t `cuda:1`) | widest 95% image-level half-width 9.41 mAP points at n = 100, 4.7× the 2-point bar; even loop vs control is ≥ 3.03 — does not resolve, so Margin becomes non-inferiority to ModTr | F189, F190, F191, F192 |
 
 ## Findings
 
@@ -44,7 +45,7 @@
 | F07 | λ_det's gain is not causally established: stages are not budget-matched, and same-config runs differ by 17.6 FID | 003 | confirmed | acts on F04; F13, F47 |
 | F08 | Absolute fidelity is poor (PSNR ~15.5, FID ~90) yet detection reaches 0.87 mAP50, 94% of the visible ceiling | 003 | open | |
 | F09 | The custom set declares `nc: 5`, but `Connector` (index 0) has zero instances; 4 classes are reported, no mAP is diluted | 003 | open | |
-| F10 | An independent `yolo11s` judge confirms M1's gate: baseline 0.7851 vs 0.1552 floor, +0.630 mAP50, all four classes | 004 | open | acts on F03; F86 |
+| F10 | An independent `yolo11s` judge confirms M1's gate: baseline 0.7851 vs 0.1552 floor, +0.630 mAP50, all four classes | 004 | open | acts on F03; F86, F191 |
 | F11 | No evidence the old judge was trained on val: the train-only judge scores real visible 0.9364 vs the old 0.9213; M1's ceiling stands | 004 | open | |
 | F12 | Self-grading was real but small (~0.023 on λ>0 arms); λ_det's effect is not monotone (stage 2 0.8106 < stage 1 0.8244); the gain lives in Switch | 004 | superseded | acts on F04; F19, F21 |
 | F13 | The noise floor is 0.0591 mAP50, not 0.0129: stage 3 vs baseline +0.062 is ~1 noise draw, so at n = 1 λ_det's gain cannot be separated from run variance | 004 | confirmed | acts on F04, F07; F17, F134 |
@@ -69,7 +70,7 @@
 | F32 | Two GPU runs at one seed do not reproduce, by design: the single-run loss-space floor is +3.4 / +3.6 / +11.8 / +7.1% (l2 / lpips / gan / total) | 007 | superseded | F44 |
 | F33 | Under 15× the weight, raw `L_det` does not detectably move at 25 epochs: −5.0 / +3.9 / +1.4%, all inside the floor | 007 | superseded | F37 |
 | F34 | The dose trades fidelity improvement: within-run `loss_lpips` falls 25.2% at `grad_scale` 0.01 vs 9.5% at 0.15 (withdrawn in the source) | 007 | refuted | F43 |
-| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | confirmed | acts on F15, F25; F72, F87, F136, F168, F182 |
+| F35 | E3's pix2pix arm is positive at `grad_scale: 0.15`: stage-3 paired zero-shot mAP50 +0.0512, p = .031 (the n = 6 floor), CI [+.025, +.081] | 007 | confirmed | acts on F15, F25; F72, F87, F136, F168, F182, F191 |
 | F36 | Dose-response appeared: paired difference 0 → +0.0280 → +0.0357 → +0.0512, monotone in λ | 007 | open | acts on F19, F28; F77 |
 | F37 | Raw detection loss falls 2.56 → 2.12 → 1.84 across stages 1–3, stage 3 ~30% below the uncalibrated campaign's 2.61 | 007 | open | acts on F33 |
 | F38 | Achieved share at 100 epochs 10.0 / 16.1 / 19.8%, just under the 20–30% band; not re-tuned after seeing mAP | 007 | open | acts on F29, F30; F144, F175 |
@@ -106,7 +107,7 @@
 | F69 | Turbo's control starts far above pix2pix's: stage-0 mAP50 0.8889 vs 0.7579 ± .0372 (~3.5 sd), LPIPS ~5 sd better at stage 3 — n = 1, most-disturbed run | 010 | open | |
 | F70 | Prediction from one run: turbo's control declines monotonically under warm-started training (0.8889 → 0.8293); the other two controls will too | 010 | refuted | F73 |
 | F71 | Globbing `runs/e3t-*` pulls in six stumps, collapses `common_stages` to [0] and yields a plausible, wrong n = 6 stage-0 table; `--stage` outside it is now fatal (f6ee35e) | 010 | open | |
-| F72 | E3 replicates on turbo: stage-3 paired zero-shot mAP50 +0.0306, p = .250 (the n = 3 floor), CI [+.0121, +.0459], 9/9 coupled-stage wins, level stage-0 null −0.0023 | 010 | confirmed | acts on F35; F182 |
+| F72 | E3 replicates on turbo: stage-3 paired zero-shot mAP50 +0.0306, p = .250 (the n = 3 floor), CI [+.0121, +.0459], 9/9 coupled-stage wins, level stage-0 null −0.0023 | 010 | confirmed | acts on F35; F182, F191 |
 | F73 | Observation B falsified per run: only `control-s3` is monotone, its −.0596 five times the others; all three controls do finish below their start | 010 | open | acts on F70 |
 | F74 | The stage-3 trajectory statistic (+0.0329, p = .75) is the s3 pair's −0.0601 baseline draw; with a level stage-0 the raw contrast governs (3/3) | 010 | open | |
 | F75 | Turbo `fidelity.lpips` is null: stage-0 null −0.0117 (3/3) is not level, so the trajectory governs, −0.0080, p = .500; not a device confound | 010 | open | |
@@ -223,3 +224,7 @@
 | F186 | Control-arm seed sd under RT-DETR (Q4's margin) is 0.004–0.032 on every rate except FLIR missed-object 0.1708 and consistency 0.1222, about 12× msrs-day's, from a control mixing working and collapsed seeds; e3t has n = 3 | 026 | open | |
 | F187 | The FLIR RT-DETR judge is its epoch-1 checkpoint (0.601 / 0.278): mAP50 drifted to 0.504 by epoch 46, losses went NaN at 47, every later validation is 0, and 24 NaN recoveries restored nothing | 026 | open | |
 | F188 | RT-DETR training is not reproducible under `deterministic=True`: same command, seed and card give 0.6798 vs 0.6468 mAP50 after 3 epochs (`grid_sampler_2d_backward_cuda` has no deterministic implementation) | 026 | open | |
+| F189 | At the test split's size Margin's CI cannot resolve +2 mAP@50: widest 95% image-level half-width 9.41 points at n = 100 (100 of 153 val images), 4.7× the 2-point bar; no row of 18 resolves — Margin becomes non-inferiority to ModTr | 027 | open | |
+| F190 | The verdict does not hinge on Q4's wider pair: loop vs its own control is 3.03–6.43 points on all nine seeds, ≥ 1.5× the bar; loop vs thermal is 8.20–9.41, 1.43–3.09× wider per seed | 027 | open | |
+| F191 | The per-image capture path reproduces `evaluate_detector` on server data: all 18 whole-pool mAP50s equal the stored stage-3 zero-shot values to 16 digits, raw thermal 0.1552 = F10 — a reproduction, not second evidence | 027 | open | acts on F10, F35, F72 |
+| F192 | Seed spread of the paired val delta is as large as one seed's image noise: e3b sd 3.84 points (+0.34 to +11.16) against a mean half-width of 4.90 (≈2.5 sd); a one-seed image CI understates Margin's uncertainty | 027 | open | |
