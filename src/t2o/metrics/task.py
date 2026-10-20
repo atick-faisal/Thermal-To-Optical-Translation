@@ -16,10 +16,12 @@ to agree by convention.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,30 @@ def _extract_per_class_ap(results: Any) -> tuple[dict[str, float], dict[str, flo
     return ap50_by_class, ap_by_class
 
 
+def _validate(
+    weights: Path | str,
+    data_yaml: Path | str,
+    imgsz: int,
+    batch: int,
+    device: str | None,
+    on_val_start: Callable[[Any], None] | None = None,
+) -> Any:
+    """The one `model.val()` call every detection score in `t2o` goes through."""
+    from ultralytics import YOLO
+
+    model = YOLO(str(weights))
+    if on_val_start is not None:
+        model.add_callback("on_val_start", on_val_start)
+    return model.val(
+        data=str(data_yaml),
+        imgsz=imgsz,
+        batch=batch,
+        device=device,
+        verbose=False,
+        plots=False,
+    )
+
+
 def evaluate_detector(
     weights: Path | str,
     data_yaml: Path | str,
@@ -127,17 +153,7 @@ def evaluate_detector(
     exported translations -- this function only ever validates, never trains, and so never
     touches a translator's autograd graph.
     """
-    from ultralytics import YOLO
-
-    model = YOLO(str(weights))
-    results = model.val(
-        data=str(data_yaml),
-        imgsz=imgsz,
-        batch=batch,
-        device=device,
-        verbose=False,
-        plots=False,
-    )
+    results = _validate(weights, data_yaml, imgsz, batch, device)
 
     scores = _extract_metrics(results)
     per_class_ap50, per_class_ap50_95 = _extract_per_class_ap(results)
@@ -158,3 +174,89 @@ def evaluate_detector(
         per_class_ap50=per_class_ap50,
         per_class_ap50_95=per_class_ap50_95,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ImageStats:
+    """One image's matched predictions from a val run: exactly what `ap_per_class` consumes.
+
+    mAP is not a sum over images, so a bootstrap over images cannot resample one number per
+    image. It resamples these records and recomputes AP from them (margin-gate plan, Q2).
+    """
+
+    stem: str
+    tp: np.ndarray  # (n_pred, 10) bool: a match at each IoU threshold 0.50:0.05:0.95
+    conf: np.ndarray  # (n_pred,)
+    pred_cls: np.ndarray  # (n_pred,)
+    target_cls: np.ndarray  # (n_target,)
+
+
+class DuplicateImageError(ValueError):
+    """Raised when two images in one split share a stem, so records keyed by stem would collide."""
+
+
+def collect_image_stats(
+    weights: Path | str,
+    data_yaml: Path | str,
+    imgsz: int = 640,
+    batch: int = 16,
+    device: str | None = None,
+) -> dict[str, ImageStats]:
+    """Per-image detection stats from one val run, keyed by image stem.
+
+    The run is `evaluate_detector`'s own `_validate` call, so these records come from the
+    one evaluation path, not a second one. ultralytics 8.4.117 hands each image's stats to
+    `DetMetrics.update_stats` (`models/yolo/detect/val.py:185-193`), but that method only
+    keeps the keys already in `DetMetrics.stats` and drops `im_name`
+    (`utils/metrics.py:1136-1145`). So the capture wraps `update_stats` itself, installed
+    from the public `on_val_start` callback (`engine/validator.py:242`). A validator
+    subclass would have to pick between `DetectionValidator` and `RTDETRValidator`, and the
+    margin scorer may be either.
+
+    Keyed by stem, not filename: translated exports are `.png` and raw thermal is `.jpg`,
+    and the arms of a paired bootstrap are joined on this key.
+    """
+    records: dict[str, ImageStats] = {}
+
+    def capture(validator: Any) -> None:
+        update_stats = validator.metrics.update_stats
+
+        def update_and_capture(stat: dict[str, Any]) -> None:
+            stem = Path(stat["im_name"]).stem
+            if stem in records:
+                raise DuplicateImageError(
+                    f"two images in {data_yaml} share the stem {stem!r}; per-image records "
+                    "are keyed by stem, so one would silently replace the other"
+                )
+            records[stem] = ImageStats(
+                stem=stem,
+                tp=stat["tp"],
+                conf=stat["conf"],
+                pred_cls=stat["pred_cls"],
+                target_cls=stat["target_cls"],
+            )
+            update_stats(stat)
+
+        validator.metrics.update_stats = update_and_capture
+
+    _validate(weights, data_yaml, imgsz, batch, device, on_val_start=capture)
+    logger.info("captured per-image stats for %d images from %s", len(records), data_yaml)
+    return records
+
+
+def map50_from_stats(records: Sequence[ImageStats]) -> float:
+    """mAP@50 over `records`, through ultralytics' own `ap_per_class`.
+
+    The same computation `DetMetrics.process` and `Metric.map50` run on a whole val split
+    (`utils/metrics.py:1158-1171` and `:971`), so over every record of a split it reproduces
+    `evaluate_detector`'s mAP@50. A record may appear more than once, as in a bootstrap draw.
+    """
+    from ultralytics.utils.metrics import ap_per_class
+
+    ap = ap_per_class(
+        np.concatenate([r.tp for r in records]),
+        np.concatenate([r.conf for r in records]),
+        np.concatenate([r.pred_cls for r in records]),
+        np.concatenate([r.target_cls for r in records]),
+    )[5]
+    return float(ap[:, 0].mean()) if len(ap) else 0.0
