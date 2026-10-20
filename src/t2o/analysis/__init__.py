@@ -18,19 +18,29 @@ from t2o.analysis.aggregate import (
     tidy_rows,
     write_csv,
 )
+from t2o.analysis.resolvability import (
+    PairedInterval,
+    UnpairedImagesError,
+    paired_image_bootstrap,
+    resolves,
+)
 
 __all__ = [
     "AggregateReport",
     "AggregationError",
     "Arm",
     "ArmSummary",
+    "PairedInterval",
     "PairedResult",
     "RunRecord",
+    "UnpairedImagesError",
     "aggregate",
     "bootstrap_ci",
     "load_run",
     "metric_value",
     "pair_runs",
+    "paired_image_bootstrap",
+    "resolves",
     "sign_flip_p_value",
     "tidy_rows",
     "write_csv",
