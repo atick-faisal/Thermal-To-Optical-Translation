@@ -72,6 +72,11 @@ first read (`roadmap.md:226-230`).
   nothing. The AP math is therefore checked against ultralytics' own `DetMetrics` on
   hand-built records with true positives, and the capture by each record carrying its own
   image's label classes. Both stay out of `slow`, so `just verify` runs them.
+- **How the arms are joined.** The bootstrap sorts the shared stems before drawing, so a
+  fixed seed reproduces the interval whatever order the val loader produced. It also
+  requires each stem to carry the same target classes in both arms: a delta is only paired
+  if both arms were scored against the same labels, and a stale `labels.cache` would
+  otherwise change one arm's ground truth silently.
 
 **The test-split pin.**
 
