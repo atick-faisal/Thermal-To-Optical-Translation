@@ -77,6 +77,20 @@ first read (`roadmap.md:226-230`).
   requires each stem to carry the same target classes in both arms: a delta is only paired
   if both arms were scored against the same labels, and a stale `labels.cache` would
   otherwise change one arm's ground truth silently.
+- **The raw-thermal arm** is built as `gate_table.py` and E8's A0 build it
+  (`write_budget_manifest(..., 1.0, infrared=True)`) and collected once, since it does not
+  depend on the training seed. It is scored against the thermal-side labels, as every
+  raw-thermal floor here has been, so a transferred label file that lost a box makes `_pair`
+  raise on that pair.
+- **The verdict reads the whole CSV** after the loop, so a resumed run judges every seed, not
+  just the ones it computed.
+- **Both custom-set campaigns feed the gate.** The script defaults to pix2pix (`e3b`, seeds
+  0–5); turbo (`e3t`, seeds 0, 1, 3) is a second invocation into its own `--out`, and the gate
+  reads the wider of the two, extending Q4's conservative reading.
+- **-04's tests stub `collect_image_stats`** with hand-built records, as `test_gate_table.py`
+  stubs `evaluate_detector`, so a half-width above 2 and a failing verdict are exercised. The
+  fixture detector alone gives zero widths (pitfalls). The dataset is a copy with labels
+  mirrored onto the thermal side.
 
 **The test-split pin.**
 
