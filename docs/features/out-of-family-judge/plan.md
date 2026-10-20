@@ -1,7 +1,7 @@
 ---
 slug: out-of-family-judge
 title: Out-of-family RT-DETR judge
-status: in-progress
+status: shipped
 created: 2026-10-18
 ---
 
