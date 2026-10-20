@@ -1,7 +1,7 @@
 ---
 slug: margin-gate
 title: Margin gate — resolvability check and test-split pin
-status: planned
+status: in-progress
 created: 2026-10-20
 ---
 
@@ -61,6 +61,14 @@ first read (`roadmap.md:226-230`).
 - **Which detector scores it.** The check uses the same detector checkpoint, in the same
   role, that Margin will be scored with. The ADR above names it, so the gate and the final
   number can't drift apart.
+- **How the capture hooks in.** An `on_val_start` callback wraps the validator's
+  `metrics.update_stats`, because `DetMetrics.stats` never stores `im_name`
+  (`utils/metrics.py:1136-1145`). Using a callback rather than a validator subclass keeps
+  `RTDETRValidator` intact for whichever scorer -03 names. Records are keyed by stem:
+  exports are `.png` and raw thermal is `.jpg`, so filenames never match across arms. -01
+  owns the records-to-mAP@50 helper, and -02 calls it per resample. The equality test
+  labels a copy of the val split with the detector's own predictions, so it compares a
+  non-zero mAP@50. It stays out of `slow`, so `just verify` runs it.
 
 **The test-split pin.**
 
