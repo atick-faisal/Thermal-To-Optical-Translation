@@ -15,17 +15,25 @@ from t2o.data.manifest import DatasetManifest, ManifestError
 from t2o.data.mirror import MirrorError, mirror_labels_onto_infrared
 from t2o.data.pairing import Pairing
 from t2o.data.splits import (
+    EmptySplitError,
+    HeldOutSplitPin,
     SplitDriftError,
     SplitManifest,
     freeze_split,
     load_split_manifest,
+    load_test_pin,
+    pin_test_split,
     verify_split,
+    verify_test_split,
     write_split_manifest,
+    write_test_pin,
 )
 
 __all__ = [
     "BudgetError",
     "DatasetManifest",
+    "EmptySplitError",
+    "HeldOutSplitPin",
     "ManifestError",
     "MirrorError",
     "Pairing",
@@ -38,9 +46,13 @@ __all__ = [
     "collate_translation_batch",
     "freeze_split",
     "load_split_manifest",
+    "load_test_pin",
     "load_yolo_labels",
     "mirror_labels_onto_infrared",
+    "pin_test_split",
     "verify_split",
+    "verify_test_split",
     "write_budget_manifest",
     "write_split_manifest",
+    "write_test_pin",
 ]
