@@ -1,7 +1,7 @@
 ---
 slug: margin-gate
 title: Margin gate — resolvability check and test-split pin
-status: shipped
+status: in-progress
 created: 2026-10-20
 ---
 
