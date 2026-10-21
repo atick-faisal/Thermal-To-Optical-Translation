@@ -22,9 +22,14 @@ Drafting begins when all six of [goal.md](goal.md)'s Success Criteria hold. Each
 Scoring against `RESEARCH_FINDINGS.md` §10's legacy five, wherever a record holds it, is evidence
 here, never a status.
 
-- **Margin — not measured.** The held-out test split has not been read, and of the
-  frozen-detector baselines only raw thermal and the no-loop translator exist; ModTr, HalluciDet
-  and zero-shot Grounding DINO wait on `M3`'s baseline suite. On validation, the loop beats its
+- **Margin — not measured; gated to non-inferiority to ModTr.** At the test split's size a 95%
+  image-level CI cannot resolve +2 mAP@50: the widest half-width is 9.41 points at n = 100, and
+  even the loop against its own control is ≥ 3.03 (F189, F190). By `goal.md`'s own clause, Margin
+  becomes non-inferiority to ModTr, with Transfer and Faithfulness carrying the claim; HalluciDet
+  and zero-shot Grounding DINO no longer carry it. The per-image scorer reproduces
+  `evaluate_detector` (F191), and seed spread is as large as one seed's image noise, so a
+  one-seed test CI would understate Margin's uncertainty (F192). The held-out test split has not
+  been read, and ModTr waits on `M3`'s baseline suite. On validation, the loop beats its
   no-loop translator (F35, F72) and translation beats raw thermal (F03, F10). F82 is measured
   against a thermal-*trained* detector, the comparison `goal.md`'s Non-Goals concede.
 - **Transfer — not measured.** Every score so far comes from the reference `yolo11s`, the same
