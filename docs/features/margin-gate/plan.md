@@ -101,6 +101,14 @@ first read (`roadmap.md:226-230`).
 - **Where the record lives.** The custom dataset's split record stays on the server
   (`design.md` §9; `TASKS.md` M0.9), so the test pin does too. Only the code reaches git.
 - Q1 decides whether this feature also makes the split reachable for scoring.
+- **The pin is never overwritten.** `freeze_one` warns and overwrites a drifted train/val
+  record (`tests/test_freeze_splits.py:72`); the pin raises `SplitDriftError` instead, since a
+  re-run after a reshuffle would otherwise re-pin it silently. Re-pinning means deleting the
+  file by hand. An images directory with no images raises too, naming the directory, so a
+  mistyped server path cannot pin zero stems.
+- **Its entrypoint is its own script**, `scripts/pin_test_split.py` (`--name`, `--images`,
+  `--splits-root`, `--check`), writing `splits/test/<name>.json`, outside the `splits/*.json`
+  glob. It needs no `data.yaml`, so `freeze_splits.py` and its tests stay untouched.
 
 **Every piece runs on a synthetic fixture.** That means a `tmp_path_factory` pair set and a
 stub detector, on CPU, in seconds, gated on `just verify`.
