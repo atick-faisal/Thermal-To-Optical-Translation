@@ -1,0 +1,91 @@
+# ModTr on FLIR-aligned -- the public counterpart of experiments/modtr_custom.yaml (plan Q7).
+#
+# FLIR is the one public set ModTr itself reports on, so this cell is both Margin's public
+# headline and a sanity check on the reimplementation. Everything but `data` and `detector` is
+# experiments/modtr_custom.yaml's; see its header for the recipe, the seeds, the stage-0 export
+# and why there is no loss-share probe.
+#
+# The loop's FLIR cell (e3f, record 016) had no YAML of its own: it ran
+# experiments/e3_pix2pix_loop.yaml with `--data`, `--max-train-images 600`,
+# `--val-loss-images 153`, `--in-loop-weights`, `--eval-init-weights` and `--reference-weights`.
+# Those values are written in here instead, so this file states its cell. The test rebuilds
+# e3f from the same overrides and checks the two match.
+#
+# The RT-DETR judge is `runs/reference-flir-rtdetr-l/weights/best.pt`, applied afterwards with
+# `t2o evaluate --judge rtdetr --write-back`, as the E3 cells were re-scored (record 026).
+
+data:
+  manifest: dataset/processed/flir/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+  # e3f's matched corpus: 600 of FLIR's train pairs, the custom set's size. A different cut
+  # trains ModTr on different images from the loop it is compared with.
+  max_train_images: 600
+  # e3f's val-loss subsample (F125). It never reaches the exported val split, which is scored
+  # whole (all 1,013 pairs).
+  val_loss_images: 153
+  # Fixes which 600 and which 153. It matches e3f's, so ModTr's corpus is the loop's.
+  subset_seed: 0
+
+train:
+  # ADR-04's budget, the loop's 4 x 100 epochs on FLIR too (record 016).
+  epochs_per_stage: 400
+  batch_size: 8
+  lr: 1.0e-4
+  # Not read by ModTr; the loop's value, as in experiments/modtr_custom.yaml.
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  hflip: 0.5
+  crop: null
+  seed: 0
+
+loss:
+  # Detection only; `build_translator` refuses any non-zero weight.
+  l2: 0.0
+  lpips: 0.0
+  gan: 0.0
+
+coupling:
+  task_weights: [1.0]
+  grad_scale: 1.0
+  reward_target: null
+
+detector:
+  in_loop:
+    # e3f's FLIR-trained yolo11n. The custom set's yolo11n.pt would train ModTr against a
+    # detector the FLIR loop never saw.
+    weights: runs/inloop-flir-yolo11n/weights/best.pt
+    imgsz: 640
+  evaluation:
+    init_weights: runs/inloop-flir-yolo11n/weights/best.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    # e3f's FLIR reference judge. Must not be in_loop.weights above.
+    weights: runs/reference-flir-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: modtr
+  pretrained: true
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  workers: 16
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: modtr-flir
+  run_dir: runs
+  name: modtr-flir

@@ -1,0 +1,110 @@
+# ModTr on the custom set -- the prior-art arm Margin is scored against (modtr-baseline).
+#
+# Copied from experiments/e3_pix2pix_loop.yaml. `data`, `detector`, `metrics` and `export` are
+# identical to it and to experiments/e3_turbo_loop.yaml, because margin-gate ADR-01 binds ModTr
+# to the same in-loop yolo11n and the same reference yolo11s as the loop it is compared with.
+# What differs is ModTr's recipe: plan Q1's one detection-only stage, ADR-04's budget and LR,
+# ADR-03's objective. tests/test_modtr_experiments.py pins both halves.
+#
+# One stage, so a run exports once, at `runs/<name>/stage0/translated`, which is what
+# `scripts/modtr_non_inferiority.py --modtr-template` reads. Launch seeds 0, 1 and 3: the seeds
+# both loop campaigns (e3b 0-5, e3t 0 1 3) ran, so one ModTr campaign is scored against both.
+#
+# The RT-DETR judge is not a config field. Score each export afterwards with
+# `t2o evaluate --weights runs/reference-rtdetr-l/weights/best.pt --judge rtdetr --write-back`,
+# the judge the E3 cells were re-scored with (record 026).
+#
+# `data.manifest`, `detector.in_loop.weights` and `detector.evaluation.init_weights` are
+# placeholders, the convention experiments/e3_pix2pix_control.yaml describes: supply them with
+# `--data`/`--in-loop-weights`/`--eval-init-weights`, exactly as the loop campaigns did.
+#
+# No `scripts/loss_share.py` probe: the objective is detection only, so its share is 100% by
+# construction. ADR-03's smoke run replaces it, and it must pass before the campaign.
+
+data:
+  manifest: dataset/yolo_rgbt/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+
+train:
+  # ADR-04's fixed budget: the loop's 4 stages x 100 epochs, in one stage, last checkpoint
+  # reported. ADR-04's calibration run can lower it before the campaign; if it does, this is
+  # the line that changes. Also sets the cosine's T_max (modtr-baseline Q8).
+  epochs_per_stage: 400
+  # Upstream's batch 8 (ADR-04), which is also the loop's. ModTr accumulates 2 batches per
+  # optimiser step inside `fit`, so its effective batch is 16.
+  batch_size: 8
+  # Upstream's AdamW LR (`main.py:53`, ADR-04). 2.0e-4 would be the pix2pix loop's, not ModTr's.
+  lr: 1.0e-4
+  # Not read by ModTr, which owns its cosine schedule (translators/modtr.py). Kept at the
+  # loop's value so `train` differs from it only where ModTr's recipe does.
+  lr_gamma: 0.95
+  # Not read by ModTr either; it trains in full precision, as pix2pix does.
+  amp: true
+  amp_dtype: bfloat16
+  # The loop's augmentation, so both arms train on the same augmented corpus.
+  hflip: 0.5
+  crop: null
+  seed: 0
+
+loss:
+  # ModTr has no reconstruction term. These must be 0: `build_translator` refuses a ModTr
+  # config with any non-zero weight, so a missing section (whose default lpips is 5.0) fails
+  # loudly at startup instead of silently changing the hash.
+  l2: 0.0
+  lpips: 0.0
+  gan: 0.0
+
+coupling:
+  # One detection-only stage (plan Q1). A 0 here would leave `fit` with no objective, and
+  # `build_translator` refuses it.
+  task_weights: [1.0]
+  # 1.0 is upstream's unscaled detection loss. The loop's 0.15 balances detection against
+  # reconstruction, and there is nothing to balance here. A small value could also damp
+  # AdamW's step once gradients approach its eps (ADR-03).
+  grad_scale: 1.0
+  # Must stay null: a hinge that stops rewarding a sample below a target is not upstream's
+  # objective (ADR-03).
+  reward_target: null
+
+detector:
+  in_loop:
+    # The loop's in-loop detector, which supplies ModTr's whole training signal (margin-gate
+    # ADR-01). A different checkpoint here would make the comparison a detector comparison.
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    # The zero-shot judge Margin is scored with. Must be the loop's, and must not be
+    # in_loop.weights, or the score is the training detector grading its own gradient.
+    weights: runs/reference-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: modtr
+  # ImageNet-initialised ResNet34 encoder, as upstream starts. False is a test-only setting:
+  # a randomly initialised encoder is no longer ModTr.
+  pretrained: true
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  workers: 16
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: modtr
+  run_dir: runs
+  name: modtr
