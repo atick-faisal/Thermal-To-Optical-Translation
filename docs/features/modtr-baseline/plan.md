@@ -87,7 +87,45 @@ weights or dataset are needed on the Mac.
 3 seeds, because F192 shows seed spread as large as one seed's image noise. Its result goes
 through `/log-experiment`.
 
+**What the wrapper owns beyond the protocol (ADR-01, ADR-04).**
+
+- Upstream's optimiser: AdamW at `train.lr` with torch's default weight decay (0.01), gradient
+  accumulation 2 with the loss halved as Lightning does, and a per-step cosine stepped once per
+  optimiser step. `T_max` comes from Q8.
+- `fit()` therefore steps the optimiser on every second call. That bends the protocol's "one
+  full optimisation step", and the module docstring says so. The wrapper cannot see epoch ends,
+  so unlike Lightning it never flushes a half-accumulated gradient at the end of an epoch; that
+  deviation is named too.
+- The AdamW state, the scheduler state and the accumulation counter go in `get_extra_state`, as
+  `pix2pix_turbo.py:358-394` does, so a resume continues the cosine instead of restarting it at
+  full lr.
+- `translate()` repeats thermal to 3 channels and returns `clamp(x * h(x), 0, 1)`.
+- ModTr has no reconstruction term. `build_translator` raises `ConfigError` if any `loss` weight
+  is non-zero or any `coupling.task_weights` entry is 0; otherwise the defaults (`lpips: 5.0`)
+  would be silently ignored.
+- `ModTrConfig` has one field, `pretrained`, so tests build the network without downloading
+  ImageNet weights. `train.amp` is ignored, as pix2pix ignores it.
+
 ## Open Questions
+
+### Q8: Where does ModTr's cosine `T_max` come from?
+
+ADR-04 keeps upstream's per-step cosine, `T_max = epochs × train batches per epoch`.
+`build_translator(config)` runs before any `Trainer` or loader exists, so the wrapper cannot
+see the batch count.
+
+- [x] Count it in `build_translator`: build the training `TranslationPairDataset` from the
+      manifest and take `ceil(len / batch_size) × epochs_per_stage × len(task_weights)`
+      (recommended) — no new field, no protocol change, and it cannot go stale: the
+      calibration run's 480 images and the campaign's 600 each get their own `T_max`
+      automatically. Cost: `build_translator` now reads the manifest.
+- [ ] A `ModTrConfig` field holding `T_max`, set by hand per YAML — the most explicit, and the
+      hash carries it. But it goes stale silently when the dataset, batch size or epochs change,
+      and the calibration and campaign configs need different values.
+- [ ] A `Trainer` hook that hands the translator its loader length before training — exact, and
+      it could flush accumulation at epoch end the way Lightning does. But it moves the
+      `Trainer`/`Translator` boundary for one backbone, and the loop's stage count still has
+      to reach it.
 
 ## Resolved
 
