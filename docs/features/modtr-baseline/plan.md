@@ -113,6 +113,19 @@ a subset of every loop campaign it is scored against: 0, 1, 3 covers e3b (0–5)
 δ is not a CLI flag; the script uses ADR-02's default and writes δ to the CSV. The δ boundary is
 tested on `non_inferior` directly; bootstrapped test arms get clear-cut shifts.
 
+**The calibration run (ADR-04).** The inner split is a seeded 80/20 copy of the training pairs,
+written beside `data/budget.py` into a new tree with its own `data.yaml` (absolute `path:`, a
+non-empty output folder refused). The calibration is then an ordinary `t2o loop --no-detector`
+against that manifest, so validation is not in it and Q8 counts 480 images unchanged. A
+config-level split was rejected because `Trainer`, `export_translated` and
+`_count_training_batches` would each need the same cut. A `runtime` flag (hash-excluded;
+ultralytics' validator never reseeds global RNG) makes `Trainer` export its validation split and
+score it with the in-loop detector through `evaluate_detector` each epoch. It appends rows to a
+per-stage file, because `metrics.json` is written only at stage end and a resumed stage would drop
+the epochs before the crash. The trigger works in mAP points (×100), uses full windows only,
+breaks ties to the earliest window, and sets the budget to the best window's last epoch index
+plus 1.
+
 ## Open Questions
 
 ### Q8: Where does ModTr's cosine `T_max` come from?
