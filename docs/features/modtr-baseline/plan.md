@@ -106,6 +106,13 @@ through `/log-experiment`.
 - `ModTrConfig` has one field, `pretrained`, so tests build the network without downloading
   ImageNet weights. `train.amp` is ignored, as pix2pix ignores it.
 
+**Scoring Margin.** The non-inferiority bootstrap draws n-out-of-n over the whole val pool;
+`paired_image_bootstrap`'s `n=100` was sized for a test split that no longer exists. Arms are
+keyed by seed and paired seed for seed under one `--seeds` list, so ModTr's campaign seeds must be
+a subset of every loop campaign it is scored against: 0, 1, 3 covers e3b (0–5) and e3t (0, 1, 3).
+δ is not a CLI flag; the script uses ADR-02's default and writes δ to the CSV. The δ boundary is
+tested on `non_inferior` directly; bootstrapped test arms get clear-cut shifts.
+
 ## Open Questions
 
 ### Q8: Where does ModTr's cosine `T_max` come from?
@@ -126,6 +133,16 @@ see the batch count.
       it could flush accumulation at epoch end the way Lightning does. But it moves the
       `Trainer`/`Translator` boundary for one backbone, and the loop's stage count still has
       to reach it.
+
+### Q9: What does "resumable" mean for a bootstrap that needs every seed at once?
+
+- [x] Not resumable: compute everything, then write the per-seed rows and the summary row once
+      at the end (recommended) — a rerun repays about 6 val runs, roughly 20 minutes, and a
+      joint CI cannot resume from CSV rows without cached records.
+- [ ] Cache each (arm, seed)'s `ImageStats` on disk, so a resume skips val runs whose cache
+      exists and always reruns the cheap bootstrap — a real resume, but a new on-disk record
+      format to own, and the cache cannot tell when an export or a `labels.cache` changed under
+      it, the staleness CLAUDE.md warns about.
 
 ## Resolved
 
