@@ -42,12 +42,13 @@ class Backbone(StrEnum):
     """Translator backbone, and the discriminator for :data:`TranslatorConfig`.
 
     Members are added as each backbone lands: ``pix2pix`` at M1, ``pix2pix_turbo`` at M2a,
-    ``lbbdm`` at M2b (PLAN.md §4).
+    ``lbbdm`` at M2b (PLAN.md §4), ``modtr`` as Margin's prior-art baseline (modtr-baseline).
     """
 
     STUB = "stub"
     PIX2PIX = "pix2pix"
     PIX2PIX_TURBO = "pix2pix_turbo"
+    MODTR = "modtr"
 
 
 class DataConfig(ConfigBase):
@@ -369,11 +370,31 @@ class Pix2PixTurboTranslatorConfig(ConfigBase):
         return value
 
 
+class ModTrTranslatorConfig(ConfigBase):
+    """ModTr (Medeiros et al., ECCV 2024), the prior-art baseline Margin is scored against.
+
+    Reimplemented in `translators/modtr_unet.py` and `translators/modtr.py` (modtr-baseline
+    ADR-01, ADR-04). Upstream's recipe has no knob worth sweeping here: the fusion operator,
+    AdamW's weight decay, the gradient accumulation and the cosine schedule are fixed in
+    `translators/modtr.py`, and the LR comes from `train.lr`. ModTr's objective is detection
+    only, so `build_translator` rejects any non-zero `loss` weight rather than ignoring it.
+    """
+
+    backbone: Literal[Backbone.MODTR] = Backbone.MODTR
+    # (bool) start the ResNet34 encoder from torchvision's ImageNet weights, as upstream starts
+    # from smp's "imagenet". False trains from random init, which is no longer ModTr; it exists
+    # so tests build the network without downloading anything.
+    pretrained: bool = True
+
+
 # A discriminated union: each new backbone adds a model with its own `backbone: Literal[...]`
 # tag plus one entry here; nothing else in the config layer changes, which is what makes
 # PLAN.md invariant 3 ("swapping backbones is a config change") true rather than aspirational.
 TranslatorConfig = Annotated[
-    StubTranslatorConfig | Pix2PixTranslatorConfig | Pix2PixTurboTranslatorConfig,
+    StubTranslatorConfig
+    | Pix2PixTranslatorConfig
+    | Pix2PixTurboTranslatorConfig
+    | ModTrTranslatorConfig,
     Field(discriminator="backbone"),
 ]
 

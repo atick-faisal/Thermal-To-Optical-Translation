@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -9,17 +11,22 @@ from t2o.config import (
     AmpDtype,
     Config,
     ConfigError,
+    ModTrTranslatorConfig,
     Pix2PixTranslatorConfig,
     Pix2PixTurboTranslatorConfig,
     StubTranslatorConfig,
 )
+from t2o.data.dataset import TranslationPairDataset
+from t2o.data.manifest import DatasetManifest
 from t2o.seeding import seed_everything
+from t2o.translators.modtr import ModTrTranslator
 from t2o.translators.pix2pix import Pix2PixTranslator
 from t2o.translators.pix2pix_turbo import Pix2PixTurboTranslator, load_sd_turbo
 from t2o.translators.protocol import Translator
 from t2o.translators.stub import StubTranslator
 
 __all__ = [
+    "ModTrTranslator",
     "Pix2PixTranslator",
     "Pix2PixTurboTranslator",
     "StubTranslator",
@@ -82,4 +89,50 @@ def build_translator(config: Config) -> nn.Module:
             amp=config.train.amp,
             amp_dtype=_AMP_DTYPES[config.train.amp_dtype],
         )
+    if isinstance(config.translator, ModTrTranslatorConfig):
+        _require_detection_only(config)
+        return ModTrTranslator(
+            total_batches=_count_training_batches(config),
+            lr=config.train.lr,
+            pretrained=config.translator.pretrained,
+        )
     raise ConfigError(f"no translator wired up for backbone {config.translator.backbone!r}")
+
+
+def _require_detection_only(config: Config) -> None:
+    """ModTr's objective is the detector's loss alone; refuse a config that says otherwise.
+
+    `LossConfig` defaults to `lpips: 5.0`, so a ModTr config that forgets the `loss` section
+    would carry weights that change its hash and nothing else. A stage at weight 0 would leave
+    `fit` with no objective at all.
+    """
+    weights = config.loss.model_dump()
+    if any(weight != 0.0 for weight in weights.values()):
+        raise ConfigError(
+            f"backbone 'modtr' trains on detection loss only, but loss is {weights}; "
+            "set loss.l2, loss.lpips and loss.gan to 0"
+        )
+    if any(weight <= 0.0 for weight in config.coupling.task_weights):
+        raise ConfigError(
+            "backbone 'modtr' needs a detection term in every stage, but "
+            f"coupling.task_weights is {list(config.coupling.task_weights)}"
+        )
+
+
+def _count_training_batches(config: Config) -> int:
+    """Every training batch the run will see: ModTr's cosine `T_max` (modtr-baseline Q8).
+
+    Counted through `TranslationPairDataset` itself, with the same cap `Trainer` applies, so the
+    count follows the real corpus: the calibration run's 480 images and the campaign's 600 each
+    get their own `T_max` without a number to keep in sync by hand. The `DataLoader` keeps a
+    short last batch, hence the ceiling.
+    """
+    manifest = DatasetManifest.load(config.data.manifest)
+    corpus = TranslationPairDataset(
+        manifest.train_images,
+        pairing=manifest.pairing,
+        max_images=config.data.max_train_images,
+        subset_seed=config.data.subset_seed,
+    )
+    per_epoch = math.ceil(len(corpus) / config.train.batch_size)
+    return per_epoch * config.train.epochs_per_stage * len(config.coupling.task_weights)
