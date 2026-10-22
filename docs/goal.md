@@ -45,12 +45,12 @@ This repo is an instrument for answering one question with one defensible result
 
 Drafting begins when **all six** hold:
 
-- **Margin** — on the held-out power-line test split, the loop beats the strongest baseline
-  that keeps the visible detector frozen (raw thermal; the same translator without the loop;
-  ModTr and HalluciDet trained on the same data; zero-shot Grounding DINO) by ≥ +2 mAP@50,
-  with a 95% bootstrap CI over test images that excludes zero and a non-negative mAP@50:95
-  delta. If the validation split shows a CI at the test split's size cannot resolve +2,
-  Margin becomes non-inferiority to ModTr, with Transfer and Faithfulness carrying the claim.
+- **Margin** — on the power-line validation split (the reporting split; see Constraints), the
+  loop beats the strongest baseline that keeps the visible detector frozen (raw thermal; the
+  same translator without the loop; ModTr and HalluciDet trained on the same data; zero-shot
+  Grounding DINO) by ≥ +2 mAP@50, with a 95% bootstrap CI over validation images that
+  excludes zero and a non-negative mAP@50:95 delta. If that CI cannot resolve +2, Margin
+  becomes non-inferiority to ModTr, with Transfer and Faithfulness carrying the claim.
 - **Transfer** — the loop's gain over the no-loop translator holds for at least one visible
   detector from a different family, never used in the loop, across ≥3 seeds.
 - **Consistency** — on ≥2 of the 4 datasets, the loop beats its own no-loop control
@@ -60,8 +60,9 @@ Drafting begins when **all six** hold:
 - **Stability** — ≥3 seeds, significance-tested, no collapse.
 - **Faithfulness** — insertion and deletion rates (objects invented or erased), scored
   against ground truth by a detector family never in the loop, with CIs, are no worse than
-  the no-loop translator's within a margin fixed before the test split is read. Reported for
-  every arm.
+  the no-loop translator's within a margin fixed before the final score. With no held-out
+  split, that margin is drawn from the same validation data it is scored on, and the paper
+  says so. Reported for every arm.
 
 Alongside them:
 
@@ -129,9 +130,10 @@ Alongside them:
   boxes: CPLID and TTPLA are visible-only, HIT-UAV is thermal-only (people and vehicles),
   Yetgin & Gerek states no pairing at 128×128, and VITLD (~400 registered transmission-line
   pairs, conductor masks only) is available on request.
-- **Custom data.** ~850 annotated, registered 640×480 FLIR pairs, taken in Brazil.
-  Experiments touch only 600 train / 153 val; the ~100 held-out test pairs are read only at
-  reporting time. Report "753 train+val of 853" and 4 classes — the manifest
+- **Custom data.** 753 annotated, registered 640×480 FLIR pairs, taken in Brazil: 600 train /
+  153 val. There is no held-out test split, so validation is the reporting split, here as on
+  every public benchmark. It has been read throughout development, and the paper states that
+  as a limitation. Report 753 pairs and 4 classes — the manifest
   declares `nc: 5`, but `Connector` (index 0) has no instances. Boxes were drawn on the
   visible images and moved to thermal with the sister project's registration, so the
   thermal-trained baseline trains on transferred labels.

@@ -395,13 +395,12 @@ never touches training code.
 
 ### The custom dataset
 
-~850 annotated pairs, of which **600 train / 153 val (753) are all any experiment in this repo
-touches** — the remaining ~100 are held out as an unseen test set, used only at reporting time.
-That isolation is structural, not procedural: `DatasetManifest` reads only
-`path`/`train`/`val`/`nc`/`names`/`rgbt`, so a `test:` key in `data.yaml` is invisible to every
-code path here. Frozen on the server as `yolo_rgbt_29_jul` (`combined_hash 7ede3433adc9c0b8`);
-see TASKS.md M0.9 for why that record cannot reach git. **Report "753 train+val of 853", not
-"850 pairs".** Scale arguments below that say "850" are order-of-magnitude and hold at 753.
+**753 annotated pairs: 600 train / 153 val.** There is no held-out test split; validation is
+the reporting split ([goal.md](goal.md) Constraints). `DatasetManifest` reads only
+`path`/`train`/`val`/`nc`/`names`/`rgbt`, so a `test:` key in `data.yaml` would be invisible
+to every code path here. Frozen on the server as `yolo_rgbt_29_jul` (`combined_hash 7ede3433adc9c0b8`);
+see TASKS.md M0.9 for why that record cannot reach git. **Report "753 pairs", not
+"850 pairs".** Scale arguments that say "850" are order-of-magnitude and hold at 753.
 
 **4 annotated classes** (Fuse, Pole, Switch, Transformer) inside a
 manifest that declares `nc: 5`. The fifth, `Connector` (index 0), is a Label Studio artifact —

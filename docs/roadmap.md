@@ -22,14 +22,17 @@ Drafting begins when all six of [goal.md](goal.md)'s Success Criteria hold. Each
 Scoring against `RESEARCH_FINDINGS.md` §10's legacy five, wherever a record holds it, is evidence
 here, never a status.
 
-- **Margin — not measured; gated to non-inferiority to ModTr.** At the test split's size a 95%
+- **Margin — not measured; gated to non-inferiority to ModTr.** The custom set has no held-out
+  test split, so Margin is scored on the 153 val images (`goal.md` Constraints). A 95%
   image-level CI cannot resolve +2 mAP@50: the widest half-width is 9.41 points at n = 100, and
-  even the loop against its own control is ≥ 3.03 (F189, F190). By `goal.md`'s own clause, Margin
+  even the loop against its own control is ≥ 3.03 (F189, F190). Scaling to n = 153 narrows
+  these by √(100/153) ≈ 0.81 — to about 7.6 and 2.45, still above the bar (an estimate, not a
+  re-run). By `goal.md`'s own clause, Margin
   becomes non-inferiority to ModTr, with Transfer and Faithfulness carrying the claim; HalluciDet
   and zero-shot Grounding DINO no longer carry it. The per-image scorer reproduces
   `evaluate_detector` (F191), and seed spread is as large as one seed's image noise, so a
-  one-seed test CI would understate Margin's uncertainty (F192). The held-out test split has not
-  been read, and ModTr waits on `M3`'s baseline suite. On validation, the loop beats its
+  one-seed CI would understate Margin's uncertainty (F192). ModTr waits on `M3`'s baseline
+  suite. On validation, the loop beats its
   no-loop translator (F35, F72) and translation beats raw thermal (F03, F10). F82 is measured
   against a thermal-*trained* detector, the comparison `goal.md`'s Non-Goals concede.
 - **Transfer — not measured.** Every score so far comes from the reference `yolo11s`, the same
@@ -52,8 +55,11 @@ here, never a status.
   identical in both arms — collapsed on two control seeds and no loop seed, by draw rather than
   by arm (F140).
 - **Faithfulness — partial.** C2's insertion and deletion rates favour the loop or match it on
-  every campaign (F49, F76, F143, F171), but they are scored by `yolo11s`, the in-loop family,
-  and no margin has been fixed for the test split.
+  every campaign (F49, F76, F143, F171). Re-scored by the out-of-family RT-DETR-l judge, no rate
+  is significantly worse for the loop on any cell (F184). The margin is fixed per cell and rate
+  in [out-of-family-judge ADR-01](features/out-of-family-judge/decisions.md); it was drawn from
+  the same val exports it would be scored on, which `goal.md` now requires the paper to state.
+  The pass rule has not yet been applied.
 
 ## M2a step 2
 
@@ -140,7 +146,7 @@ against ≈214 of 600 all-class on the custom set (F81).
       thermal" holds on one.
 
   > *Migration note:* possibly settled by `docs/goal.md` Margin/Consistency — human to close.
-  > `goal.md` keeps Margin on the power-line test split, counts public datasets through
+  > `goal.md` keeps Margin on the power-line validation split, counts public datasets through
   > Consistency, and makes "translation beats raw thermal" a reported outcome, not a criterion.
   > The row's +0.650 and −0.125 were written at n = 3; F82 holds the n = 6 values.
 
@@ -228,8 +234,7 @@ as everywhere else: a step or finding label by grep under `docs/experiments/`, `
 
 Rows here do not come from `TASKS.md`; the sections above carry every open row it had at the tag.
 
-- [ ] Pin the held-out test split's membership before it is first read. `freeze_split` records
-      only train and val, so a leak *into* train or val is caught (the 753 hashes change) but a
-      reshuffle *within* the ~100 held-out pairs is not. The test split is the one `goal.md`'s
-      Success Criteria are scored on. Source: `TASKS.md:788-793` at the tag; the isolation itself
-      is [design.md](design.md) §9, The custom dataset.
+- [x] ~~Pin the held-out test split's membership before it is first read.~~ Dropped
+      2026-10-22: the custom set has no held-out test split, so there is nothing to pin;
+      validation is the reporting split (`goal.md` Constraints). Source: `TASKS.md:788-793` at
+      the tag.
