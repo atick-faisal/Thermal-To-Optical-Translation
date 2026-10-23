@@ -6,8 +6,10 @@ images, disjoint stems. Config overrides keep every run tiny and CPU-fast.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -19,7 +21,17 @@ from torch import Tensor, nn
 from t2o.config import Config
 from t2o.data.dataset import TranslationBatch
 from t2o.data.manifest import DatasetManifest
-from t2o.engine.trainer import BEST_CHECKPOINT, LAST_CHECKPOINT, Trainer, resolve_device
+from t2o.engine.trainer import (
+    BEST_CHECKPOINT,
+    LAST_CHECKPOINT,
+    MONITOR_FILENAME,
+    EpochStats,
+    MonitorError,
+    Trainer,
+    load_monitor,
+    resolve_device,
+)
+from t2o.metrics.task import TaskMetrics
 from t2o.seeding import seed_everything, seed_worker
 from t2o.tracking import RunTracker
 from t2o.translators import StubTranslator
@@ -361,3 +373,160 @@ def test_training_is_bit_identical_at_any_worker_count(data_yaml: Path, tmp_path
 
     for key, value in serial.translator.state_dict().items():
         assert torch.equal(value, parallel.translator.state_dict()[key])
+
+
+# --------------------------------------------------------------------------- monitor_map
+
+
+def _monitored(**runtime: object) -> Config:
+    return Config.load(
+        overrides={
+            "train": {"batch_size": 2, "epochs_per_stage": 2},
+            "runtime": {"workers": 0, "monitor_map": True, **runtime},
+        }
+    )
+
+
+def _scored(map50: float) -> TaskMetrics:
+    return TaskMetrics(
+        precision=0.0,
+        recall=0.0,
+        map50=map50,
+        map50_95=0.0,
+        per_class_ap50={},
+        per_class_ap50_95={},
+    )
+
+
+def test_without_monitor_map_no_detector_runs_and_no_file_is_written(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    manifest = DatasetManifest.load(data_yaml)
+    run_dir = tmp_path / "run"
+    trainer = Trainer(_config(), manifest, StubTranslator(hidden_channels=4), run_dir)
+
+    with patch("t2o.engine.trainer.evaluate_detector") as evaluate:
+        history = trainer.train()
+
+    evaluate.assert_not_called()
+    assert all(stats.val_map50 is None for stats in history)
+    assert not (run_dir / MONITOR_FILENAME).exists()
+
+
+def test_monitor_map_scores_the_translated_val_split_with_the_in_loop_detector(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    manifest = DatasetManifest.load(data_yaml)
+    run_dir = tmp_path / "run"
+    config = _monitored()
+    trainer = Trainer(config, manifest, StubTranslator(hidden_channels=4), run_dir)
+
+    with patch("t2o.engine.trainer.evaluate_detector", return_value=_scored(0.42)) as evaluate:
+        history = trainer.train()
+
+    assert [stats.val_map50 for stats in history] == [0.42, 0.42]
+    assert evaluate.call_count == config.train.epochs_per_stage
+    weights, data = evaluate.call_args.args
+    assert weights == config.detector.in_loop.weights
+    exported = data.parent / "val" / "images"
+    assert {p.stem for p in exported.iterdir()} == {p.stem for p in manifest.val_images.iterdir()}
+    assert load_monitor(run_dir) == history
+
+
+def test_the_monitor_survives_a_resume_that_metrics_json_would_not(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    """`Trainer.train()` returns only the epochs after a resume; the file keeps all of them."""
+    manifest = DatasetManifest.load(data_yaml)
+    run_dir = tmp_path / "run"
+
+    with patch("t2o.engine.trainer.evaluate_detector", return_value=_scored(0.1)):
+        Trainer(_monitored(), manifest, StubTranslator(hidden_channels=4), run_dir).train()
+    longer = _monitored().model_copy(
+        update={"train": _monitored().train.model_copy(update={"epochs_per_stage": 3})}
+    )
+    resumed = Trainer(longer, manifest, StubTranslator(hidden_channels=4), run_dir)
+    resumed.resume()
+    with patch("t2o.engine.trainer.evaluate_detector", return_value=_scored(0.2)):
+        after = resumed.train()
+
+    assert [stats.epoch for stats in after] == [2]
+    assert [stats.val_map50 for stats in load_monitor(run_dir)] == [0.1, 0.1, 0.2]
+
+
+def _write_monitor(stage_dir: Path, epochs: list[int]) -> None:
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    rows = [
+        EpochStats(epoch=epoch, train_losses={"loss_det": float(i)}, val_loss=0.0, val_map50=0.5)
+        for i, epoch in enumerate(epochs)
+    ]
+    (stage_dir / MONITOR_FILENAME).write_text(
+        "".join(json.dumps(asdict(row)) + "\n" for row in rows)
+    )
+
+
+def test_a_re_run_epoch_keeps_its_later_row(tmp_path: Path) -> None:
+    # A crash after epoch 1's row but before its checkpoint makes the resume re-run epoch 1.
+    _write_monitor(tmp_path, [0, 1, 1, 2])
+
+    epochs = load_monitor(tmp_path)
+
+    assert [stats.epoch for stats in epochs] == [0, 1, 2]
+    assert epochs[1].train_losses == {"loss_det": 2.0}
+
+
+def test_a_hole_in_the_monitor_is_refused(tmp_path: Path) -> None:
+    _write_monitor(tmp_path, [0, 2])
+
+    with pytest.raises(MonitorError, match=r"missing epoch\(s\) \[1\]"):
+        load_monitor(tmp_path)
+
+
+def test_a_missing_monitor_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(MonitorError, match="--monitor-map"):
+        load_monitor(tmp_path)
+
+
+@pytest.mark.slow
+def test_monitor_map_end_to_end_changes_nothing_trained(
+    data_yaml: Path, detector_weights: Path, tmp_path: Path
+) -> None:
+    """The real `evaluate_detector`, and the reason `monitor_map` may sit outside the hash:
+    ultralytics' validator never reseeds the global RNG, so training is bit-identical.
+    """
+    manifest = DatasetManifest.load(data_yaml)
+    detector = {"detector": {"in_loop": {"weights": str(detector_weights)}}}
+
+    seed_everything(0)
+    plain = Trainer(
+        Config.load(
+            overrides={
+                **detector,
+                "train": {"batch_size": 2, "epochs_per_stage": 2},
+                "runtime": {"workers": 0, "device": "cpu"},
+            }
+        ),
+        manifest,
+        StubTranslator(hidden_channels=4),
+        tmp_path / "plain",
+    )
+    plain.train()
+
+    seed_everything(0)
+    monitored = Trainer(
+        Config.load(
+            overrides={
+                **detector,
+                "train": {"batch_size": 2, "epochs_per_stage": 2},
+                "runtime": {"workers": 0, "device": "cpu", "monitor_map": True},
+            }
+        ),
+        manifest,
+        StubTranslator(hidden_channels=4),
+        tmp_path / "monitored",
+    )
+    history = monitored.train()
+
+    assert all(stats.val_map50 is not None and 0.0 <= stats.val_map50 <= 1.0 for stats in history)
+    for key, value in plain.translator.state_dict().items():
+        assert torch.equal(value, monitored.translator.state_dict()[key])

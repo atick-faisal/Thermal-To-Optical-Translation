@@ -70,6 +70,13 @@ def test_group_flag_is_wired_through_to_runtime() -> None:
     assert overrides_from_args(args)["runtime"] == {"group": "e3-pix2pix"}
 
 
+def test_monitor_map_flag_is_wired_through_to_runtime() -> None:
+    """ModTr's calibration run (modtr-baseline ADR-04) turns it on from the launch line."""
+    args = build_parser().parse_args(["loop", "--monitor-map"])
+
+    assert overrides_from_args(args)["runtime"] == {"monitor_map": True}
+
+
 def test_overrides_from_args_omits_unset_flags() -> None:
     args = build_parser().parse_args(["train"])
 
