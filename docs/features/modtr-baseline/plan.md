@@ -1,7 +1,7 @@
 ---
 slug: modtr-baseline
 title: ModTr baseline — the non-inferiority anchor for Margin
-status: in-progress
+status: shipped
 created: 2026-10-22
 ---
 
