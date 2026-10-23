@@ -39,14 +39,22 @@ the same instance across successive ``Trainer(...)`` calls *is* the warm start.
 each step -- the staged detection-consistency term (M0.7). ``Trainer`` still composes
 nothing itself; it only carries the per-stage ingredient the backbone's own loss
 composition needs, matching how ``engine/loop.py`` reconstructs both fresh per stage.
+
+``runtime.monitor_map`` adds a second, detection-side val pass for ModTr's calibration run
+(modtr-baseline ADR-04): the in-loop detector's mAP@50 on the translated val split, every
+epoch, through ``evaluate_detector`` -- the one evaluation path. Each epoch is also appended to
+``monitor.jsonl``, because ``engine/loop.py`` writes ``metrics.json`` only when a stage ends and
+a resumed stage returns only the epochs after the resume. The calibration is one 400-epoch
+stage, so without the file a crash would silently cut the curve its trigger reads.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
 
@@ -58,6 +66,8 @@ from torch.utils.data import DataLoader
 from t2o.config import Config
 from t2o.data.dataset import TranslationBatch, TranslationPairDataset, collate_translation_batch
 from t2o.data.manifest import DatasetManifest
+from t2o.engine.export import export_split, write_data_yaml
+from t2o.metrics.task import evaluate_detector
 from t2o.seeding import seed_worker
 from t2o.tracking import RunTracker
 from t2o.translators.protocol import Translator
@@ -66,6 +76,15 @@ logger = logging.getLogger(__name__)
 
 LAST_CHECKPOINT = "translator_last.pt"
 BEST_CHECKPOINT = "translator_best.pt"
+MONITOR_FILENAME = "monitor.jsonl"
+# Where each epoch's translated val split is exported for `runtime.monitor_map`. Overwritten
+# every epoch: only the score is kept.
+MONITOR_DIRNAME = "monitor"
+
+
+class MonitorError(ValueError):
+    """Raised when `monitor.jsonl` cannot give a complete per-epoch history."""
+
 
 # Release the allocator's cache every this many training steps (M2a step 5). See
 # `_train_epoch` for why the *between-steps* moment is the one that can do any good.
@@ -86,6 +105,32 @@ class EpochStats:
     # rebuilds these with `EpochStats(**epoch)` from metrics.json, so a required field would
     # make every run written before today unreadable and unresumable.
     seconds: float = 0.0
+    # The in-loop detector's mAP@50 on the translated val split, as a fraction; None unless
+    # `runtime.monitor_map`. Defaulted for the same metrics.json reason as `seconds`.
+    val_map50: float | None = None
+
+
+def load_monitor(stage_dir: Path) -> list[EpochStats]:
+    """One `EpochStats` per epoch from a stage's `monitor.jsonl`, in epoch order.
+
+    An epoch can appear twice: its row is written before its checkpoint, so a crash between
+    the two makes the resumed stage re-run it. The later row is the one the run continued
+    from, so it wins. A missing epoch cannot be recovered, so it raises.
+    """
+    path = stage_dir / MONITOR_FILENAME
+    if not path.is_file():
+        raise MonitorError(f"no {MONITOR_FILENAME} in {stage_dir}; was the run --monitor-map?")
+    by_epoch: dict[int, EpochStats] = {}
+    for line in path.read_text().splitlines():
+        if line.strip():
+            stats = EpochStats(**json.loads(line))
+            by_epoch[stats.epoch] = stats
+    if not by_epoch:
+        raise MonitorError(f"{path} holds no epochs")
+    missing = sorted(set(range(max(by_epoch) + 1)) - by_epoch.keys())
+    if missing:
+        raise MonitorError(f"{path} is missing epoch(s) {missing}; the curve has a hole")
+    return [by_epoch[epoch] for epoch in sorted(by_epoch)]
 
 
 def resolve_device(device: str | None) -> torch.device:
@@ -122,6 +167,7 @@ class Trainer:
             raise TypeError("translator must implement fit()/translate() (the Translator protocol)")
 
         self.config = config
+        self.manifest = manifest
         self.translator = translator
         self.run_dir = run_dir
         self.tracker = tracker
@@ -214,14 +260,24 @@ class Trainer:
             started = time.perf_counter()
             train_losses = self._train_epoch()
             val_loss = self._validate()
+            monitor = self.config.runtime.monitor_map
+            val_map50 = self._validate_map50() if monitor else None
             seconds = time.perf_counter() - started
             # Read before the `empty_cache()` below, which would flatten `reserved`.
             memory = self._peak_memory()
-            history.append(
-                EpochStats(
-                    epoch=epoch, train_losses=train_losses, val_loss=val_loss, seconds=seconds
-                )
+            stats = EpochStats(
+                epoch=epoch,
+                train_losses=train_losses,
+                val_loss=val_loss,
+                seconds=seconds,
+                val_map50=val_map50,
             )
+            history.append(stats)
+            if monitor:
+                # Before the checkpoint, so a crash between the two duplicates this epoch's row
+                # (`load_monitor` keeps the later one) instead of losing it.
+                with (self.run_dir / MONITOR_FILENAME).open("a") as file:
+                    file.write(json.dumps(asdict(stats)) + "\n")
             logger.info("epoch %d took %.1f s", epoch, seconds)
             if memory:
                 logger.info(
@@ -243,6 +299,8 @@ class Trainer:
                 prefix = f"{self.metric_prefix}/" if self.metric_prefix else ""
                 metrics = {f"{prefix}train/{k}": v for k, v in train_losses.items()}
                 metrics[f"{prefix}val/pixel_l2"] = val_loss
+                if val_map50 is not None:
+                    metrics[f"{prefix}val/in_loop_map50"] = val_map50
                 metrics[f"{prefix}epoch"] = float(epoch)
                 metrics[f"{prefix}seconds"] = seconds
                 metrics.update({f"{prefix}memory/{key}": v for key, v in memory.items()})
@@ -321,6 +379,34 @@ class Trainer:
             total += F.mse_loss(pred, target).item()
             n += 1
         return total / n if n else float("nan")
+
+    def _validate_map50(self) -> float:
+        """The in-loop detector's mAP@50 on this epoch's translated val split.
+
+        The val split `_validate` reads, so `data.val_loss_images` caps this too; the
+        calibration run leaves it null and scores every inner-val image. The in-loop detector,
+        not the reference: ADR-04 asks how well ModTr serves the detector it trains against.
+        """
+        root = self.run_dir / MONITOR_DIRNAME
+        export_split(
+            self.translator,
+            self.val_dataset,
+            root / "val",
+            normalize=self.config.export.normalize,
+            device=self.device,
+            batch_size=self.config.train.batch_size,
+            workers=self.config.runtime.workers,
+        )
+        # Its `train:` points at nothing; ultralytics' val checks only `val:`.
+        data_yaml = write_data_yaml(root, self.manifest)
+        metrics = evaluate_detector(
+            self.config.detector.in_loop.weights,
+            data_yaml,
+            imgsz=self.config.detector.in_loop.imgsz,
+            batch=self.config.detector.reference.batch,
+            device=self.config.runtime.device,
+        )
+        return metrics.map50
 
     def _checkpoint(self, epoch: int, val_loss: float) -> None:
         improved = val_loss < self.best_val_loss

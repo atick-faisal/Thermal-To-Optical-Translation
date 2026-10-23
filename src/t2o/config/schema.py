@@ -471,6 +471,13 @@ class RuntimeConfig(ConfigBase):
     # a run ungrouped. Purely organisational, hence here rather than anywhere hashed --
     # regrouping runs must never change what is being measured.
     group: str | None = None
+    # (bool) score the in-loop detector's mAP@50 on the translated val split after every epoch,
+    # and append each epoch to `monitor.jsonl` in the stage directory. For ModTr's calibration
+    # run (modtr-baseline ADR-04), whose manifest's val split is an inner split of train. On a
+    # real manifest it reads the reporting split every epoch -- nothing selects on it, but it
+    # is still looking. Costs an export and a val pass per epoch. Outside the hash because it
+    # changes nothing trained: ultralytics' validator never reseeds the global RNG.
+    monitor_map: bool = False
 
     @property
     def path(self) -> Path:

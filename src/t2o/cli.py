@@ -43,6 +43,7 @@ _OVERRIDES: dict[str, tuple[str, ...]] = {
     "name": ("runtime", "name"),
     "group": ("runtime", "group"),
     "wandb": ("runtime", "wandb"),
+    "monitor_map": ("runtime", "monitor_map"),
     "data": ("data", "manifest"),
     "annotation_fraction": ("data", "annotation_fraction"),
     "max_train_images": ("data", "max_train_images"),
@@ -282,6 +283,12 @@ def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", help="run name under run_dir")
     parser.add_argument("--group", help="W&B group; the campaign's runs share one")
     parser.add_argument("--wandb", action="store_true", default=None)
+    parser.add_argument(
+        "--monitor-map",
+        action="store_true",
+        default=None,
+        help="score the in-loop detector on the val split every epoch (ModTr calibration)",
+    )
     parser.add_argument(
         "--data",
         type=Path,
