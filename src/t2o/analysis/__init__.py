@@ -18,6 +18,12 @@ from t2o.analysis.aggregate import (
     tidy_rows,
     write_csv,
 )
+from t2o.analysis.epoch_budget import (
+    BudgetVerdict,
+    CurveTooShortError,
+    epoch_budget,
+    loss_falls,
+)
 from t2o.analysis.resolvability import (
     PairedInterval,
     UnpairedImagesError,
@@ -30,13 +36,17 @@ __all__ = [
     "AggregationError",
     "Arm",
     "ArmSummary",
+    "BudgetVerdict",
+    "CurveTooShortError",
     "PairedInterval",
     "PairedResult",
     "RunRecord",
     "UnpairedImagesError",
     "aggregate",
     "bootstrap_ci",
+    "epoch_budget",
     "load_run",
+    "loss_falls",
     "metric_value",
     "pair_runs",
     "paired_image_bootstrap",
