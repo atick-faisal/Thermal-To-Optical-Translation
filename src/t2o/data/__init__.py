@@ -10,6 +10,7 @@ from t2o.data.dataset import (
     annotated_subset,
     collate_translation_batch,
 )
+from t2o.data.inner_split import InnerSplitError, write_inner_split
 from t2o.data.labels import load_yolo_labels
 from t2o.data.manifest import DatasetManifest, ManifestError
 from t2o.data.mirror import MirrorError, mirror_labels_onto_infrared
@@ -34,6 +35,7 @@ __all__ = [
     "DatasetManifest",
     "EmptySplitError",
     "HeldOutSplitPin",
+    "InnerSplitError",
     "ManifestError",
     "MirrorError",
     "Pairing",
@@ -53,6 +55,7 @@ __all__ = [
     "verify_split",
     "verify_test_split",
     "write_budget_manifest",
+    "write_inner_split",
     "write_split_manifest",
     "write_test_pin",
 ]
