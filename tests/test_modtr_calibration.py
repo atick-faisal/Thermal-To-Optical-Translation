@@ -14,9 +14,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+import yaml
 from scripts.modtr_calibration import main
 
-from t2o.config import Config
+from t2o.config import CONFIG_FILENAME, Config
+from t2o.data.inner_split import MARKER_KEY
 from t2o.data.manifest import DatasetManifest
 from t2o.engine.trainer import MONITOR_FILENAME, EpochStats
 
@@ -68,6 +70,20 @@ def test_split_writes_a_loadable_inner_manifest(inner_yaml: Path) -> None:
 
     assert len(list(inner.val_images.iterdir())) == 2
     assert len(list(inner.train_images.iterdir())) == 3
+
+
+def test_split_takes_the_cap_from_the_config(data_yaml: Path, tmp_path: Path) -> None:
+    config = Config.load(overrides={"data": {"max_train_images": 4, "subset_seed": 2}})
+    config.snapshot(tmp_path / "experiment")
+    out = tmp_path / "inner"
+
+    argv = ["split", "--data", str(data_yaml), "--out", str(out), "--fraction", "0.5"]
+    assert main([*argv, "--config", str(tmp_path / "experiment" / CONFIG_FILENAME)]) == 0
+
+    declared = yaml.safe_load((out / "data.yaml").read_text())[MARKER_KEY]
+    assert (declared["max_images"], declared["subset_seed"]) == (4, 2)
+    inner = DatasetManifest.load(out / "data.yaml")
+    assert len(list(inner.train_images.iterdir())) + len(list(inner.val_images.iterdir())) == 4
 
 
 def test_a_rising_curve_keeps_the_budget_and_a_falling_loss_passes(

@@ -91,7 +91,43 @@ def test_the_manifest_is_absolute_and_marked(data_yaml: Path, tmp_path: Path) ->
 
     # ultralytics honours `path:` literally (CLAUDE.md), so a relative one breaks off the Mac.
     assert Path(declared["path"]).is_absolute()
-    assert declared[MARKER_KEY] == {"source": str(source.path), "fraction": 0.4, "seed": 5}
+    assert declared[MARKER_KEY] == {
+        "source": str(source.path),
+        "fraction": 0.4,
+        "seed": 5,
+        "max_images": None,
+        "subset_seed": 0,
+    }
+
+
+def test_a_capped_split_partitions_exactly_the_corpus_a_run_trains_on(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    # ADR-05: FLIR's calibration splits the 600 images its campaign trains on, not the folder.
+    source = DatasetManifest.load(data_yaml)
+    inner = DatasetManifest.load(
+        write_inner_split(source, tmp_path / "inner", 0.5, max_images=4, subset_seed=2)
+    )
+    corpus = TranslationPairDataset(
+        source.train_images, pairing=source.pairing, max_images=4, subset_seed=2
+    )
+
+    train, val = _stems(inner.train_images), _stems(inner.val_images)
+    assert len(train) == len(val) == 2
+    assert train | val == {p.stem for p in corpus.visible_paths}
+
+
+def test_the_cap_is_recorded_in_the_marker(data_yaml: Path, tmp_path: Path) -> None:
+    source = DatasetManifest.load(data_yaml)
+    path = write_inner_split(source, tmp_path / "inner", 0.5, max_images=4, subset_seed=2)
+
+    marker = yaml.safe_load(path.read_text())[MARKER_KEY]
+    assert (marker["max_images"], marker["subset_seed"]) == (4, 2)
+
+
+def test_a_cap_above_the_training_split_is_refused(data_yaml: Path, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="exceeds"):
+        write_inner_split(DatasetManifest.load(data_yaml), tmp_path / "inner", max_images=6)
 
 
 def test_a_non_empty_output_directory_is_refused(data_yaml: Path, tmp_path: Path) -> None:
