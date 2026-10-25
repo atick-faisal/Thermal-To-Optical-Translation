@@ -251,3 +251,67 @@ So the arms would differ in both training data and checkpoint selection.
 - Cost: the calibration trains on 480 images, so it has fewer steps per epoch than the campaign's
   600. An epoch count transfers between them only approximately.
 - Changing the budget or the trigger after the calibration result exists needs a superseding ADR.
+
+## ADR-05 — FLIR's ModTr arm gets its own calibration run, split from the campaign's 600-image subset
+
+**Date:** 2026-10-25
+**Status:** accepted
+**Tasks:** MODTR-BASELINE-07, and a follow-up task for the split change that `tasks.md` does not
+have yet
+
+**Context**
+ADR-04 sets a calibration run that may shorten ModTr's 400-epoch budget. Record 028 ran it on the
+custom set: the trigger did not fire and the loss rule passed. ADR-04 does not say whether the
+FLIR arm (plan Q7) needs its own calibration run.
+
+FLIR differs from the custom set in its images, its labels and its in-loop detector
+(`runs/inloop-flir-yolo11n/weights/best.pt`). So the custom set's result says nothing about
+whether 400 epochs over-train on FLIR.
+
+The split script can't run a faithful FLIR calibration as it stands:
+- `write_inner_split` splits every image in the training folder
+  (`src/t2o/data/inner_split.py:65`).
+- FLIR's campaign trains on only 600 pairs, chosen by `max_train_images: 600` and
+  `subset_seed: 0` (`experiments/modtr_flir.yaml:23, :28`). That subset is drawn by
+  `capped_subset` (`src/t2o/data/dataset.py:156`).
+
+**Decision**
+- FLIR's ModTr arm gets its own calibration run before its campaign. It follows ADR-04's form
+  exactly:
+  - one seed (0);
+  - an 80/20 inner split with split seed 0;
+  - the in-loop `yolo11n`'s mAP@50 on translated inner-val, logged every epoch;
+  - the same 10-epoch trailing-mean trigger with its 2.0-point threshold;
+  - ADR-03's loss pass rule;
+  - the result recorded through `/log-experiment` before the FLIR campaign starts.
+- **The split is drawn from the campaign's 600-image subset, not FLIR's whole training folder.**
+  The split first applies `capped_subset` with the config's `max_train_images` and
+  `subset_seed`, then splits those 600 into 480 / 120. Validation is never read, as before.
+- The in-loop detector is the one the FLIR campaign uses,
+  `runs/inloop-flir-yolo11n/weights/best.pt`.
+- The FLIR campaign's budget comes from this run alone. The custom set's budget stays as record
+  028 set it.
+
+**Alternatives considered**
+- **Reuse the custom set's result for FLIR, with no calibration run.** It costs nothing and needs
+  no code. But it rests on a different dataset and a different in-loop detector. It would leave
+  ADR-04's guard against over-training unchecked on the public headline cell, the one a reviewer
+  is most likely to reproduce.
+- **Split FLIR's whole training folder, as the script does today.** It needs no code change. But
+  the run would then train on 600 images drawn from 80% of FLIR's training folder, not the 600
+  the campaign uses. Inner-val would also be 20% of that whole folder, scored every epoch, so the
+  run would be much slower and calibrate a different corpus.
+
+**Consequences**
+- A small code change comes before the run: the split has to honour `max_train_images` and
+  `subset_seed`. It is a new task, built and verified on the Mac first.
+- The custom set's split is unaffected. Its config sets no cap, and `capped_subset` keeps every
+  image when the cap is null.
+- Cost: about 6.6 GPU-hours of calibration (the custom set's figure, record 028; FLIR's own cost
+  is unmeasured). The FLIR campaign can't start until that run is recorded.
+- Cost: the two datasets may end up with different epoch budgets. ModTr would then be "400
+  epochs, or less where the calibration fired", not one number across the paper, and that has to
+  be disclosed per dataset.
+- Cost: FLIR's in-loop `yolo11n` was most likely trained on FLIR's visible training images. If
+  so, it has seen the 120 inner-val images, the same caveat record 028 carries. The trigger reads
+  the drop from the curve's own peak, so it is less exposed than the curve's level.
