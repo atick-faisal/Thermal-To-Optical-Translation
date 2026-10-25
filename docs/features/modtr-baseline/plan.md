@@ -126,6 +126,15 @@ the epochs before the crash. The trigger works in mAP points (×100), uses full 
 breaks ties to the earliest window, and sets the budget to the best window's last epoch index
 plus 1.
 
+**FLIR's calibration (ADR-05).** The inner split is cut from the 600 images the campaign trains
+on. `write_inner_split` applies `capped_subset` with the config's `max_train_images` and
+`subset_seed` before the 80/20 draw, and records both in its marker. The Trainer lists and caps
+images the same way, so the 480 + 120 are the campaign's 600. A null cap leaves the custom
+set's split unchanged. The run must then lift both caps: `capped_subset` raises on a cap above
+its split (600 > 480, 153 > 120), and the CLI's integer flags cannot pass a null. So the FLIR
+calibration command adds `--max-train-images 480 --val-loss-images 120`, which `capped_subset`
+reads as the whole split.
+
 ## Open Questions
 
 ### Q8: Where does ModTr's cosine `T_max` come from?
