@@ -14,6 +14,12 @@ splits and native Windows rules out symlinks (`budget.py`), so the pairs are cop
 
 The inner-val images are drawn through :func:`t2o.data.dataset.annotated_subset`, the seeded
 selector every other subset in `t2o` uses.
+
+**A capped corpus is split, not the whole folder (ADR-05).** FLIR's campaign trains on 600 of
+its training pairs (`data.max_train_images`), so its calibration must split those 600, not the
+folder they were drawn from. The images are listed and cut exactly as
+:class:`t2o.data.dataset.TranslationPairDataset` lists and cuts them, so at the same cap and
+seed the inner split's two halves are the campaign's corpus. A null cap splits every image.
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ from pathlib import Path
 
 import yaml
 
-from t2o.data.dataset import IMAGE_SUFFIXES, annotated_subset
+from t2o.data.dataset import IMAGE_SUFFIXES, annotated_subset, capped_subset
 from t2o.data.manifest import RGBT_BLOCK, DatasetManifest
 
 logger = logging.getLogger(__name__)
@@ -45,12 +51,16 @@ def write_inner_split(
     out_dir: Path | str,
     fraction: float = 0.2,
     seed: int = 0,
+    max_images: int | None = None,
+    subset_seed: int = 0,
 ) -> Path:
     """Copy ``manifest``'s training pairs into ``out_dir`` as an inner train/val split.
 
-    ``fraction`` of the training images become the inner val split, the rest the inner train
-    split; the source's val split is never read. Each pair's thermal image and both modalities'
-    labels travel with it, laid out as the source lays them out. Returns the new ``data.yaml``.
+    The training images are first cut to ``max_images`` under ``subset_seed``, as a run's
+    ``data.max_train_images`` and ``data.subset_seed`` cut them; null keeps them all.
+    ``fraction`` of that corpus becomes the inner val split, the rest the inner train split; the
+    source's val split is never read. Each pair's thermal image and both modalities' labels
+    travel with it, laid out as the source lays them out. Returns the new ``data.yaml``.
 
     Refuses a non-empty ``out_dir``: a second split written over a first would leave a mix of
     the two that loads cleanly.
@@ -61,9 +71,11 @@ def write_inner_split(
     if out_dir.exists() and any(out_dir.iterdir()):
         raise InnerSplitError(f"{out_dir} is not empty; write the inner split into a new directory")
 
+    # The listing `TranslationPairDataset` makes, then its cut: anything else picks other images.
     images = sorted(
         p for p in manifest.train_images.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES
     )
+    images = capped_subset(images, max_images, subset_seed)
     held_out = annotated_subset(images, fraction, seed)
     if not held_out or len(held_out) == len(images):
         raise InnerSplitError(
@@ -107,13 +119,16 @@ def write_inner_split(
                     "source": str(manifest.path),
                     "fraction": fraction,
                     "seed": seed,
+                    "max_images": max_images,
+                    "subset_seed": subset_seed,
                 },
             },
             sort_keys=False,
         )
     )
     logger.info(
-        "inner split %s: %d train / %d val of %s's %d training images (fraction %.2f, seed %d)",
+        "inner split %s: %d train / %d val of %s's %d training images "
+        "(fraction %.2f, seed %d; cap %s, subset seed %d)",
         destination,
         len(images) - len(held_out),
         len(held_out),
@@ -121,5 +136,7 @@ def write_inner_split(
         len(images),
         fraction,
         seed,
+        max_images,
+        subset_seed,
     )
     return destination
