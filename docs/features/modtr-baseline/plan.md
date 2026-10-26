@@ -133,7 +133,9 @@ images the same way, so the 480 + 120 are the campaign's 600. A null cap leaves 
 set's split unchanged. The run must then lift both caps: `capped_subset` raises on a cap above
 its split (600 > 480, 153 > 120), and the CLI's integer flags cannot pass a null. So the FLIR
 calibration command adds `--max-train-images 480 --val-loss-images 120`, which `capped_subset`
-reads as the whole split.
+reads as the whole split. Its trigger fired (record 029), so FLIR's campaign trains 339 epochs;
+the two ModTr cells no longer share the loop's 400, and the experiments test pins each to its own
+calibration record.
 
 ## Open Questions
 
