@@ -28,8 +28,9 @@ data:
   subset_seed: 0
 
 train:
-  # ADR-04's budget, the loop's 4 x 100 epochs on FLIR too (record 016).
-  epochs_per_stage: 400
+  # FLIR's own calibration run (record 029, ADR-05): ADR-04's trigger fired, so 339 epochs, not
+  # the loop's 4 x 100. Raising it back trains past the point the trigger flagged.
+  epochs_per_stage: 339
   batch_size: 8
   lr: 1.0e-4
   # Not read by ModTr; the loop's value, as in experiments/modtr_custom.yaml.

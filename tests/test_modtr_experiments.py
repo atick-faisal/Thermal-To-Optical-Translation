@@ -46,6 +46,12 @@ _CELLS: list[tuple[Path, list[Config]]] = [
 ]
 CELLS = [pytest.param(*cell, id=cell[0].stem) for cell in _CELLS]
 
+# ADR-04's budget, as each cell's own calibration run set it (ADR-05).
+CALIBRATED_EPOCHS = {
+    MODTR_CUSTOM: 400,  # record 028: the trigger did not fire, so the loop's 4 x 100 stands
+    MODTR_FLIR: 339,  # record 029: the trigger fired
+}
+
 
 @pytest.mark.parametrize(("modtr_path", "loops"), CELLS)
 def test_data_and_detectors_match_every_paired_loop_cell(
@@ -81,10 +87,13 @@ def test_train_differs_from_the_copied_loop_only_by_modtrs_recipe(
 
 
 @pytest.mark.parametrize(("modtr_path", "loops"), CELLS)
-def test_modtr_trains_the_loops_budget_in_one_detection_only_stage(
+def test_modtr_trains_its_calibrated_budget_in_one_detection_only_stage(
     modtr_path: Path, loops: list[Config]
 ) -> None:
-    """Plan Q1's single stage, ADR-04's 400 epochs, ADR-03's unhinged objective."""
+    """Plan Q1's single stage, ADR-04's calibrated budget, ADR-03's unhinged objective.
+
+    Calibration can only lower the loop's 4 x 100 epochs, never raise it.
+    """
     modtr = Config.load(modtr_path)
 
     assert modtr.translator.backbone == Backbone.MODTR
@@ -92,9 +101,11 @@ def test_modtr_trains_the_loops_budget_in_one_detection_only_stage(
     assert modtr.coupling.grad_scale == 1.0
     assert modtr.coupling.reward_target is None
     assert (modtr.loss.l2, modtr.loss.lpips, modtr.loss.gan) == (0.0, 0.0, 0.0)
+    assert modtr.train.epochs_per_stage == CALIBRATED_EPOCHS[modtr_path]
     for loop in loops:
         loop_epochs = loop.train.epochs_per_stage * len(loop.coupling.task_weights)
-        assert modtr.train.epochs_per_stage == loop_epochs == 400
+        assert loop_epochs == 400
+        assert modtr.train.epochs_per_stage <= loop_epochs
 
 
 @pytest.mark.parametrize("modtr_path", [MODTR_CUSTOM, MODTR_FLIR])
