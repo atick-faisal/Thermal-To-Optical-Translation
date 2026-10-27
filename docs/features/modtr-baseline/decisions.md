@@ -63,7 +63,7 @@ upstream `file:line` for each piece and names every deviation. A test pins the p
 ## ADR-02 — Margin's non-inferiority test: δ = 5 mAP@50 points, paired image bootstrap on seed-averaged mAP
 
 **Date:** 2026-10-22
-**Status:** accepted
+**Status:** superseded by ADR-06
 **Tasks:** MODTR-BASELINE-02, MODTR-BASELINE-05
 
 **Context**
@@ -315,3 +315,53 @@ The split script can't run a faithful FLIR calibration as it stands:
 - Cost: FLIR's in-loop `yolo11n` was most likely trained on FLIR's visible training images. If
   so, it has seen the 120 inner-val images, the same caveat record 028 carries. The trigger reads
   the drop from the curve's own peak, so it is less exposed than the curve's level.
+
+## ADR-06 — FLIR's Margin is read on 3-class mAP@50 (bicycle, car, person)
+
+**Date:** 2026-10-27
+**Status:** accepted
+**Tasks:** MODTR-BASELINE-05, and a follow-up task for the class subset that `tasks.md` does not
+yet list
+
+**Context**
+ADR-02 names Margin's endpoint as "mAP@50" with no class subset, and was written with the 5-class
+custom set in mind. MODTR-BASELINE-05 implemented it as all-class mAP@50
+(`scripts/modtr_non_inferiority.py:111-112`, `map50_from_stats`), which on FLIR means 4-class.
+FLIR's primary has been 3-class since record 012's F94: dog has 13 val instances but carries a
+quarter of a 4-class mean, and record 016 fixed the 3-class endpoint before reading its numbers.
+Record 031 scored FLIR's Margin on 4-class and it failed: loop − ModTr −5.80, CI [−7.00, −3.65].
+So FLIR's verdict sits on the one endpoint the repo had already demoted for FLIR. ADR-02's
+consequences require a superseding ADR for any change to the test after a ModTr number exists.
+This is that ADR, written **after** the 4-class result was seen. It supersedes ADR-02.
+
+**Decision**
+- **FLIR's Margin endpoint is 3-class mAP@50** (bicycle, car, person), the mean
+  `metrics/task.py::primary_mean` takes. **The custom set keeps all-class mAP@50** over its five
+  classes.
+- **Everything else in ADR-02 is restated unchanged:** δ = 5 mAP@50 points, absolute; a paired 95%
+  bootstrap over the val images on seed-averaged mAP, 10,000 resamples, with per-seed deltas and
+  their sd reported beside it; each dataset's reference `yolo11s` as the scorer; pass when the
+  lower bound is above −5.
+- **Record 031's 4-class verdict stands.** It is reported beside the 3-class one, and the paper
+  discloses both versions and the order in which they were decided.
+- **The 3-class verdict comes from a new scoring run**, recorded through `/log-experiment`.
+
+**Alternatives considered**
+- Keep the 4-class verdict as primary, with a 3-class re-read as a labelled secondary: the most
+  conservative about pre-registration. It lost because FLIR's Margin would then be the only FLIR
+  headline on a different endpoint from records 016 and 026.
+- Report 4-class only: it costs nothing. It lost because it rests FLIR's verdict on an endpoint
+  F94 showed a 13-instance class can move: a 0.4 AP swing in dog moves the 4-class mean by 0.1.
+
+**Consequences**
+- Cost: this is post hoc. It was chosen after the 4-class FAIL was seen, and a reviewer can read
+  it as moving the goalposts. Against that: 3-class was FLIR's primary before ModTr existed (F94),
+  and record 031 predicted, before any 3-class score, that the loop still trails on 3-class. Under
+  RT-DETR it trails by 10.83 points at 3-class (F206). If the prediction holds, the switch rescues
+  nothing.
+- Cost: a code change and a server run. The bootstrap re-scores every image, so the class subset
+  has to reach `scripts/modtr_non_inferiority.py`; it cannot be rebuilt from `metrics.json`.
+  Scoring plus bootstrap took about 1 h 38 min on FLIR (F209).
+- The two datasets read Margin on different class sets. Each matches that dataset's own primary.
+- Which dataset decides Margin does not change: plan Q7 still has the custom set deciding it,
+  with FLIR as its public counterpart.

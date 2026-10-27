@@ -137,6 +137,13 @@ reads as the whole split. Its trigger fired (record 029), so FLIR's campaign tra
 the two ModTr cells no longer share the loop's 400, and the experiments test pins each to its own
 calibration record.
 
+**FLIR's class subset (ADR-06)** restricts each image's `ImageStats` to the kept classes before
+`seed_averaged_bootstrap`, rather than threading classes through `map50_from_stats`: ultralytics
+matches a prediction only to a same-class label (`engine/validator.py:335-336`) and computes AP
+per class (`utils/metrics.py:838-848`), so dropping dog leaves every other class's AP unchanged
+and the pool mean equals `primary_mean`. The server re-score checks it: the loop's per-seed
+3-class values must equal record 026's `zero_shot.primary_map50`.
+
 ## Open Questions
 
 ### Q8: Where does ModTr's cosine `T_max` come from?
@@ -238,6 +245,7 @@ what makes fixing δ now honest rather than a guess. On the custom set:
 - [ ] The seed-level sign-flip test (design.md:660-666) — matches the rule for seed intervals.
       But it tests superiority, not non-inferiority. With 3–6 seeds it cannot express a margin
       well, and ADR-01 already rejected it for Margin.
+> Superseded by ADR-06 (2026-10-27)
 
 ### Q6: Should `scripts/loss_share.py` be run for ModTr?
 
