@@ -14,13 +14,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import yaml
 from scripts.modtr_non_inferiority import CSV_FILENAME, MEAN, main
+from ultralytics.utils.metrics import ap_per_class
 
 from t2o.data.manifest import ManifestError
-from t2o.metrics.task import ImageStats
-from test_resolvability import _arm
+from t2o.metrics.task import ImageStats, map50_from_stats
+from test_resolvability import POOL_SIZE, _arm
 
 SEEDS = (0, 1, 3)
 LOOP = "e3b-loop"
@@ -197,3 +199,117 @@ def test_missing_reference_weights_fail_before_any_val_run(
     with pytest.raises(SystemExit, match="--reference-weights not found"):
         main(_argv(runs, tmp_path / "absent.pt", tmp_path / "score", *SEEDS))
     assert ahead == []
+
+
+def _three_class_arm(hit_rate: float, seed: int) -> dict[str, ImageStats]:
+    """Image `i` holds one Fuse, Pole or Switch label (`i % 3`), found with probability
+    `hit_rate`, plus a false positive of the next class along -- so every Switch-only image
+    also carries a Fuse false positive, which a subset that dropped the image would lose."""
+    rng = np.random.default_rng(seed)
+    arm: dict[str, ImageStats] = {}
+    for i in range(POOL_SIZE):
+        stem = f"img{i:02d}"
+        cls, wrong = float(i % 3), float((i + 1) % 3)
+        arm[stem] = ImageStats(
+            stem=stem,
+            tp=np.repeat(np.array([[rng.random() < hit_rate], [False]]), 10, axis=1),
+            conf=rng.uniform(0.0, 1.0, size=2),
+            pred_cls=np.array([cls, wrong]),
+            target_cls=np.array([cls]),
+        )
+    return arm
+
+
+THREE_STRONG = {seed: _three_class_arm(hit_rate=0.9, seed=30 + seed) for seed in SEEDS}
+THREE_WEAK = {seed: _three_class_arm(hit_rate=0.3, seed=40 + seed) for seed in SEEDS}
+FUSE, POLE, SWITCH = 0, 1, 2
+
+
+def _mean_ap50(records: dict[str, ImageStats], classes: set[int]) -> float:
+    """The mean of ultralytics' own per-class AP@50 over `classes`, from every record."""
+    values = list(records.values())
+    stats = ap_per_class(
+        np.concatenate([r.tp for r in values]),
+        np.concatenate([r.conf for r in values]),
+        np.concatenate([r.pred_cls for r in values]),
+        np.concatenate([r.target_cls for r in values]),
+    )
+    ap, unique = stats[5], stats[6]
+    return float(np.mean([ap[k, 0] for k, c in enumerate(unique) if c in classes]))
+
+
+@pytest.fixture
+def three(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    return _stub(monkeypatch, {LOOP: THREE_STRONG, MODTR: THREE_WEAK})
+
+
+def test_a_class_subset_scores_the_mean_ap_over_those_classes(
+    runs: Path,
+    judge: Path,
+    tmp_path: Path,
+    three: list[dict[str, Any]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    out = tmp_path / "score"
+    main([*_argv(runs, judge, out, *SEEDS), "--primary-classes", "Fuse", "Pole"])
+
+    rows = _rows(out)
+    for row in rows[:-1]:
+        seed = int(row["seed"])
+        assert float(row["loop_map50"]) == pytest.approx(
+            _mean_ap50(THREE_STRONG[seed], {FUSE, POLE})
+        )
+        assert float(row["modtr_map50"]) == pytest.approx(
+            _mean_ap50(THREE_WEAK[seed], {FUSE, POLE})
+        )
+    assert all(row["classes"] == "Fuse Pole" for row in rows)
+    assert _verdicts(caplog)[0].endswith("on Fuse, Pole")
+
+
+def test_an_image_with_only_excluded_labels_stays_in_the_pool(
+    runs: Path, judge: Path, tmp_path: Path, three: list[dict[str, Any]]
+) -> None:
+    out = tmp_path / "score"
+    main([*_argv(runs, judge, out, *SEEDS), "--primary-classes", "Fuse", "Pole"])
+
+    seed_0 = _rows(out)[0]
+    assert seed_0["pool"] == str(POOL_SIZE)
+    # Dropping the Switch-only images would also drop their Fuse false positives.
+    kept_images = [r for r in THREE_STRONG[0].values() if r.target_cls[0] != SWITCH]
+    assert float(seed_0["loop_map50"]) != pytest.approx(
+        map50_from_stats([_without(r, SWITCH) for r in kept_images])
+    )
+
+
+def _without(record: ImageStats, cls: int) -> ImageStats:
+    kept = record.pred_cls != cls
+    return ImageStats(
+        stem=record.stem,
+        tp=record.tp[kept],
+        conf=record.conf[kept],
+        pred_cls=record.pred_cls[kept],
+        target_cls=record.target_cls[record.target_cls != cls],
+    )
+
+
+def test_an_unknown_class_fails_before_any_val_run(
+    runs: Path, judge: Path, tmp_path: Path, ahead: list[dict[str, Any]]
+) -> None:
+    with pytest.raises(SystemExit, match="dog"):
+        main([*_argv(runs, judge, tmp_path / "score", *SEEDS), "--primary-classes", "Fuse", "dog"])
+    assert ahead == []
+
+
+def test_the_default_scores_every_class_as_before(
+    runs: Path, judge: Path, tmp_path: Path, ahead: list[dict[str, Any]]
+) -> None:
+    out = tmp_path / "score"
+    main(_argv(runs, judge, out, *SEEDS))
+
+    rows = _rows(out)
+    for row in rows[:-1]:
+        seed = int(row["seed"])
+        assert float(row["loop_map50"]) == map50_from_stats(list(STRONG[seed].values()))
+        assert float(row["modtr_map50"]) == map50_from_stats(list(WEAK[seed].values()))
+    assert all(row["classes"] == "Fuse Pole Switch Transformer" for row in rows)
