@@ -16,6 +16,15 @@ invocation into its own `--out`.
 (margin-gate ADR-01). Both arms' exports carry the visible labels they were mirrored from
 (`engine/export.py::_mirror_label`), and the pairing check refuses any image whose labels differ.
 
+**A class subset filters the records, not the pool** (ADR-06: FLIR's Margin is read on bicycle,
+car and person, leaving dog out). `--primary-classes` drops every other class's predictions and
+labels from each image before the bootstrap. Each image stays in the pool, even one left with no
+labels, so every draw is still over the whole val split. This is the same number as
+`primary_mean` over the per-class APs, because ultralytics matches a prediction only to a label
+of its own class (`engine/validator.py:335-336`) and computes AP one class at a time
+(`utils/metrics.py:838-848`). Removing a class therefore leaves every other class's AP
+unchanged.
+
 **Not resumable** (modtr-baseline plan, Q9). The interval needs every seed's records at once, so
 CSV rows alone cannot resume it, and a rerun repays only a few val runs. The CSV is written once,
 after the bootstrap, and an existing one is refused rather than overwritten.
@@ -29,9 +38,11 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
+
+import numpy as np
 
 from t2o.analysis.resolvability import (
     NON_INFERIORITY_MARGIN,
@@ -77,11 +88,47 @@ class Row:
     loop_data: str  # the export, or on the MEAN row the template
     modtr_data: str
     weights: str
+    classes: str  # the class set every mAP in the row is over, space-separated (ADR-06)
 
 
 def _export_manifest(template: str, seed: int) -> DatasetManifest:
     """One seed's export. A template, so the seed-to-export pairing is structural."""
     return DatasetManifest.load(Path(template.format(seed=seed)) / "data.yaml")
+
+
+def _class_ids(classes: Sequence[str], manifests: Mapping[str, DatasetManifest]) -> list[int]:
+    """`classes` as indices, refused unless every export names them at the same index.
+
+    Both arms' records are filtered by one id set, so an export whose `names` order differed
+    would silently keep a different class in one arm.
+    """
+    for label, manifest in manifests.items():
+        if not set(classes) <= set(manifest.class_names):
+            raise SystemExit(
+                f"--primary-classes {list(classes)} not all in {label}: {manifest.class_names}"
+            )
+    orders = {tuple(m.class_names.index(name) for name in classes) for m in manifests.values()}
+    if len(orders) > 1:
+        raise SystemExit(
+            f"--primary-classes {list(classes)} sit at different indices across "
+            f"the exports: {sorted(orders)}"
+        )
+    return list(orders.pop())
+
+
+def _restrict(records: dict[str, ImageStats], ids: Sequence[int]) -> dict[str, ImageStats]:
+    """Every image, holding only the predictions and labels of the classes in `ids`."""
+    restricted: dict[str, ImageStats] = {}
+    for stem, record in records.items():
+        kept = np.isin(record.pred_cls, ids)
+        restricted[stem] = replace(
+            record,
+            tp=record.tp[kept],
+            conf=record.conf[kept],
+            pred_cls=record.pred_cls[kept],
+            target_cls=record.target_cls[np.isin(record.target_cls, ids)],
+        )
+    return restricted
 
 
 def _collect(args: argparse.Namespace, data_yaml: Path) -> dict[str, ImageStats]:
@@ -122,6 +169,7 @@ def _rows(
             loop_data=str(loops[seed].path),
             modtr_data=str(modtrs[seed].path),
             weights=str(args.reference_weights),
+            classes=" ".join(args.primary_classes),
         )
         for seed in sorted(loop)
     ]
@@ -150,7 +198,7 @@ def _write(csv_path: Path, rows: list[Row]) -> None:
         writer.writerows(asdict(row) for row in rows)
 
 
-def _log_verdict(interval: SeedAveragedInterval) -> None:
+def _log_verdict(interval: SeedAveragedInterval, classes: Sequence[str]) -> None:
     logger.info(
         "per-seed deltas (loop - ModTr): %s; sd %.2f mAP points",
         ", ".join(f"s{seed} {delta:+.2f}" for seed, delta in interval.seed_deltas.items()),
@@ -158,17 +206,19 @@ def _log_verdict(interval: SeedAveragedInterval) -> None:
     )
     if non_inferior(interval.low):
         logger.info(
-            "verdict: NON-INFERIOR -- lower bound %.2f > -%.1f mAP points (delta %+.2f)",
+            "verdict: NON-INFERIOR -- lower bound %.2f > -%.1f mAP points (delta %+.2f) on %s",
             interval.low,
             NON_INFERIORITY_MARGIN,
             interval.delta,
+            ", ".join(classes),
         )
     else:
         logger.info(
-            "verdict: NOT NON-INFERIOR -- lower bound %.2f <= -%.1f mAP points (delta %+.2f)",
+            "verdict: NOT NON-INFERIOR -- lower bound %.2f <= -%.1f mAP points (delta %+.2f) on %s",
             interval.low,
             NON_INFERIORITY_MARGIN,
             interval.delta,
+            ", ".join(classes),
         )
 
 
@@ -198,6 +248,14 @@ def build_parser() -> argparse.ArgumentParser:
         # margin-gate ADR-01: the scorer the gate used and Margin is defined on.
         help="the zero-shot reference judge that scores every arm",
     )
+    # Same spelling as scripts/gate_table.py and `t2o aggregate`, so Margin's class set is
+    # stated the way the gate and the campaign state theirs.
+    parser.add_argument(
+        "--primary-classes",
+        nargs="+",
+        help="the classes Margin is read on; defaults to every class in the exports. For FLIR: "
+        "bicycle car person (ADR-06)",
+    )
     parser.add_argument("--resamples", type=int, default=10000)
     parser.add_argument("--bootstrap-seed", type=int, default=0)
     parser.add_argument("--imgsz", type=int, default=DEFAULT_IMGSZ)
@@ -218,20 +276,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"--reference-weights not found: {args.reference_weights}")
     loops = {seed: _export_manifest(args.loop_template, seed) for seed in args.seeds}
     modtrs = {seed: _export_manifest(args.modtr_template, seed) for seed in args.seeds}
+    exports = {str(m.path): m for m in (*loops.values(), *modtrs.values())}
+    args.primary_classes = args.primary_classes or loops[args.seeds[0]].class_names
+    ids = _class_ids(args.primary_classes, exports)
 
     loop: dict[int, dict[str, ImageStats]] = {}
     modtr: dict[int, dict[str, ImageStats]] = {}
     for seed in args.seeds:
         logger.info("seed %d: scoring the loop and ModTr", seed)
-        loop[seed] = _collect(args, loops[seed].path)
-        modtr[seed] = _collect(args, modtrs[seed].path)
+        loop[seed] = _restrict(_collect(args, loops[seed].path), ids)
+        modtr[seed] = _restrict(_collect(args, modtrs[seed].path), ids)
 
     interval = seed_averaged_bootstrap(
         loop, modtr, resamples=args.resamples, seed=args.bootstrap_seed
     )
     _write(csv_path, _rows(args, loops, modtrs, loop, modtr, interval))
     logger.info("wrote %s", csv_path)
-    _log_verdict(interval)
+    _log_verdict(interval, args.primary_classes)
     return 0
 
 
