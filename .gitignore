@@ -34,6 +34,10 @@ third_party/**/checkpoints/
 # `tmp_path_factory`, and skip any test wanting the real fixture when it is absent.
 dataset/
 
+# Deep-research output — discusses unpublished results, so it stays local on this public remote
+research_notes/
+reports/
+
 # ultralytics-generated label caches — derived state; stale ones fail silently
 *.cache
 
