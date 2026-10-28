@@ -3,7 +3,7 @@
 ## ADR-01 — Faithfulness margin: the control arm's seed spread under the RT-DETR judge
 
 **Date:** 2026-10-20
-**Status:** accepted
+**Status:** superseded by ADR-02
 **Tasks:** OUT-OF-FAMILY-JUDGE-06
 
 **Context**
@@ -78,3 +78,78 @@ not settled:
   the same `t2o faithfulness` settings.
 - **Faithfulness is not closed by this entry.** It closes when the pinned test split is scored
   against these numbers.
+
+## ADR-02 — Faithfulness is decided on val, under ADR-01's margins and rule
+
+**Date:** 2026-10-28
+**Status:** accepted
+**Tasks:** none — the verdict is applied by a `/log-experiment` record, not a task
+
+**Context**
+This supersedes ADR-01's split and closure terms. ADR-01 applied its pass rule "on the test split"
+and said Faithfulness closes only when that split is scored. No test split exists: the custom set
+is 600 train / 153 val, frozen, and `goal.md:61-65` now scores Faithfulness on val, with a margin
+"drawn from the same validation data it is scored on, and the paper says so". Applying the rule
+also runs into `design.md:664`: "No claim rests on a bootstrap interval excluding zero." The rule
+uses a seed-level percentile bootstrap CI, which is exactly the unit that line was written about.
+Margin-gate ADR-01 avoided that line because its interval is over images, but this interval is
+over seeds, so that route is closed. One more fact forced the choice: on val, e3t's (turbo)
+false-object difference is +0.0040, well inside its 0.0315 margin, while its n = 3 interval
+reaches +0.0538 (record 026, `026-out-of-family-rtdetr-judge.md:1248`). The handling of the CI
+decides turbo's verdict.
+
+**Decision**
+- **The split is val.** ADR-01's pass rule applies to record 026's stage-3 val scores under
+  `rtdetr`, with nothing else changed. "On the test split" now reads "on val".
+- **ADR-01's margins and rule stand word for word.** The per-cell, per-rate table, the seed-paired
+  95% bootstrap CI, its direction per rate, and the scope to record 026's checkpoints all stay.
+  Nothing is retuned.
+- **A scoped exception to `design.md:664`, stated by direction.**
+  - **A fail is robust.** The percentile bootstrap at n = 3–6 is anti-conservative, i.e. too
+    narrow. An interval that crosses the margin while too narrow would also cross it at its
+    honest width.
+  - **A pass rests on that anti-conservative interval** and is reported that way, beside the
+    rate's exact sign-flip p.
+  - `design.md` is not edited.
+- **The verdict is per cell and per rate.** A fail is reported as a fail. It is not outvoted by
+  another cell on the same dataset.
+- **Faithfulness closes** when one record applies this rule to record 026's numbers.
+- **ModTr's rates are reported**, as `goal.md:65` asks ("for every arm"), under the same judge
+  checkpoints. ModTr sits outside the pass rule, which compares loop against control only.
+
+**Alternatives considered**
+- **An exact one-sided sign-flip test of (loop − control − margin)**: it is design.md's own test,
+  but it changes the rule after the numbers are seen. At n = 3 its smallest p is 0.125, so turbo
+  could never pass any rate by construction.
+- **The point estimate inside the margin, with the CI shown as descriptive spread**: turbo would
+  pass (+0.0040 vs 0.0315). That is a rule change toward a pass, made after seeing a fail.
+- **Margin-gate ADR-01's scoping argument (the interval is over images, not seeds)**: this
+  interval is over seeds, so the argument does not hold here.
+- **Editing `design.md:664` to carve out the exception**: the line is right about passes, which
+  are the claims it guards. A scope note in this entry is enough, as it was for margin-gate.
+- **Retuning turbo's margin, e.g. borrowing e3b's six-seed spread**: ADR-01 already rejected this
+  because it breaks "the noise of exactly the unit being compared". Doing it after seeing the fail
+  would be the post-hoc tuning a fixed margin exists to prevent.
+- **More turbo seeds to tighten its interval**: a costly server campaign, and it reads as chasing
+  a pass after a fail.
+- **Resting the custom set's Faithfulness on e3b alone**: it breaks consistency with how similar
+  experiments were run before. Earlier campaigns reported e3b and e3t each in their own right
+  (records 007 and 010), and this verdict follows the same practice.
+- **Waiting for a held-out test split**: none exists or is planned. `goal.md` now scores on val.
+
+**Consequences**
+- **Turbo's false-object rate fails**, and the paper reports it. The custom set's Faithfulness is
+  split: pix2pix passes and turbo fails on one rate.
+- **The turbo fail shows an unresolved rate, not more invented objects.** Its point estimate is
+  +0.0040 (p = .75); the fail comes from n = 3's interval width. The paper has to say so in those
+  terms.
+- **Passes are weaker evidence than fails.** They rest on an interval `design.md` calls
+  anti-conservative. e3b's false-object pass has a sign-flip p of .156, which shows no difference
+  either way, not a demonstrated equivalence.
+- **The margins and the verdict come from the same data.** Record 026 printed the paired
+  differences on 2026-10-19, and ADR-01 fixed the margins from the control spread on 2026-10-20.
+  This is disclosed, as `goal.md:63-64` requires.
+- **Nothing reopens Faithfulness** once the record lands, because no test split will arrive to
+  re-score it. ADR-01's checkpoint tie and its scoring-match rule still bind any re-score.
+- **The ModTr rates need a server run** using these same judge checkpoints. Reporting them with a
+  CI needs code, because `t2o aggregate` cannot pair ModTr runs (`aggregate.py:285-298`).
