@@ -43,17 +43,20 @@ This repo is an instrument for answering one question with one defensible result
 
 ## Success Criteria
 
-Drafting begins when **all six** hold:
+All six are measured and **reported, passed or not**. Drafting does not wait for all six to
+hold: a criterion that fails goes into the paper as a characterised limit, with its numbers,
+not as a reason to hold the draft. (Amended 2026-10-29; the earlier gate was "drafting
+begins when all six hold".)
 
 - **Margin** — on the power-line validation split (the reporting split; see Constraints), the
   loop beats the strongest baseline that keeps the visible detector frozen (raw thermal; the
-  same translator without the loop; ModTr and HalluciDet trained on the same data; zero-shot
-  Grounding DINO) by ≥ +2 mAP@50, with a 95% bootstrap CI over validation images that
+  same translator without the loop; ModTr trained on the same data; zero-shot Grounding
+  DINO) by ≥ +2 mAP@50, with a 95% bootstrap CI over validation images that
   excludes zero and a non-negative mAP@50:95 delta. If that CI cannot resolve +2, Margin
   becomes non-inferiority to ModTr, with Transfer and Faithfulness carrying the claim.
 - **Transfer** — the loop's gain over the no-loop translator holds for at least one visible
   detector from a different family, never used in the loop, across ≥3 seeds.
-- **Consistency** — on ≥2 of the 4 datasets, the loop beats its own no-loop control
+- **Consistency** — on ≥2 of the 3 datasets (custom, FLIR-aligned, `msrs-day`), the loop beats its own no-loop control
   (sign-flip test, ≥3 seeds). Whether translation beats raw thermal is *not* a criterion: it
   is C2's measured outcome, reported for every dataset, failures included.
 - **Causality** — the λ_det ablation (E3) shows the loop drives the gain, seed-stable.
@@ -76,7 +79,10 @@ Alongside them:
   visible detector on raw thermal), annotation budget (the thermal labels a direct detector
   needs to match the loop, E8), and registration error (how fast label transfer and
   translation each degrade as alignment worsens). Label transfer is compared with the visible
-  detector trained both on the pairs and on visible data the translator never saw.
+  detector trained both on the pairs and on visible data the translator never saw. The
+  registration-error axis is required; the never-seen-visible comparison is **optional**,
+  run if GPU time allows before January, otherwise stated as a limitation. (Amended
+  2026-11-03.)
 - **C3** — an object-level insertion/deletion audit for translators trained against a
   detector.
 - **C4** — a power-line testbed and reproducible protocol: frozen splits, and per dataset a
@@ -84,16 +90,31 @@ Alongside them:
   references. If the second power-line set (below) is annotated, it is released as the
   public power-line benchmark, with a cross-camera split (train on one camera model, test
   on the other) and a cross-country test against the Brazilian set.
-- **A decision-level fusion experiment** combining the translation route with the
-  label-transfer route.
-- A submission-ready manuscript for **Information Fusion**, framing the loop as cross-modal
-  knowledge fusion.
+- **An uncertainty budget** for the headline measurement (mAP@50 of a frozen judge on the
+  translated image), GUM-style: spread across seeds, bootstrap over validation images, and
+  spread across judge detectors. Built from existing runs.
+- **A measured ground-truth quality ceiling.** No-reference quality scores, sharpness and
+  noise of the real visible photos against the translations, so "the outputs are only as
+  good as the visible targets" is a measurement, not an assertion.
+- **A qualitative field check on thermal-only imagery.** The ~300 very-high-resolution
+  thermal images with no visible counterpart, preprocessed to the training pixel scale and
+  inspected visually. No labels, so it is a figure, not a measured result.
+- A submission-ready manuscript for **IEEE Transactions on Instrumentation and
+  Measurement**, framed as a characterised measurement procedure, submitted by **31 January
+  2027**. If TIM rejects without review, it goes to **Engineering Applications of AI** the
+  same week. (Amended 2026-10-29; replaces Information Fusion and the decision-level fusion
+  experiment it required.)
 
 ## Non-Goals
 
 - **Nothing outside the publication.** The goal is one paper: a translation → detection
   loop, with the emphasis on power-line components and benchmarking on public datasets.
-  Work that does not serve that paper is a non-goal, however useful.
+  Work that does not serve that paper is a non-goal, however useful. The paired→unpaired
+  enhancer cascade is a second paper: it enters this one only if it passes a faithfulness
+  gate, fixed before its first score, by 10 January 2027.
+- **No HalluciDet re-run and no M3FD cell.** HalluciDet is cited as prior art, not
+  retrained; M3FD is fetched but not used as a benchmark, since two public sets already
+  carry Consistency. (Amended 2026-10-29.)
 - **Not a product, not an inspection tool.** No inference service, deployment tooling, UI,
   labelling tools, real-time optimisation or edge deployment. If it does not feed the
   results table or its defence, it does not belong here.
