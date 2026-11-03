@@ -621,10 +621,18 @@ def _run_faithfulness(args: argparse.Namespace) -> int:
         imgsz=args.imgsz,
         batch=args.batch,
         device=args.device,
+        class_names=manifest.names,
     )
     logger.info("  false-object rate       %.4f  (LOWER better)", metrics.false_object_rate)
     logger.info("  missed-object rate      %.4f  (LOWER better)", metrics.missed_object_rate)
     logger.info("  detection-consistency   %.4f  (higher better)", metrics.detection_consistency)
+    for name, missed in metrics.missed_object_rate_by_class.items():
+        logger.info(
+            "    %-14s false %.4f  missed %.4f",
+            name,
+            metrics.false_object_rate_by_class[name],
+            missed,
+        )
 
     if target is not None:
         from t2o.engine.loop import record_faithfulness, record_judge

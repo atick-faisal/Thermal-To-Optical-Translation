@@ -34,12 +34,21 @@ box the judge finds again, with the same
 class at IoU >= 0.5, on the translation of that erased input is an object the pipeline put back
 with no evidence for it. The matcher is the same `_greedy_match`, so a completion and a missed
 object are the same match read from opposite sides.
+
+**Per-class missed- and false-object rates** (cascade-gate ADR-03) sit beside the pooled two.
+The gate reads the fuse and switch rates, which poles -- many, and easy -- would dilute in a
+pooled count. They are read off the same matches, so no match changes, and each class's counts
+add up exactly to the pooled counts. Keys are every class the dataset names, not just the classes
+seen, so a class's key exists in every seed's ``metrics.json`` and ``t2o aggregate`` can always
+pair it.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -152,6 +161,15 @@ class FaithfulnessMetrics:
     false_object_rate: float
     missed_object_rate: float
     detection_consistency: float
+    # Keyed by class name. Empty by default, so a `metrics.json` written before these existed
+    # still loads through `FaithfulnessMetrics(**...)` (`engine/loop.py`).
+    false_object_rate_by_class: dict[str, float] = field(default_factory=dict)
+    missed_object_rate_by_class: dict[str, float] = field(default_factory=dict)
+
+
+def _rate(failures: int, total: int) -> float:
+    """``failures / total``, or 0.0 when there was nothing to fail on: the no-failure value."""
+    return failures / total if total else 0.0
 
 
 class FaithfulnessEvaluator:
@@ -163,10 +181,14 @@ class FaithfulnessEvaluator:
     `_greedy_match` at the same `iou_threshold`, which is what makes the three rates
     comparable to each other and to every other translator's numbers run through this
     class (PLAN.md invariant 1).
+
+    ``class_names`` is the dataset's ``names:``, index for index. Given, the missed- and
+    false-object rates are also counted per class; left empty, the per-class rates are too.
     """
 
-    def __init__(self, iou_threshold: float = 0.5) -> None:
+    def __init__(self, iou_threshold: float = 0.5, class_names: Sequence[str] = ()) -> None:
         self._iou_threshold = iou_threshold
+        self._class_names = tuple(class_names)
         self.reset()
 
     def update(self, translated: Detections, visible: Detections, gt: Detections) -> None:
@@ -180,18 +202,43 @@ class FaithfulnessEvaluator:
         self._consistent += int(visible_matched.sum())
         self._total_visible += visible.cls.shape[0]
 
+        if self._class_names:
+            self._check_named(translated)
+            self._check_named(gt)
+            self._false_by_class.update(translated.cls[~translated_matched_gt].tolist())
+            self._translated_by_class.update(translated.cls.tolist())
+            self._missed_by_class.update(gt.cls[~gt_matched].tolist())
+            self._gt_by_class.update(gt.cls.tolist())
+
+    def _check_named(self, detections: Detections) -> None:
+        """Refuse a class id with no name, which would drop out of the per-class counts
+        and leave them no longer adding up to the pooled ones."""
+        n = len(self._class_names)
+        unknown = sorted({c for c in detections.cls.tolist() if not 0 <= c < n})
+        if unknown:
+            raise ValueError(
+                f"class ids {unknown} have no name among the {n} classes "
+                f"{list(self._class_names)}; the judge and the data.yaml disagree on classes"
+            )
+
     def compute(self) -> FaithfulnessMetrics:
         return FaithfulnessMetrics(
-            false_object_rate=(
-                self._false_objects / self._total_translated if self._total_translated else 0.0
-            ),
-            # Nothing to miss is not a failure -- defaults to the best-case value like
-            # false_object_rate's empty case above, not to an undefined 0/0.
-            missed_object_rate=(self._missed_objects / self._total_gt if self._total_gt else 0.0),
+            false_object_rate=_rate(self._false_objects, self._total_translated),
+            # Nothing to miss is not a failure -- the best-case value like
+            # false_object_rate's empty case above, not an undefined 0/0.
+            missed_object_rate=_rate(self._missed_objects, self._total_gt),
             # Nothing on the real photo to be inconsistent with -- vacuously consistent.
             detection_consistency=(
                 self._consistent / self._total_visible if self._total_visible else 1.0
             ),
+            false_object_rate_by_class={
+                name: _rate(self._false_by_class[i], self._translated_by_class[i])
+                for i, name in enumerate(self._class_names)
+            },
+            missed_object_rate_by_class={
+                name: _rate(self._missed_by_class[i], self._gt_by_class[i])
+                for i, name in enumerate(self._class_names)
+            },
         )
 
     def reset(self) -> None:
@@ -201,6 +248,10 @@ class FaithfulnessEvaluator:
         self._total_gt = 0
         self._consistent = 0
         self._total_visible = 0
+        self._false_by_class: Counter[int] = Counter()
+        self._translated_by_class: Counter[int] = Counter()
+        self._missed_by_class: Counter[int] = Counter()
+        self._gt_by_class: Counter[int] = Counter()
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +376,7 @@ def evaluate_faithfulness(
     imgsz: int = 640,
     batch: int = 16,
     device: str | None = None,
+    class_names: Sequence[str] = (),
 ) -> FaithfulnessMetrics:
     """Score one translated export against the real visible frames it was translated from.
 
@@ -341,6 +393,8 @@ def evaluate_faithfulness(
     Ground truth is read from the *source* labels via ``pairing``, not from the export's
     mirrored copy: ``export.py::_mirror_label`` copies them verbatim, so the two agree, and
     reading the source keeps one source of truth for what the boxes are.
+
+    ``class_names`` (the manifest's ``names``) turns on the per-class rates.
     """
     from ultralytics import YOLO
 
@@ -360,7 +414,7 @@ def evaluate_faithfulness(
     translated_detections = detect(translated_paths)
     visible_detections = detect(visible_paths)
 
-    evaluator = FaithfulnessEvaluator(iou_threshold=iou_threshold)
+    evaluator = FaithfulnessEvaluator(iou_threshold=iou_threshold, class_names=class_names)
     for visible_path, translated, visible in zip(
         visible_paths, translated_detections, visible_detections, strict=True
     ):
