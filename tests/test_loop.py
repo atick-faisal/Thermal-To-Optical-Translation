@@ -32,7 +32,7 @@ from t2o.engine.loop import (
     record_judge,
     run_loop,
 )
-from t2o.metrics.faithfulness import FaithfulnessMetrics
+from t2o.metrics.faithfulness import CompletionMetrics, FaithfulnessMetrics
 from t2o.metrics.task import TaskMetrics
 from t2o.translators import StubTranslator, build_translator
 
@@ -517,6 +517,29 @@ def test_recorded_judge_scores_survive_a_resume(
     entries = _metrics_json(run_dir)
     assert entries[0]["judges"] == judged
     assert "judges" not in entries[1]
+
+
+def test_record_judge_files_completion_beside_the_judges_faithfulness(tmp_path: Path) -> None:
+    """The erasure probe lands next to the same judge's rates and round-trips on resume.
+
+    Its key is the dotted path `t2o aggregate --metric judges.rtdetr.completion.completion_rate`
+    reads, so the probe pairs by seed with no aggregator change.
+    """
+    (tmp_path / METRICS_FILENAME).write_text(
+        json.dumps([{"stage": 3, "task_weight": 1.0, "epochs": [], "detector": None}])
+    )
+
+    record_judge(tmp_path, 3, "rtdetr", faithfulness=_stub_rates())
+    record_judge(tmp_path, 3, "rtdetr", completion=CompletionMetrics(completion_rate=0.0625))
+
+    judge = json.loads((tmp_path / METRICS_FILENAME).read_text())[0]["judges"]["rtdetr"]
+    assert judge["completion"] == {"completion_rate": 0.0625}
+    assert judge["faithfulness"]["false_object_rate"] == 0.125
+    assert _load_existing_results(tmp_path)[0].judges == {
+        "rtdetr": JudgeScores(
+            faithfulness=_stub_rates(), completion=CompletionMetrics(completion_rate=0.0625)
+        )
+    }
 
 
 def test_a_metrics_json_without_epoch_seconds_still_loads(tmp_path: Path) -> None:

@@ -25,7 +25,7 @@ from t2o.cli import (
     overrides_from_args,
 )
 from t2o.config import Config
-from t2o.metrics.faithfulness import FaithfulnessMetrics
+from t2o.metrics.faithfulness import CompletionMetrics, FaithfulnessMetrics
 from t2o.metrics.task import TaskMetrics
 from t2o.translators import StubTranslator, build_translator
 
@@ -499,6 +499,23 @@ def _faithfulness_argv(
     ]
 
 
+def _completion_argv(
+    run_dir: Path, *extra: str, weights: Path | str = "w.pt", data: Path | str = "d.yaml"
+) -> list[str]:
+    """The erased split's export, in place under the stage-1 run it was translated by."""
+    translated = run_dir / "stage3" / "erased-translated"
+    return [
+        "completion",
+        "--translated",
+        str(translated),
+        "--data",
+        str(data),
+        "--weights",
+        str(weights),
+        *extra,
+    ]
+
+
 def test_evaluate_write_back_records_the_judge_zero_shot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -543,7 +560,7 @@ def test_evaluate_write_back_without_a_judge_is_refused(
     assert (run_dir / "metrics.json").read_text() == before
 
 
-@pytest.mark.parametrize("argv", [_evaluate_argv, _faithfulness_argv])
+@pytest.mark.parametrize("argv", [_evaluate_argv, _faithfulness_argv, _completion_argv])
 def test_judge_without_write_back_is_refused(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], argv: Callable[..., list[str]]
 ) -> None:
@@ -615,6 +632,76 @@ def test_faithfulness_takes_no_config(tmp_path: Path) -> None:
         ["faithfulness", "--translated", str(tmp_path), "--data", "d.yaml", "--weights", "w.pt"]
     )
     assert not hasattr(args, "config")
+
+
+# --- completion: the cascade gate's erasure probe ------------------------------------------
+
+
+def test_completion_write_back_files_the_rate_under_the_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Beside that judge's faithfulness, where `t2o aggregate` can pair it by seed."""
+    run_dir = _finished_run(tmp_path, [0, 3])
+    _stub_scoring(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "t2o.metrics.faithfulness.evaluate_completion",
+        lambda *args, **kwargs: CompletionMetrics(completion_rate=0.0625),
+    )
+
+    assert main(_faithfulness_argv(run_dir, "--write-back", "--judge", "rtdetr")) == 0
+    assert main(_completion_argv(run_dir, "--write-back", "--judge", "rtdetr")) == 0
+
+    entries = json.loads((run_dir / "metrics.json").read_text())
+    assert "judges" not in entries[0]
+    judge = entries[1]["judges"]["rtdetr"]
+    assert set(judge) == {"faithfulness", "completion"}
+    assert judge["completion"]["completion_rate"] == pytest.approx(0.0625)
+
+
+def test_completion_write_back_without_a_judge_is_refused_before_scoring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_dir = _finished_run(tmp_path, [0, 3])
+    before = (run_dir / "metrics.json").read_text()
+    monkeypatch.setattr("t2o.metrics.faithfulness.evaluate_completion", _must_not_score)
+
+    with pytest.raises(SystemExit):
+        main(_completion_argv(run_dir, "--write-back"))
+
+    assert "needs --judge" in capsys.readouterr().err
+    assert (run_dir / "metrics.json").read_text() == before
+
+
+def test_completion_write_back_refuses_an_export_outside_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_scoring(monkeypatch, tmp_path)
+    monkeypatch.setattr("t2o.metrics.faithfulness.evaluate_completion", _must_not_score)
+
+    with pytest.raises(FileNotFoundError, match="cannot tell which run and stage"):
+        main(_completion_argv(tmp_path, "--write-back", "--judge", "rtdetr"))
+
+
+def test_completion_scores_without_write_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Off by default, and then any directory can be scored and nothing is written."""
+    _stub_scoring(monkeypatch, tmp_path)
+    seen: dict[str, object] = {}
+
+    def fake_completion(
+        translated: Path, erased: Path, *args: object, **kwargs: object
+    ) -> CompletionMetrics:
+        seen.update(translated=translated, erased=erased)
+        return CompletionMetrics(completion_rate=0.0)
+
+    monkeypatch.setattr("t2o.metrics.faithfulness.evaluate_completion", fake_completion)
+    root = tmp_path / "erased-translated"
+    (root / "val" / "images").mkdir(parents=True)
+
+    argv = ["completion", "--translated", str(root), "--data", "d.yaml", "--weights", "w.pt"]
+    assert main(argv) == 0
+    assert seen == {"translated": root / "val" / "images", "erased": tmp_path}
 
 
 def test_train_detector_splits_out_into_ultralytics_project_and_name(

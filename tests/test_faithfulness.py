@@ -21,12 +21,14 @@ from PIL import Image
 from t2o.config import Config, ConfigError
 from t2o.data.pairing import Pairing
 from t2o.metrics.faithfulness import (
+    CompletionEvaluator,
     Detections,
     FaithfulnessEvaluator,
     _cxcywh_to_xyxy,
     _greedy_match,
     detections_from_labels,
     detections_from_result,
+    evaluate_completion,
     evaluate_faithfulness,
 )
 
@@ -297,6 +299,78 @@ def test_reset_clears_accumulated_state() -> None:
     assert evaluator.compute().false_object_rate == pytest.approx(0.0)
 
 
+# --------------------------------------------------------------------------- completion
+
+# Every test here reads `erased` as the boxes inpainted out of the thermal input, so a
+# prediction on one of them is an object the pipeline put back.
+
+
+def test_an_erased_object_found_again_counts_as_completed() -> None:
+    erased = _det([0, 0], [_BOX_A, _BOX_B])
+    # Re-found at A only. The stray detection overlaps no erased box: it is an invented
+    # object, which is the false-object rate's job, not a completion.
+    stray = [0.0, 0.7, 0.1, 0.9]
+    translated = _det([0, 0], [_BOX_A, stray], conf=[0.9, 0.8])
+
+    evaluator = CompletionEvaluator()
+    evaluator.update(translated, erased)
+
+    assert evaluator.compute().completion_rate == pytest.approx(0.5)
+
+
+def test_a_completion_needs_the_erased_class_and_enough_overlap() -> None:
+    erased = _det([0, 0], [_BOX_A, _BOX_B])
+    shifted_b = [0.7, 0.7, 0.9, 0.9]  # IoU with B is 1/7, under 0.5
+    translated = _det([1, 0], [_BOX_A, shifted_b], conf=[0.9, 0.8])
+
+    evaluator = CompletionEvaluator()
+    evaluator.update(translated, erased)
+
+    assert evaluator.compute().completion_rate == pytest.approx(0.0)
+
+
+def test_one_prediction_completes_at_most_one_erased_box() -> None:
+    """Two erased boxes on one spot, one prediction there: the greedy matcher claims one."""
+    erased = _det([0, 0], [_BOX_A, _BOX_A])
+    translated = _det([0], [_BOX_A], conf=[0.9])
+
+    evaluator = CompletionEvaluator()
+    evaluator.update(translated, erased)
+
+    assert evaluator.compute().completion_rate == pytest.approx(0.5)
+
+
+def test_completion_pools_boxes_across_images_rather_than_averaging_per_image() -> None:
+    evaluator = CompletionEvaluator()
+    # Image 1: one of three erased boxes completed. Image 2: its one box completed.
+    evaluator.update(
+        _det([0], [_BOX_A], conf=[0.9]),
+        _det([0, 0, 0], [_BOX_A, _BOX_B, [0.0, 0.0, 0.05, 0.05]]),
+    )
+    evaluator.update(_det([0], [_BOX_B], conf=[0.9]), _det([0], [_BOX_B]))
+
+    # 2 of 4 boxes, not the per-image mean (1/3 + 1) / 2.
+    assert evaluator.compute().completion_rate == pytest.approx(0.5)
+
+
+def test_nothing_erased_reads_as_nothing_completed() -> None:
+    evaluator = CompletionEvaluator()
+    evaluator.update(
+        _det([0], [_BOX_A], conf=[0.9]),
+        Detections(cls=torch.zeros(0, dtype=torch.long), bboxes=torch.zeros(0, 4)),
+    )
+    assert evaluator.compute().completion_rate == pytest.approx(0.0)
+
+
+def test_completion_reset_clears_accumulated_state() -> None:
+    evaluator = CompletionEvaluator()
+    evaluator.update(_det([0], [_BOX_A], conf=[0.9]), _det([0], [_BOX_A]))
+    evaluator.reset()
+    evaluator.update(_det([0], [_BOX_B], conf=[0.9]), _det([0], [_BOX_A]))
+
+    assert evaluator.compute().completion_rate == pytest.approx(0.0)
+
+
 # --------------------------------------------------------------------------- config
 
 
@@ -502,3 +576,75 @@ def test_evaluate_faithfulness_refuses_an_empty_split(
 
     with pytest.raises(FileNotFoundError, match="no images to score"):
         evaluate_faithfulness(tmp_path / "translated", tmp_path / "images", "w.pt", Pairing())
+
+
+# --- evaluate_completion: the erasure probe over a translation of an erased split ----------
+
+
+def test_evaluate_completion_counts_the_erased_boxes_put_back(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Frame a's object reappears on its erased footprint; frame b's stays gone."""
+    translated, erased, pairing = export_pair
+    calls: list[int] = []
+    monkeypatch.setattr(
+        "ultralytics.YOLO",
+        _fake_yolo(
+            {"a": _FakeBoxes([0], _CENTRE_BOX, [0.9]), "b": _FakeBoxes([0], _CORNER_BOX, [0.9])},
+            calls,
+        ),
+    )
+
+    metrics = evaluate_completion(translated, erased, "w.pt", pairing=pairing)
+
+    assert metrics.completion_rate == pytest.approx(0.5)
+    # Only the translation is judged; the erased tree gives frames and boxes, never a pass.
+    assert calls == [2]
+
+
+def test_evaluate_completion_applies_the_confidence_threshold(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    translated, erased, pairing = export_pair
+    faint = _FakeBoxes([0], _CENTRE_BOX, [0.1])
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({"a": faint, "b": faint}))
+
+    metrics = evaluate_completion(translated, erased, "w.pt", pairing=pairing)
+
+    assert metrics.completion_rate == pytest.approx(0.0)
+
+
+def test_evaluate_completion_is_chunked_like_faithfulness(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    translated, erased, pairing = export_pair
+    calls: list[int] = []
+    boxes = _FakeBoxes([0], _CENTRE_BOX, [0.9])
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({"a": boxes, "b": boxes}, calls))
+
+    metrics = evaluate_completion(translated, erased, "w.pt", pairing=pairing, batch=1)
+
+    assert calls == [1, 1]
+    assert metrics.completion_rate == pytest.approx(1.0)
+
+
+def test_evaluate_completion_names_frames_with_no_translated_counterpart(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    translated, erased, pairing = export_pair
+    (translated / "a.png").unlink()
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({}))
+
+    with pytest.raises(FileNotFoundError, match=r"1 of 2 visible frames.*\ba\b"):
+        evaluate_completion(translated, erased, "w.pt", pairing=pairing)
+
+
+def test_evaluate_completion_refuses_an_empty_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "images").mkdir()
+    (tmp_path / "translated").mkdir()
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({}))
+
+    with pytest.raises(FileNotFoundError, match="no images to score"):
+        evaluate_completion(tmp_path / "translated", tmp_path / "images", "w.pt", Pairing())
