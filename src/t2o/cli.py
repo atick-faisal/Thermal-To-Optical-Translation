@@ -176,6 +176,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_judge_argument(faithfulness)
 
+    erase = subparsers.add_parser(
+        "erase",
+        help="write a copy of one split with every ground-truth box inpainted out of the "
+        "thermal frames (the cascade gate's counterfactual-erasure probe input); labels "
+        "unchanged, its own data.yaml for `t2o export`",
+    )
+    erase.add_argument("--data", type=Path, required=True, help="source data.yaml")
+    erase.add_argument("--out", type=Path, required=True, help="new, empty output root")
+    erase.add_argument("--split", choices=("train", "val"), default="val")
+    erase.add_argument(
+        "--dilate-px",
+        type=int,
+        help="pixels added on every side of a box before inpainting (default: "
+        "erasure.DEFAULT_DILATE_PX); too few leaves a rim of a registration-shifted object",
+    )
+    erase.add_argument(
+        "--inpaint-radius",
+        type=float,
+        help="OpenCV Telea neighbourhood radius in pixels (default: "
+        "erasure.DEFAULT_INPAINT_RADIUS)",
+    )
+
     train_detector = subparsers.add_parser(
         "train-detector",
         help="train a detector on real data, e.g. E3's independent zero-shot judge",
@@ -364,6 +386,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_fidelity(args)
     if args.command == "faithfulness":
         return _run_faithfulness(args)
+    if args.command == "erase":
+        return _run_erase(args)
     if args.command == "train-detector":
         return _run_train_detector(args)
     if args.command == "aggregate":
@@ -560,6 +584,22 @@ def _run_faithfulness(args: argparse.Namespace) -> int:
             record_faithfulness(run_dir, stage, metrics)
         else:
             record_judge(run_dir, stage, args.judge, faithfulness=metrics)
+    return 0
+
+
+def _run_erase(args: argparse.Namespace) -> int:
+    from t2o.data.erasure import write_erased_split
+    from t2o.data.manifest import DatasetManifest
+
+    # The flags default to None so the defaults live once, in `erasure.py`, without importing
+    # cv2 at the top of this module.
+    tuning = {
+        key: value
+        for key, value in (("dilate_px", args.dilate_px), ("inpaint_radius", args.inpaint_radius))
+        if value is not None
+    }
+    data_yaml = write_erased_split(DatasetManifest.load(args.data), args.out, args.split, **tuning)
+    logger.info("wrote %s", data_yaml)
     return 0
 
 
