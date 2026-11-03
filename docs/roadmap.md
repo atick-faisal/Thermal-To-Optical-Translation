@@ -17,13 +17,15 @@ Three rules hold:
 
 ## Drafting criteria
 
-Drafting begins when all six of [goal.md](goal.md)'s Success Criteria hold. Each line grades
+Each of [goal.md](goal.md)'s six Success Criteria is reported, passed or not. Drafting does not
+wait for all six to hold: one that fails goes into the paper as a characterised limit, with its
+numbers (`goal.md`, amended 2026-10-29). Each line grades
 `goal.md`'s wording and cites the [findings](experiments/index.md#findings) that bear on it.
 Scoring against `RESEARCH_FINDINGS.md` §10's legacy five, wherever a record holds it, is evidence
 here, never a status.
 
-- **Margin — not measured; gated to non-inferiority to ModTr.** The custom set has no held-out
-  test split, so Margin is scored on the 153 val images (`goal.md` Constraints). A 95%
+- **Margin — reported: non-inferior to ModTr on the custom set, fails on FLIR.** The custom set
+  has no held-out test split, so Margin is scored on the 153 val images (`goal.md` Constraints). A 95%
   image-level CI cannot resolve +2 mAP@50: the widest half-width is 9.41 points at n = 100, and
   even the loop against its own control is ≥ 3.03 (F189, F190). Scaling to n = 153 narrows
   these by √(100/153) ≈ 0.81 — to about 7.6 and 2.45, still above the bar (an estimate, not a
@@ -31,14 +33,21 @@ here, never a status.
   becomes non-inferiority to ModTr, with Transfer and Faithfulness carrying the claim; HalluciDet
   and zero-shot Grounding DINO no longer carry it. The per-image scorer reproduces
   `evaluate_detector` (F191), and seed spread is as large as one seed's image noise, so a
-  one-seed CI would understate Margin's uncertainty (F192). ModTr waits on `M3`'s baseline
-  suite. On validation, the loop beats its
-  no-loop translator (F35, F72) and translation beats raw thermal (F03, F10). F82 is measured
+  one-seed CI would understate Margin's uncertainty (F192). At
+  [modtr-baseline ADR-02](features/modtr-baseline/decisions.md)'s δ = 5 points, the loop clears
+  ModTr on both custom campaigns, +13.78 (e3b) and +15.11 (e3t) (F200). This ModTr is weaker
+  than the loop's own no-loop translator (F201), so Margin's main bar still rests on loop vs
+  control. On FLIR it fails: −8.56 on the 3-class primary (ADR-06), the whole CI below −δ
+  (F205, F210), and ModTr is the best zero-shot translator measured there (F207). On validation,
+  the loop beats its no-loop translator (F35, F72) and translation beats raw thermal (F03, F10). F82 is measured
   against a thermal-*trained* detector, the comparison `goal.md`'s Non-Goals concede.
-- **Transfer — not measured.** Every score so far comes from the reference `yolo11s`, the same
-  family as the in-loop `yolo11n`. No detector from another family has scored a translation.
-- **Consistency — 3 of 5 datasets.** The loop beats its no-loop control on the custom set (F35;
-  turbo F72), on FLIR-aligned (F136) and on msrs-day (F168). LLVIP and M3FD have no cell yet.
+- **Transfer — met.** Under the RT-DETR-l judge, a family never in the loop, the loop's gain over
+  its control holds on all four cells at 85–99% of the `yolo11s` gain (F182). It is significant
+  on the custom pix2pix, FLIR and msrs-day cells (p = .031); turbo's three seeds can corroborate
+  but not reach significance (p = .25). The FLIR judge is its epoch-1 checkpoint (F187), and its
+  raw-thermal floor is unmeasured (F183).
+- **Consistency — met, 3 of 3 datasets.** The loop beats its no-loop control on the custom set (F35;
+  turbo F72), on FLIR-aligned (F136) and on msrs-day (F168), the three `goal.md` names.
   Translation against raw thermal is reported, not graded: above the floor on the custom set
   (F10), on it on FLIR (F137), 6.8× it on msrs-day (F169).
 - **The passive-class claim is closed, negative (2026-10-15).** On msrs-day the loop stays
@@ -54,12 +63,16 @@ here, never a status.
   turbo's three seeds can corroborate but not reach significance (F72). On FLIR, stage 0 —
   identical in both arms — collapsed on two control seeds and no loop seed, by draw rather than
   by arm (F140).
-- **Faithfulness — partial.** C2's insertion and deletion rates favour the loop or match it on
-  every campaign (F49, F76, F143, F171). Re-scored by the out-of-family RT-DETR-l judge, no rate
-  is significantly worse for the loop on any cell (F184). The margin is fixed per cell and rate
-  in [out-of-family-judge ADR-01](features/out-of-family-judge/decisions.md); it was drawn from
-  the same val exports it would be scored on, which `goal.md` now requires the paper to state.
-  The pass rule has not yet been applied.
+- **Faithfulness — reported: 11 of 12 rate tests pass; turbo's false-object rate fails.** C2's
+  insertion and deletion rates favour the loop or match it on every campaign (F49, F76, F143,
+  F171). Re-scored by the out-of-family RT-DETR-l judge, no rate is significantly worse for the
+  loop on any cell (F184). The margin is fixed per cell and rate in
+  [out-of-family-judge ADR-01](features/out-of-family-judge/decisions.md); it was drawn from
+  the same val exports it is scored on, which `goal.md` requires the paper to state. ADR-02
+  applies the rule on val: e3t's false-object CI [−0.0461, +0.0538] crosses its 0.0315 margin
+  on a +0.0040 point estimate at n = 3, and e3b's false-object pass crosses zero (F213). It is
+  reported as a fail, not re-tuned. ModTr is the least faithful arm on the custom set and the
+  most faithful on FLIR (F214, F215; point estimates, no CI).
 
 ## M2a step 2
 
@@ -238,3 +251,18 @@ Rows here do not come from `TASKS.md`; the sections above carry every open row i
       2026-10-22: the custom set has no held-out test split, so there is nothing to pin;
       validation is the reporting split (`goal.md` Constraints). Source: `TASKS.md:788-793` at
       the tag.
+- [ ] C2's registration-error axis: how fast label transfer and translation each degrade as
+      alignment worsens. Required (`goal.md` C2, amended 2026-11-03); nothing in `src/` or
+      `scripts/` measures it yet.
+- [ ] C2's never-seen-visible comparison: label transfer with the visible detector trained on
+      visible data the translator never saw. Optional — run if GPU time allows before January,
+      otherwise stated as a limitation (`goal.md` C2).
+- [ ] C4's bracket on FLIR: a thermal-supervised and a label-transfer reference. Record 013
+      has only the visible ceiling and raw-thermal floor, and RT-DETR's FLIR floor is
+      unmeasured (F183).
+- [ ] The uncertainty budget for the headline measurement — seed spread, image bootstrap,
+      judge spread — built from existing runs (`goal.md` Success Criteria).
+- [ ] The measured ground-truth quality ceiling: no-reference quality, sharpness and noise of
+      the real visible photos against the translations (`goal.md` Success Criteria).
+- [ ] The qualitative field check on the ~300 thermal-only images: a figure, not a measured
+      result (`goal.md` Success Criteria).
