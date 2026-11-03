@@ -123,6 +123,57 @@ def test_split_copy_keeps_labels_and_visible_frames_and_erases_thermal(
     assert labelled, "the fixture's val split should carry boxes to erase"
 
 
+def test_split_copy_records_every_class_when_none_are_named(erased_yaml: Path) -> None:
+    declared = yaml.safe_load(erased_yaml.read_text())
+
+    assert declared["erasure"]["classes"] == declared["names"]
+
+
+def test_named_classes_are_the_only_ones_erased_and_labelled(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    source = DatasetManifest.load(data_yaml)
+    erased = DatasetManifest.load(
+        write_erased_split(source, tmp_path / "erased", classes=["Switch"])
+    )
+    pairing = source.pairing
+    switch = source.class_names.index("Switch")
+
+    frames = sorted(source.val_images.glob("*.jpg"))
+    assert len(list(erased.val_images.glob("*.png"))) == len(frames)
+    dropped = 0
+    for visible_path in frames:
+        name = f"{visible_path.stem}.png"
+        source_lines = pairing.label_path(visible_path).read_text().splitlines()
+        kept = pairing.label_path(erased.val_images / name).read_text().splitlines()
+        # Kept lines are the source's own text, in order; every other class is dropped.
+        assert kept == [line for line in source_lines if line.split()[0] == str(switch)]
+        dropped += len(source_lines) - len(kept)
+
+        cls, bboxes = load_yolo_labels(pairing.label_path(visible_path))
+        targets = bboxes[cls[:, 0] == switch].numpy()
+        with (
+            Image.open(pairing.infrared_path(visible_path)) as original,
+            Image.open(pairing.infrared_path(erased.val_images / name)) as copy,
+        ):
+            before, after = np.asarray(original), np.asarray(copy)
+        inside = box_mask(before.shape, targets, dilate_px=4) > 0
+        # Outside the switch boxes nothing moves, so the other objects are still in the frame.
+        assert np.array_equal(before[~inside], after[~inside])
+        if len(targets):
+            assert not np.array_equal(before[inside], after[inside])
+    assert dropped, "the fixture's val split should carry boxes of other classes"
+    declared = yaml.safe_load((erased.root / "data.yaml").read_text())
+    assert declared["erasure"]["classes"] == ["Switch"]
+
+
+def test_refuses_an_unknown_class_name(data_yaml: Path, tmp_path: Path) -> None:
+    with pytest.raises(ErasureError, match=r"unknown class name\(s\) \['fuse'\]"):
+        write_erased_split(DatasetManifest.load(data_yaml), tmp_path / "erased", classes=["fuse"])
+
+    assert not (tmp_path / "erased").exists()
+
+
 def test_split_copy_never_carries_a_label_cache(data_yaml: Path, tmp_path: Path) -> None:
     source = DatasetManifest.load(data_yaml)
     stale = source.val_images.parent / "labels.cache"
@@ -187,11 +238,15 @@ def test_main_erase_writes_the_split(data_yaml: Path, tmp_path: Path) -> None:
             "train",
             "--dilate-px",
             "2",
+            "--classes",
+            "Fuse",
+            "Switch",
         ]
     )
 
     assert exit_code == 0
     declared = yaml.safe_load((out / "data.yaml").read_text())
     assert declared["train"] == "train/visible/images"
+    assert declared["erasure"]["classes"] == ["Fuse", "Switch"]
     assert declared["erasure"]["dilate_px"] == 2
     assert declared["erasure"]["inpaint_radius"] == 3.0
