@@ -1,4 +1,5 @@
-"""Faithfulness (C2): false-object rate, missed-object rate, detection-consistency.
+"""Faithfulness (C2): false-object rate, missed-object rate, detection-consistency, and the
+cascade gate's completion rate.
 
 The safety-critical co-contribution (PLAN.md §1, §12): can the translator's failures be
 bounded and reported, not just its average quality? All three rates are built on the same
@@ -25,12 +26,20 @@ missed-object rate: that compares against hand-labelled ground truth (annotation
 dependent); this compares the translator against the detector's own behaviour on the
 untranslated photo, which needs no labels at all and so stays well-defined at any
 `annotation_fraction` (PLAN.md §9, E8).
+
+**Completion rate** is the counterfactual-erasure probe's number
+(``docs/features/cascade-gate/plan.md``, Tech Stack). Every ground-truth box is inpainted out
+of the thermal input first (``data/erasure.py``), so a box the judge finds again, with the same
+class at IoU >= 0.5, on the translation of that erased input is an object the pipeline put back
+with no evidence for it. The matcher is the same `_greedy_match`, so a completion and a missed
+object are the same match read from opposite sides.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +202,118 @@ class FaithfulnessEvaluator:
         self._total_visible = 0
 
 
+@dataclass(frozen=True, slots=True)
+class CompletionMetrics:
+    completion_rate: float
+
+
+class CompletionEvaluator:
+    """Accumulates how many erased ground-truth boxes the judge finds again.
+
+    ``update`` is called once per image with the judge's predictions on the translation of the
+    *erased* thermal frame and the boxes that were erased from it -- the split's own labels,
+    which ``t2o erase`` copies unchanged. A predicted box only counts on an erased box's
+    footprint, with its class: a detection anywhere else is the false-object rate's business,
+    not this one's.
+    """
+
+    def __init__(self, iou_threshold: float = 0.5) -> None:
+        self._iou_threshold = iou_threshold
+        self.reset()
+
+    def update(self, translated: Detections, erased: Detections) -> None:
+        _, erased_matched = _greedy_match(translated, erased, self._iou_threshold)
+        self._completed += int(erased_matched.sum())
+        self._total_erased += erased.cls.shape[0]
+
+    def compute(self) -> CompletionMetrics:
+        # Nothing erased means nothing could be put back -- the no-failure value, the same
+        # convention as missed_object_rate's empty case.
+        rate = self._completed / self._total_erased if self._total_erased else 0.0
+        return CompletionMetrics(completion_rate=rate)
+
+    def reset(self) -> None:
+        self._completed = 0
+        self._total_erased = 0
+
+
+def _list_images(images: Path) -> list[Path]:
+    return sorted(p for p in Path(images).iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def _translated_counterparts(visible_paths: list[Path], translated_images: Path) -> list[Path]:
+    """The translated frame for every visible frame, in the same order, or a loud failure.
+
+    Matched on stem, not filename: export.py writes every image as .png regardless of the
+    source suffix, so a name-for-name lookup silently finds nothing on a .jpg dataset.
+    """
+    by_stem = {p.stem: p for p in _list_images(translated_images)}
+    missing = [p.stem for p in visible_paths if p.stem not in by_stem]
+    if missing:
+        preview = ", ".join(missing[:5])
+        more = "" if len(missing) <= 5 else f", ... (+{len(missing) - 5} more)"
+        raise FileNotFoundError(
+            f"{len(missing)} of {len(visible_paths)} visible frames have no translated "
+            f"counterpart in {translated_images}: {preview}{more}"
+        )
+    return [by_stem[p.stem] for p in visible_paths]
+
+
+def _detect(
+    model: Any,
+    paths: list[Path],
+    *,
+    conf_threshold: float,
+    imgsz: int,
+    batch: int,
+    device: str | None,
+) -> list[Detections]:
+    """One judge pass over `paths` in chunks of `batch`, converted to `Detections` as it goes.
+
+    **Chunked here because a list source is never streamed.** A `list` reaches
+    ultralytics' `check_source` (`data/build.py`), which hands it to `autocast_list` --
+    decoding every element up front -- and then to `LoadPilAndNumpy`, whose
+    `bs = len(im0)` makes the whole split *one* batch. `batch=` is passed only to the
+    other branch, `LoadImagesAndVideos`, so it is silently ignored on this one, and
+    `stream=True` yields a generator over a single iteration. The custom set's 153-image
+    val split fit in one batch on a 40 GiB card, which is why both earlier C2 campaigns
+    passed; FLIR's 1,013 tried to allocate 9.89 GiB in one backbone concat and raised
+    (TASKS.md M3 E9 step 5).
+
+    Converting inside the loop still matters for a second, independent reason: a
+    `Results` object retains the decoded source image, so collecting them would hold
+    hundreds of MB to read a handful of boxes out of each.
+
+    `rect=False` is ultralytics' own default, pinned because it is what makes a chunk
+    boundary invisible. It leaves `pre_transform`'s `auto` false, so every image is
+    letterboxed to a fixed square `imgsz` independently of its neighbours and NMS is
+    per-image -- the batching below cannot move a number, and these rates stay comparable
+    to the ones e3b and e3t were scored with (PLAN.md invariant 1).
+
+    Two passes on one model must be **sequential, not zipped**. `YOLO.predict`
+    reuses one `self.predictor` across calls, so starting a second stream while the
+    first is still being consumed resets state underneath it -- which is also why each
+    chunk's generator is drained before the next one starts.
+    """
+    detections: list[Detections] = []
+    for start in range(0, len(paths), batch):
+        detections.extend(
+            detections_from_result(result, conf_threshold)
+            for result in model.predict(
+                paths[start : start + batch],
+                imgsz=imgsz,
+                device=device,
+                rect=False,
+                verbose=False,
+                stream=True,
+                # Filtered here too, so ultralytics never pays NMS on boxes that
+                # `detections_from_result` is about to discard anyway.
+                conf=conf_threshold,
+            )
+        )
+    return detections
+
+
 def evaluate_faithfulness(
     translated_images: Path,
     visible_images: Path,
@@ -222,75 +343,19 @@ def evaluate_faithfulness(
     """
     from ultralytics import YOLO
 
-    visible_paths = sorted(
-        p for p in Path(visible_images).iterdir() if p.suffix.lower() in IMAGE_SUFFIXES
-    )
+    visible_paths = _list_images(visible_images)
     if not visible_paths:
         raise FileNotFoundError(f"no images to score in {visible_images}")
+    translated_paths = _translated_counterparts(visible_paths, translated_images)
 
-    # Matched on stem, not filename: export.py writes every image as .png regardless of the
-    # source suffix, so a name-for-name lookup silently finds nothing on a .jpg dataset.
-    by_stem = {
-        p.stem: p for p in Path(translated_images).iterdir() if p.suffix.lower() in IMAGE_SUFFIXES
-    }
-    missing = [p.stem for p in visible_paths if p.stem not in by_stem]
-    if missing:
-        preview = ", ".join(missing[:5])
-        more = "" if len(missing) <= 5 else f", ... (+{len(missing) - 5} more)"
-        raise FileNotFoundError(
-            f"{len(missing)} of {len(visible_paths)} visible frames have no translated "
-            f"counterpart in {translated_images}: {preview}{more}"
-        )
-    translated_paths = [by_stem[p.stem] for p in visible_paths]
-
-    model = YOLO(str(weights))
-
-    def detect(paths: list[Path]) -> list[Detections]:
-        """One pass in chunks of `batch`, converted to `Detections` as it goes.
-
-        **Chunked here because a list source is never streamed.** A `list` reaches
-        ultralytics' `check_source` (`data/build.py`), which hands it to `autocast_list` --
-        decoding every element up front -- and then to `LoadPilAndNumpy`, whose
-        `bs = len(im0)` makes the whole split *one* batch. `batch=` is passed only to the
-        other branch, `LoadImagesAndVideos`, so it is silently ignored on this one, and
-        `stream=True` yields a generator over a single iteration. The custom set's 153-image
-        val split fit in one batch on a 40 GiB card, which is why both earlier C2 campaigns
-        passed; FLIR's 1,013 tried to allocate 9.89 GiB in one backbone concat and raised
-        (TASKS.md M3 E9 step 5).
-
-        Converting inside the loop still matters for a second, independent reason: a
-        `Results` object retains the decoded source image, so collecting them would hold
-        hundreds of MB to read a handful of boxes out of each.
-
-        `rect=False` is ultralytics' own default, pinned because it is what makes a chunk
-        boundary invisible. It leaves `pre_transform`'s `auto` false, so every image is
-        letterboxed to a fixed square `imgsz` independently of its neighbours and NMS is
-        per-image -- the batching below cannot move a number, and these rates stay comparable
-        to the ones e3b and e3t were scored with (PLAN.md invariant 1).
-
-        The two passes are also deliberately **sequential, not zipped**. `YOLO.predict`
-        reuses one `self.predictor` across calls, so starting a second stream while the
-        first is still being consumed resets state underneath it -- which is also why each
-        chunk's generator is drained before the next one starts.
-        """
-        detections: list[Detections] = []
-        for start in range(0, len(paths), batch):
-            detections.extend(
-                detections_from_result(result, conf_threshold)
-                for result in model.predict(
-                    paths[start : start + batch],
-                    imgsz=imgsz,
-                    device=device,
-                    rect=False,
-                    verbose=False,
-                    stream=True,
-                    # Filtered here too, so ultralytics never pays NMS on boxes that
-                    # `detections_from_result` is about to discard anyway.
-                    conf=conf_threshold,
-                )
-            )
-        return detections
-
+    detect = partial(
+        _detect,
+        YOLO(str(weights)),
+        conf_threshold=conf_threshold,
+        imgsz=imgsz,
+        batch=batch,
+        device=device,
+    )
     translated_detections = detect(translated_paths)
     visible_detections = detect(visible_paths)
 
@@ -313,5 +378,55 @@ def evaluate_faithfulness(
         metrics.false_object_rate,
         metrics.missed_object_rate,
         metrics.detection_consistency,
+    )
+    return metrics
+
+
+def evaluate_completion(
+    translated_images: Path,
+    erased_images: Path,
+    weights: Path | str,
+    pairing: Pairing,
+    iou_threshold: float = 0.5,
+    conf_threshold: float = 0.25,
+    imgsz: int = 640,
+    batch: int = 16,
+    device: str | None = None,
+) -> CompletionMetrics:
+    """Score the translation of an erased split for objects put back where none remain.
+
+    ``erased_images`` is the visible side of the split ``t2o erase`` wrote, and
+    ``translated_images`` is what a pipeline made from its erased thermal side. Only the
+    translation is run through the judge; the erased tree supplies the frame list and,
+    through ``pairing``, the erased boxes. The judge, thresholds and chunked pass are
+    `evaluate_faithfulness`'s, so this rate sits beside its three on one footing.
+    """
+    from ultralytics import YOLO
+
+    erased_paths = _list_images(erased_images)
+    if not erased_paths:
+        raise FileNotFoundError(f"no images to score in {erased_images}")
+    translated_paths = _translated_counterparts(erased_paths, translated_images)
+
+    translated_detections = _detect(
+        YOLO(str(weights)),
+        translated_paths,
+        conf_threshold=conf_threshold,
+        imgsz=imgsz,
+        batch=batch,
+        device=device,
+    )
+
+    evaluator = CompletionEvaluator(iou_threshold=iou_threshold)
+    for erased_path, translated in zip(erased_paths, translated_detections, strict=True):
+        cls, bboxes = load_yolo_labels(pairing.label_path(erased_path))
+        evaluator.update(translated=translated, erased=detections_from_labels(cls, bboxes))
+
+    metrics = evaluator.compute()
+    logger.info(
+        "completion %s on %d erased frames: completion rate %.4f",
+        Path(translated_images).parent.name,
+        len(erased_paths),
+        metrics.completion_rate,
     )
     return metrics

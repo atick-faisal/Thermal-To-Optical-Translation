@@ -176,6 +176,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_judge_argument(faithfulness)
 
+    completion = subparsers.add_parser(
+        "completion",
+        help="score the translation of an erased split (`t2o erase`) for objects put back "
+        "where none remain: the cascade gate's completion rate",
+    )
+    completion.add_argument(
+        "--translated",
+        type=Path,
+        required=True,
+        help="the export translated from the erased split: its root (contains val/images) "
+        "or the images dir itself",
+    )
+    completion.add_argument(
+        "--data",
+        type=Path,
+        required=True,
+        help="the erased split's data.yaml, as `t2o erase` wrote it; its labels are the "
+        "erased boxes",
+    )
+    # Not defaulted, for faithfulness's reason: the gate scores with the `rtdetr` judge.
+    completion.add_argument("--weights", type=Path, required=True, help="judge checkpoint")
+    completion.add_argument("--split", choices=("train", "val"), default="val")
+    completion.add_argument("--iou-threshold", type=float, default=0.5)
+    completion.add_argument("--conf-threshold", type=float, default=0.25)
+    completion.add_argument("--imgsz", type=int, default=640)
+    # Passed through for the same OOM reason as faithfulness's --batch.
+    completion.add_argument("--batch", type=int, default=16)
+    completion.add_argument("--device", help="null/auto, 'cpu', or 'cuda:0'")
+    completion.add_argument(
+        "--write-back",
+        action="store_true",
+        help="also record the rate into the scored run's metrics.json under --judge, making "
+        "it reachable as `t2o aggregate --metric judges.<name>.completion.completion_rate`. "
+        "The run directory and stage are read off --translated, which must therefore sit "
+        "under <run_dir>/stage<N>/, e.g. runs/e3b-loop-s0/stage3/erased-translated",
+    )
+    _add_judge_argument(completion)
+
     erase = subparsers.add_parser(
         "erase",
         help="write a copy of one split with every ground-truth box inpainted out of the "
@@ -292,6 +330,10 @@ def _check_write_back(parser: argparse.ArgumentParser, args: argparse.Namespace)
     # finding on it reads that key -- a re-score must land beside it, never over it.
     if args.command == "evaluate" and args.write_back and args.judge is None:
         parser.error("evaluate --write-back needs --judge; the run's zero_shot is never rewritten")
+    # The probe is scored by an out-of-family judge only (cascade-gate plan, Tech Stack), so
+    # there is no yolo11s key for it to land under.
+    if args.command == "completion" and args.write_back and args.judge is None:
+        parser.error("completion --write-back needs --judge; the rate is filed under a judge")
 
 
 def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
@@ -374,7 +416,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         format=LOG_FORMAT,
     )
 
-    # These four take their inputs directly rather than through Config -- they act on
+    # These take their inputs directly rather than through Config -- they act on
     # artifacts that already exist on disk, same spirit as Clean-SeAFusion's standalone
     # `predict`. None needs an experiment definition to say what it is doing, and
     # `train-detector` in particular must not: the judge it produces has to be independent
@@ -386,6 +428,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_fidelity(args)
     if args.command == "faithfulness":
         return _run_faithfulness(args)
+    if args.command == "completion":
+        return _run_completion(args)
     if args.command == "erase":
         return _run_erase(args)
     if args.command == "train-detector":
@@ -584,6 +628,40 @@ def _run_faithfulness(args: argparse.Namespace) -> int:
             record_faithfulness(run_dir, stage, metrics)
         else:
             record_judge(run_dir, stage, args.judge, faithfulness=metrics)
+    return 0
+
+
+def _run_completion(args: argparse.Namespace) -> int:
+    from t2o.data.manifest import DatasetManifest
+    from t2o.metrics.faithfulness import evaluate_completion
+
+    manifest = DatasetManifest.load(args.data)
+    erased = manifest.train_images if args.split == "train" else manifest.val_images
+
+    translated = Path(args.translated)
+    if (translated / args.split / "images").is_dir():
+        translated = translated / args.split / "images"
+
+    # Same fail-before-scoring order as `_run_evaluate`.
+    target = _export_run_and_stage(Path(args.translated)) if args.write_back else None
+    metrics = evaluate_completion(
+        translated,
+        erased,
+        args.weights,
+        pairing=manifest.pairing,
+        iou_threshold=args.iou_threshold,
+        conf_threshold=args.conf_threshold,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        device=args.device,
+    )
+    logger.info("  completion rate         %.4f  (LOWER better)", metrics.completion_rate)
+
+    if target is not None:
+        from t2o.engine.loop import record_judge
+
+        run_dir, stage = target
+        record_judge(run_dir, stage, args.judge, completion=metrics)
     return 0
 
 

@@ -85,7 +85,7 @@ from t2o.data.manifest import DatasetManifest
 from t2o.engine.detector_stage import DetectorResult, train_detector
 from t2o.engine.export import export_translated
 from t2o.engine.trainer import LAST_CHECKPOINT, EpochStats, Trainer
-from t2o.metrics.faithfulness import FaithfulnessMetrics
+from t2o.metrics.faithfulness import CompletionMetrics, FaithfulnessMetrics
 from t2o.metrics.fidelity import FidelityMetrics, evaluate_fidelity
 from t2o.metrics.task import TaskMetrics, evaluate_detector
 from t2o.seeding import seed_everything
@@ -110,6 +110,10 @@ class JudgeScores:
     # rather than written as null -- the same reason `StageResult.faithfulness` is.
     zero_shot: TaskMetrics | None = None
     faithfulness: FaithfulnessMetrics | None = None
+    # The cascade gate's erasure probe, scored on this stage's translation of an *erased* val
+    # split (`t2o completion`). Under the judge, beside its faithfulness, so `t2o aggregate`
+    # pairs it by seed like any other leaf.
+    completion: CompletionMetrics | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,7 +360,7 @@ def _stage_result_to_json(result: StageResult) -> dict[str, Any]:
     # distinction).
     if data["faithfulness"] is None:
         del data["faithfulness"]
-    # Same reasoning, one level down: no judge yet, or a judge missing one of its two passes.
+    # Same reasoning, one level down: no judge yet, or a judge missing one of its passes.
     data["judges"] = {
         name: {key: value for key, value in scores.items() if value is not None}
         for name, scores in data["judges"].items()
@@ -399,9 +403,11 @@ def _stage_result_from_json(data: dict[str, Any]) -> StageResult:
 def _judge_scores_from_json(data: dict[str, Any]) -> JudgeScores:
     zero_shot = data.get("zero_shot")
     faithfulness = data.get("faithfulness")
+    completion = data.get("completion")
     return JudgeScores(
         zero_shot=TaskMetrics(**zero_shot) if zero_shot is not None else None,
         faithfulness=FaithfulnessMetrics(**faithfulness) if faithfulness is not None else None,
+        completion=CompletionMetrics(**completion) if completion is not None else None,
     )
 
 
@@ -434,13 +440,14 @@ def record_judge(
     *,
     zero_shot: TaskMetrics | None = None,
     faithfulness: FaithfulnessMetrics | None = None,
+    completion: CompletionMetrics | None = None,
 ) -> None:
     """Fold one out-of-family judge's scores into ``judges.<name>`` of a stage entry.
 
-    The zero-shot and faithfulness passes are separate commands, so this merges: a pass left
-    as None keeps whatever that judge already has. The yolo11s ``zero_shot``/``faithfulness``
-    keys and every other judge are never touched. Stage lookup and its refusals are
-    ``record_faithfulness``'s, for the same reasons.
+    The zero-shot, faithfulness and completion passes are separate commands, so this merges:
+    a pass left as None keeps whatever that judge already has. The yolo11s
+    ``zero_shot``/``faithfulness`` keys and every other judge are never touched. Stage lookup
+    and its refusals are ``record_faithfulness``'s, for the same reasons.
 
     A dotted ``name`` is refused because ``t2o aggregate`` addresses metrics by dotted path:
     ``judges.rtdetr.l.zero_shot.map50`` would point at a judge called ``rtdetr`` and silently
@@ -448,7 +455,7 @@ def record_judge(
     """
     if not name or "." in name:
         raise ValueError(f"judge name {name!r} must be non-empty and contain no '.'")
-    if zero_shot is None and faithfulness is None:
+    if zero_shot is None and faithfulness is None and completion is None:
         raise ValueError(f"record_judge({name!r}) was given no scores to record")
 
     def update(entry: dict[str, Any]) -> None:
@@ -457,6 +464,8 @@ def record_judge(
             scores["zero_shot"] = asdict(zero_shot)
         if faithfulness is not None:
             scores["faithfulness"] = asdict(faithfulness)
+        if completion is not None:
+            scores["completion"] = asdict(completion)
 
     _update_stage_entry(run_dir, stage, update)
     logger.info("recorded judge %s into %s stage %d", name, run_dir / METRICS_FILENAME, stage)
