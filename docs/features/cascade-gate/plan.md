@@ -62,6 +62,13 @@ zero-shot reading, if the server install allows.
   4. build and run stage 2.
 
   No stage-2 image is scored before the ADR lands.
+- **Fuse/switch targeting (ADR-03).** `write_erased_split` takes the class names to erase,
+  resolved against `names:`; an unknown name fails, listing the valid ones. A kept label line is
+  copied as text, never reformatted. `FaithfulnessMetrics` gains `missed_object_rate_by_class`
+  and `false_object_rate_by_class`, `dict[str, float]` keyed by class name and empty by default,
+  so record 026's `metrics.json` still loads through `FaithfulnessMetrics(**…)`
+  (`src/t2o/engine/loop.py:398,409`). `aggregate.metric_value` already walks nested keys, so
+  `faithfulness.missed_object_rate_by_class.fuse` needs no aggregate change.
 - **`scripts/loss_share.py` is skipped by ADR.** A frozen zero-shot stage 2 has no objective.
   The precedent is modtr-baseline ADR-03 (`docs/features/modtr-baseline/decisions.md:132-176`).
 - **Constraints:**
@@ -119,6 +126,8 @@ zero-shot reading, if the server install allows.
   which confounds the completion rate.
 - [ ] Gaussian-blur each box heavily — it keeps the low-frequency heat signature, so a trace of the
   object survives. That tests robustness rather than erasure.
+
+> Superseded by ADR-03 (2026-11-03)
 
 ### Q5: Which zero-shot stage-2 model goes first?
 

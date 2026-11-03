@@ -207,3 +207,85 @@ direct check in its place.
 - Cost: a non-zero mean change shows that stage 2 changes the image. It does not show that the
   intended weights loaded. The strict load in CASCADE-GATE-05 is what checks that, so the two
   checks are needed together.
+
+## ADR-03 — The gate targets fuses and switches: erase only them, and judge their per-class rates
+
+**Date:** 2026-11-03
+**Status:** accepted
+**Tasks:** CASCADE-GATE-02, CASCADE-GATE-03, CASCADE-GATE-04, CASCADE-GATE-07
+
+**Context**
+The cascade's hypothesis is narrower than the plan states it. Stage-1 outputs often draw switches
+and fuses deformed and noisy, so the detector misses them. Perhaps the component was not hot enough
+to stand out from the background, or the thermal frame lacked texture. The hope is that stage 2
+reconstructs a clean component from that partial evidence. That is a win. A component drawn where
+the thermal frame holds no trace is a red flag (user, 2026-11-03).
+
+Two things in the plan as resolved do not fit that:
+
+- **Plan Q4 erases every ground-truth box.** After step 1 of the stage-1 runbook, the user looked at
+  the erased frames. Pole boxes are large, and inpainting them left the frames badly deformed. That
+  large Telea fill is itself an artefact the translator then reacts to. Poles are also easy to
+  detect, and they are not what the hypothesis is about.
+- **The insertion/deletion audit pools all four classes** (fuse, pole, switch, transformer). Poles
+  are many and easy, so they dilute exactly the fuse and switch gain, and the fuse and switch
+  inventions, that the gate is meant to show.
+
+**Decision**
+- **The erasure probe erases only fuse and switch boxes.** Poles and transformers stay in the frame
+  untouched. Telea inpainting and the dilation stay as plan Q4 resolved them.
+- **The erased tree's labels hold only the erased boxes.** `t2o erase` gains a class filter and
+  writes each frame's label file with only the boxes it inpainted. It records the classes under
+  `erasure:` in its `data.yaml`. The completion scorer is unchanged: "its labels are the erased
+  boxes" stays true.
+- **The faithfulness audit reports per-class missed-object and false-object rates beside the pooled
+  ones.** The gate reads the fuse and switch rates of both as well as the pooled rates:
+  - per-class missed-object rate: that class's ground-truth boxes left unmatched, over that class's
+    ground-truth boxes. This is the win.
+  - per-class false-object rate: that class's predictions left unmatched, over that class's
+    predictions. This is the red flag on real frames.
+
+  Matching is already same-class, so the per-class counts add up exactly to the pooled counts. No
+  match changes.
+- **The completion rate stays lower-is-better.** On an erased box no trace is left, so a component
+  that comes back was invented by definition. A pass needs three things against stage 1: fewer
+  missed fuses/switches on real val, no rise in invented fuses/switches on real val, and no rise in
+  the completion rate on erased val.
+- Margins for the new per-class rates are not set here. Gate ADR-04 (CASCADE-GATE-04) sets them from
+  the stage-1 loop arm's seed spread, the same rule plan Q3 gives the completion rate.
+
+**Alternatives considered**
+- **Erase every ground-truth box (plan Q4 as resolved).** It is the purest counterfactual. But the
+  pole fills deform the frame, and poles are not the hypothesis.
+- **Erase fuses and switches but copy the labels unchanged.** Poles and transformers would still be
+  in the frame and in the labels. The judge finds them easily, so they would count as "put back",
+  and the completion rate would mostly measure pole recall.
+- **Filter by class in the completion scorer instead of in the labels.** That keeps the erased
+  labels identical to the source. But then the scorer needs to know which classes were erased, and
+  a mismatch between the erase flags and the score flags would be silent. Writing only the erased
+  boxes keeps one source of truth on disk.
+- **Judge the pooled rates only (the status quo).** It needs no code. But a fuse/switch gain or a
+  fuse/switch invention can vanish into the pole count, so a pass or fail would not answer the
+  cascade's question.
+- **Per-class missed-object rates only.** It covers the win. But an invented fuse or switch on real
+  val would then be caught only by the pooled false-object rate, where poles dilute it.
+- **Also erase transformers.** The user ruled it out: the hypothesis concerns fuses and switches
+  only.
+
+**Consequences**
+- **Cost: two code changes come before the stage-1 probe run,** a class filter on `t2o erase` and
+  per-class missed/false rates in the audit. That pushes the first reading closer to the 2026-11-12
+  meeting.
+- **Cost: record 026's `judges.rtdetr.faithfulness` has no per-class rates.** So the e3b and e3t
+  stage-1 exports must be re-scored with the judge (a server pass of minutes). The write-back
+  replaces those keys. The pooled values should come out identical because the scorer is the same,
+  and the record of that run must check this.
+- **Cost: per-class rates rest on fewer boxes than the pooled ones,** so their seed spread, and the
+  margins built from it, will be wider. A per-class verdict may come out unresolved rather than pass
+  or fail. That is reported as it falls.
+- The probe no longer tests invented poles or transformers on erased input. On real val, the pooled
+  false-object rate still catches those.
+- The all-class erased split from the runbook's step 1 stays on the server unused. The fuse/switch
+  split gets a new folder.
+- **The gate's own ADR moves to ADR-04.** CASCADE-GATE-04's row still says "Gate ADR-03", so it
+  needs a `/task-plan` update. That update can add the two code tasks too.
