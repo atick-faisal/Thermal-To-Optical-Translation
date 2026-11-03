@@ -28,8 +28,9 @@ untranslated photo, which needs no labels at all and so stays well-defined at an
 `annotation_fraction` (PLAN.md §9, E8).
 
 **Completion rate** is the counterfactual-erasure probe's number
-(``docs/features/cascade-gate/plan.md``, Tech Stack). Every ground-truth box is inpainted out
-of the thermal input first (``data/erasure.py``), so a box the judge finds again, with the same
+(``docs/features/cascade-gate/plan.md``, Tech Stack). The target boxes -- fuses and switches,
+cascade-gate ADR-03 -- are inpainted out of the thermal input first (``data/erasure.py``), so a
+box the judge finds again, with the same
 class at IoU >= 0.5, on the translation of that erased input is an object the pipeline put back
 with no evidence for it. The matcher is the same `_greedy_match`, so a completion and a missed
 object are the same match read from opposite sides.
@@ -211,8 +212,8 @@ class CompletionEvaluator:
     """Accumulates how many erased ground-truth boxes the judge finds again.
 
     ``update`` is called once per image with the judge's predictions on the translation of the
-    *erased* thermal frame and the boxes that were erased from it -- the split's own labels,
-    which ``t2o erase`` copies unchanged. A predicted box only counts on an erased box's
+    *erased* thermal frame and the boxes that were erased from it -- the erased split's labels,
+    which ``t2o erase`` writes with only those boxes. A predicted box only counts on an erased box's
     footprint, with its class: a detection anywhere else is the false-object rate's business,
     not this one's.
     """

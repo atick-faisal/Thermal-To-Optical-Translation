@@ -216,13 +216,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     erase = subparsers.add_parser(
         "erase",
-        help="write a copy of one split with every ground-truth box inpainted out of the "
-        "thermal frames (the cascade gate's counterfactual-erasure probe input); labels "
-        "unchanged, its own data.yaml for `t2o export`",
+        help="write a copy of one split with ground-truth boxes inpainted out of the thermal "
+        "frames (the cascade gate's counterfactual-erasure probe input); its labels keep only "
+        "the erased boxes, its own data.yaml for `t2o export`",
     )
     erase.add_argument("--data", type=Path, required=True, help="source data.yaml")
     erase.add_argument("--out", type=Path, required=True, help="new, empty output root")
     erase.add_argument("--split", choices=("train", "val"), default="val")
+    erase.add_argument(
+        "--classes",
+        nargs="+",
+        help="erase only these class names, as data.yaml spells them (cascade-gate ADR-03: "
+        "the fuse and switch names); other objects stay, their labels are dropped. Default: all",
+    )
     erase.add_argument(
         "--dilate-px",
         type=int,
@@ -676,7 +682,9 @@ def _run_erase(args: argparse.Namespace) -> int:
         for key, value in (("dilate_px", args.dilate_px), ("inpaint_radius", args.inpaint_radius))
         if value is not None
     }
-    data_yaml = write_erased_split(DatasetManifest.load(args.data), args.out, args.split, **tuning)
+    data_yaml = write_erased_split(
+        DatasetManifest.load(args.data), args.out, args.split, classes=args.classes, **tuning
+    )
     logger.info("wrote %s", data_yaml)
     return 0
 

@@ -1,4 +1,4 @@
-"""Counterfactual erasure: inpaint every ground-truth box out of a split's thermal images.
+"""Counterfactual erasure: inpaint ground-truth boxes out of a split's thermal images.
 
 The cascade gate's probe (``docs/features/cascade-gate/plan.md``, Q4) asks whether a pipeline
 puts back an object that is no longer in its thermal input. This module makes that input: each
@@ -20,8 +20,15 @@ loads (through PIL, ``data/dataset.py::load_image_tensor``) is the erased region
 modalities are re-saved because ``Pairing`` derives the thermal path from the visible one by
 segment substitution and keeps the filename, suffix included.
 
-Labels are copied byte for byte. The boxes stay where the objects *were*, which is exactly
-what the completion rate scores against. ultralytics' ``labels.cache`` is never copied
+**Only the named classes are erased when ``classes`` is given** (cascade-gate ADR-03: fuses and
+switches). Every other object stays in the frame untouched, and its label line is dropped from
+the copy. The erased tree's labels are then exactly the erased boxes, so the completion rate
+scores only those: a visible pole the judge finds would otherwise count as "put back". A kept
+line is copied as text, never re-formatted. With no ``classes`` every box is erased and the
+labels are copied byte for byte.
+
+The boxes stay where the objects *were*, which is exactly what the completion rate scores
+against. ultralytics' ``labels.cache`` is never copied
 (``data/labels.py::invalidate_label_cache`` says why a stale one is silently trusted).
 """
 
@@ -30,6 +37,7 @@ from __future__ import annotations
 import logging
 import math
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 import cv2
@@ -95,12 +103,35 @@ def erase_boxes(
     return cv2.inpaint(image, mask, inpaint_radius, cv2.INPAINT_TELEA)
 
 
-def _copy_labels(source: Path, destination: Path) -> int:
-    """Copy ``*.txt`` only -- never ``labels.cache``. Returns the file count."""
+def _class_ids(manifest: DatasetManifest, classes: Sequence[str] | None) -> frozenset[int]:
+    """Resolve class names to the manifest's indices; ``None`` means every class."""
+    names = manifest.class_names
+    if classes is None:
+        return frozenset(range(len(names)))
+    unknown = sorted(set(classes) - set(names))
+    if unknown:
+        raise ErasureError(f"unknown class name(s) {unknown}; {manifest.path} declares {names}")
+    return frozenset(names.index(name) for name in classes)
+
+
+def _kept_lines(text: str, keep: frozenset[int]) -> str:
+    """The label lines whose class is in ``keep``, each copied as written."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    return "".join(f"{line}\n" for line in lines if int(float(line.split()[0])) in keep)
+
+
+def _copy_labels(source: Path, destination: Path, keep: frozenset[int] | None) -> int:
+    """Copy ``*.txt`` only -- never ``labels.cache``. Returns the file count.
+
+    ``keep=None`` copies each file byte for byte; otherwise only the lines of those classes.
+    """
     destination.mkdir(parents=True, exist_ok=True)
     labels = sorted(source.glob(f"*{LABEL_SUFFIX}")) if source.is_dir() else []
     for label in labels:
-        shutil.copyfile(label, destination / label.name)
+        if keep is None:
+            shutil.copyfile(label, destination / label.name)
+        else:
+            (destination / label.name).write_text(_kept_lines(label.read_text(), keep))
     return len(labels)
 
 
@@ -109,10 +140,15 @@ def write_erased_split(
     out_root: Path | str,
     split: str = "val",
     *,
+    classes: Sequence[str] | None = None,
     dilate_px: int = DEFAULT_DILATE_PX,
     inpaint_radius: float = DEFAULT_INPAINT_RADIUS,
 ) -> Path:
     """Write an erased copy of one split, plus a ``data.yaml`` that ``t2o export`` can read.
+
+    ``classes`` names the classes to erase, as ``names:`` spells them; ``None`` erases all.
+    Every frame is written either way, so the export's layout and frame count do not depend
+    on it.
 
     The copy keeps the source's own layout relative to its root, so ``manifest.pairing``
     resolves in it unchanged. Returns the written ``data.yaml``.
@@ -129,6 +165,7 @@ def write_erased_split(
     Refuses a non-empty ``out_root``: a re-run into an old tree could leave stale frames or a
     ``labels.cache`` that ultralytics would trust.
     """
+    keep = _class_ids(manifest, classes)
     out_root = Path(out_root).resolve()
     if out_root.exists() and any(out_root.iterdir()):
         raise ErasureError(
@@ -154,7 +191,8 @@ def write_erased_split(
         with Image.open(visible_path) as visible:
             visible.save(visible_out / name)
 
-        _, bboxes = load_yolo_labels(manifest.pairing.label_path(visible_path))
+        cls, bboxes = load_yolo_labels(manifest.pairing.label_path(visible_path))
+        bboxes = bboxes[[int(c) in keep for c in cls[:, 0].tolist()]]
         with Image.open(manifest.pairing.infrared_path(visible_path)) as infrared:
             thermal = np.asarray(infrared)
         erased = erase_boxes(
@@ -167,7 +205,11 @@ def write_erased_split(
         (source_images, visible_out),
         (manifest.pairing.infrared_path(source_images), infrared_out),
     ):
-        _copy_labels(images_dir.parent / LABELS_SEGMENT, out_images.parent / LABELS_SEGMENT)
+        _copy_labels(
+            images_dir.parent / LABELS_SEGMENT,
+            out_images.parent / LABELS_SEGMENT,
+            None if classes is None else keep,
+        )
 
     destination = out_root / DATA_FILENAME
     destination.write_text(
@@ -188,6 +230,7 @@ def write_erased_split(
                     "source": str(manifest.path),
                     "split": split,
                     "method": "opencv-telea",
+                    "classes": [name for i, name in enumerate(manifest.class_names) if i in keep],
                     "dilate_px": dilate_px,
                     "inpaint_radius": inpaint_radius,
                 },
