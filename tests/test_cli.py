@@ -430,7 +430,7 @@ def test_write_back_records_the_rates_into_metrics_json(
     run_dir = _finished_run(tmp_path, [0, 3])
     monkeypatch.setattr(
         "t2o.data.manifest.DatasetManifest.load",
-        classmethod(lambda cls, path: SimpleNamespace(val_images=tmp_path, pairing=None)),
+        classmethod(lambda cls, path: SimpleNamespace(val_images=tmp_path, pairing=None, names=())),
     )
     monkeypatch.setattr(
         "t2o.metrics.faithfulness.evaluate_faithfulness",
@@ -463,7 +463,7 @@ def _stub_scoring(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Both scoring passes replaced by fixed numbers: the tests below pin the wiring only."""
     monkeypatch.setattr(
         "t2o.data.manifest.DatasetManifest.load",
-        classmethod(lambda cls, path: SimpleNamespace(val_images=tmp_path, pairing=None)),
+        classmethod(lambda cls, path: SimpleNamespace(val_images=tmp_path, pairing=None, names=())),
     )
     monkeypatch.setattr(
         "t2o.metrics.faithfulness.evaluate_faithfulness",

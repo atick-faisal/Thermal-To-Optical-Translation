@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from t2o.analysis.aggregate import metric_value
 from t2o.config import Config
 from t2o.engine.loop import (
     METRICS_FILENAME,
@@ -359,6 +360,8 @@ def test_record_faithfulness_writes_only_the_addressed_stage(
         "false_object_rate": 0.125,
         "missed_object_rate": 0.25,
         "detection_consistency": 0.75,
+        "false_object_rate_by_class": {},
+        "missed_object_rate_by_class": {},
     }
 
 
@@ -407,6 +410,8 @@ def test_recorded_faithfulness_survives_a_resume(
         "false_object_rate": 0.125,
         "missed_object_rate": 0.25,
         "detection_consistency": 0.75,
+        "false_object_rate_by_class": {},
+        "missed_object_rate_by_class": {},
     }
 
 
@@ -454,6 +459,8 @@ def test_record_judge_merges_into_one_judge_and_leaves_the_others_alone(
             "false_object_rate": 0.125,
             "missed_object_rate": 0.25,
             "detection_consistency": 0.75,
+            "false_object_rate_by_class": {},
+            "missed_object_rate_by_class": {},
         }
     }
 
@@ -540,6 +547,53 @@ def test_record_judge_files_completion_beside_the_judges_faithfulness(tmp_path: 
             faithfulness=_stub_rates(), completion=CompletionMetrics(completion_rate=0.0625)
         )
     }
+
+
+def test_per_class_rates_are_written_back_where_aggregate_reads_them(tmp_path: Path) -> None:
+    """ADR-03's fuse/switch rates ride inside the judge's faithfulness, beside the pooled ones."""
+    (tmp_path / METRICS_FILENAME).write_text(
+        json.dumps([{"stage": 3, "task_weight": 1.0, "epochs": [], "detector": None}])
+    )
+    rates = FaithfulnessMetrics(
+        false_object_rate=0.125,
+        missed_object_rate=0.25,
+        detection_consistency=0.75,
+        false_object_rate_by_class={"fuse": 0.5, "switch": 0.0},
+        missed_object_rate_by_class={"fuse": 0.375, "switch": 1.0},
+    )
+
+    record_judge(tmp_path, 3, "rtdetr", faithfulness=rates)
+
+    (entry,) = json.loads((tmp_path / METRICS_FILENAME).read_text())
+    assert metric_value(entry, "judges.rtdetr.faithfulness.missed_object_rate_by_class.fuse") == (
+        0.375
+    )
+    assert metric_value(entry, "judges.rtdetr.faithfulness.false_object_rate") == 0.125
+    assert _load_existing_results(tmp_path)[0].judges["rtdetr"].faithfulness == rates
+
+
+def test_a_faithfulness_entry_without_per_class_rates_still_loads(tmp_path: Path) -> None:
+    """Record 026's `metrics.json` predates the per-class rates; it must still resume."""
+    pooled = {"false_object_rate": 0.125, "missed_object_rate": 0.25, "detection_consistency": 0.75}
+    (tmp_path / METRICS_FILENAME).write_text(
+        json.dumps(
+            [
+                {
+                    "stage": 3,
+                    "task_weight": 1.0,
+                    "epochs": [],
+                    "detector": None,
+                    "faithfulness": pooled,
+                    "judges": {"rtdetr": {"faithfulness": pooled}},
+                }
+            ]
+        )
+    )
+
+    (result,) = _load_existing_results(tmp_path)
+
+    assert result.faithfulness == _stub_rates()
+    assert result.judges["rtdetr"].faithfulness == _stub_rates()
 
 
 def test_a_metrics_json_without_epoch_seconds_still_loads(tmp_path: Path) -> None:

@@ -299,6 +299,106 @@ def test_reset_clears_accumulated_state() -> None:
     assert evaluator.compute().false_object_rate == pytest.approx(0.0)
 
 
+# --------------------------------------------------------------------------- per class
+
+_BOX_C = [0.1, 0.6, 0.3, 0.8]
+_FUSE, _POLE, _SWITCH = 0, 1, 2
+# Transformer (3) has no instance anywhere below, so its rates show the empty-class default.
+_NAMES = ("fuse", "pole", "switch", "transformer")
+
+
+def _three_frames() -> list[tuple[Detections, Detections, Detections]]:
+    """``(translated, visible, gt)`` per frame, every outcome written out by hand.
+
+    1. fuse and pole re-found; a switch invented at C.
+    2. pole re-found; the switch at A drawn as a fuse -- a false fuse and a missed switch.
+    3. the fuse at A missed outright.
+
+    So fuse: 2 GT, 1 missed; 2 predicted, 1 false. Pole: 2 GT, 2 predicted, all matched.
+    Switch: 1 GT, missed; 1 predicted, false. Pooled: 5 GT, 2 missed; 5 predicted, 2 false.
+    """
+    frames = [
+        ([_FUSE, _POLE, _SWITCH], [_BOX_A, _BOX_B, _BOX_C], [_FUSE, _POLE], [_BOX_A, _BOX_B]),
+        ([_POLE, _FUSE], [_BOX_B, _BOX_A], [_SWITCH, _POLE], [_BOX_A, _BOX_B]),
+        ([], [], [_FUSE], [_BOX_A]),
+    ]
+    out = []
+    for pred_cls, pred_boxes, gt_cls, gt_boxes in frames:
+        translated = (
+            _det(pred_cls, pred_boxes, conf=[0.9] * len(pred_cls))
+            if pred_cls
+            else Detections(cls=torch.zeros(0, dtype=torch.long), bboxes=torch.zeros(0, 4))
+        )
+        gt = _det(gt_cls, gt_boxes)
+        out.append((translated, _det(gt_cls, gt_boxes, conf=[1.0] * len(gt_cls)), gt))
+    return out
+
+
+def test_per_class_rates_are_read_class_by_class() -> None:
+    evaluator = FaithfulnessEvaluator(class_names=_NAMES)
+    for frame in _three_frames():
+        evaluator.update(*frame)
+    metrics = evaluator.compute()
+
+    assert metrics.missed_object_rate_by_class == pytest.approx(
+        {"fuse": 0.5, "pole": 0.0, "switch": 1.0, "transformer": 0.0}
+    )
+    assert metrics.false_object_rate_by_class == pytest.approx(
+        {"fuse": 0.5, "pole": 0.0, "switch": 1.0, "transformer": 0.0}
+    )
+
+
+def test_per_class_counts_add_up_to_the_pooled_counts_and_leave_them_unchanged() -> None:
+    """ADR-03: matching is already same-class, so splitting by class moves no count."""
+    named = FaithfulnessEvaluator(class_names=_NAMES)
+    pooled = FaithfulnessEvaluator()
+    for frame in _three_frames():
+        named.update(*frame)
+        pooled.update(*frame)
+    by_class, plain = named.compute(), pooled.compute()
+
+    assert (by_class.false_object_rate, by_class.missed_object_rate) == pytest.approx((0.4, 0.4))
+    assert by_class.false_object_rate == plain.false_object_rate
+    assert by_class.missed_object_rate == plain.missed_object_rate
+    assert by_class.detection_consistency == plain.detection_consistency
+
+    # Each class's rate times its denominator is its count; the counts sum to the pooled one.
+    gt_per_class = {"fuse": 2, "pole": 2, "switch": 1, "transformer": 0}
+    predicted_per_class = {"fuse": 2, "pole": 2, "switch": 1, "transformer": 0}
+    missed = sum(by_class.missed_object_rate_by_class[c] * n for c, n in gt_per_class.items())
+    false = sum(by_class.false_object_rate_by_class[c] * n for c, n in predicted_per_class.items())
+    assert missed == pytest.approx(plain.missed_object_rate * sum(gt_per_class.values()))
+    assert false == pytest.approx(plain.false_object_rate * sum(predicted_per_class.values()))
+
+
+def test_without_class_names_the_per_class_rates_stay_empty() -> None:
+    evaluator = FaithfulnessEvaluator()
+    for frame in _three_frames():
+        evaluator.update(*frame)
+    metrics = evaluator.compute()
+
+    assert metrics.missed_object_rate_by_class == {}
+    assert metrics.false_object_rate_by_class == {}
+
+
+def test_a_class_id_with_no_name_is_refused() -> None:
+    """It would drop out of the per-class counts, which then no longer add up."""
+    evaluator = FaithfulnessEvaluator(class_names=("fuse",))
+    with pytest.raises(ValueError, match=r"class ids \[2\] have no name"):
+        evaluator.update(_det([2], [_BOX_A], conf=[0.9]), _det([0], [_BOX_A]), _det([0], [_BOX_A]))
+
+
+def test_per_class_reset_clears_accumulated_state() -> None:
+    evaluator = FaithfulnessEvaluator(class_names=_NAMES)
+    for frame in _three_frames():
+        evaluator.update(*frame)
+    evaluator.reset()
+
+    perfect = _det([_FUSE], [_BOX_A], conf=[0.9])
+    evaluator.update(perfect, perfect, _det([_FUSE], [_BOX_A]))
+    assert evaluator.compute().missed_object_rate_by_class["switch"] == pytest.approx(0.0)
+
+
 # --------------------------------------------------------------------------- completion
 
 # Every test here reads `erased` as the boxes inpainted out of the thermal input, so a
@@ -490,6 +590,23 @@ def test_a_translation_whose_every_detection_is_invented_reads_as_a_full_false_o
     assert metrics.false_object_rate == pytest.approx(1.0)
     # Every annotated object was also erased -- the detector found nothing where they are.
     assert metrics.missed_object_rate == pytest.approx(1.0)
+
+
+def test_evaluate_faithfulness_reports_per_class_rates_given_the_class_names(
+    export_pair: tuple[Path, Path, Pairing], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each frame's labelled fuse is re-found, and a switch is invented in its corner."""
+    translated, visible, pairing = export_pair
+    boxes = _FakeBoxes([0, 1], [*_CENTRE_BOX, *_CORNER_BOX], [0.9, 0.8])
+    monkeypatch.setattr("ultralytics.YOLO", _fake_yolo({"a": boxes, "b": boxes}))
+
+    metrics = evaluate_faithfulness(
+        translated, visible, "w.pt", pairing=pairing, class_names=("fuse", "switch")
+    )
+
+    assert metrics.false_object_rate == pytest.approx(0.5)
+    assert metrics.false_object_rate_by_class == pytest.approx({"fuse": 0.0, "switch": 1.0})
+    assert metrics.missed_object_rate_by_class == pytest.approx({"fuse": 0.0, "switch": 0.0})
 
 
 def test_a_translation_the_detector_sees_nothing_in_reads_as_a_full_missed_object_rate(
