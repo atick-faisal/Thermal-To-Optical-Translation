@@ -6,6 +6,8 @@ Subcommands wrap the engine entry points built in M0.8: `train` (one stage of
 (`metrics.fidelity.evaluate_fidelity`), and `train-detector`
 (`engine.detector_stage.train_detector`). PLAN.md §1 rules out an inference service, so
 nothing here serves predictions; `evaluate` only ever scores an existing detector checkpoint.
+`refine` runs a stage-1 export through the cascade's frozen stage 2 (cascade-gate plan Q1),
+under its own `RefineConfig`.
 This module is the sole caller of ``logging.basicConfig`` (PLAN.md §13); library modules only
 ever take ``logging.getLogger(__name__)``.
 
@@ -60,6 +62,16 @@ _OVERRIDES: dict[str, tuple[str, ...]] = {
     "detector_epochs": ("detector", "evaluation", "epochs"),
     "detector_batch": ("detector", "evaluation", "batch"),
     "normalize": ("export", "normalize"),
+}
+
+# `t2o refine`'s own table, onto `RefineConfig` rather than `Config`. Only the fields that
+# change between runs of one campaign; `source.split` and `refiner.dtype` stay in the file.
+_REFINE_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "source": ("source", "export"),
+    "checkpoint": ("refiner", "checkpoint"),
+    "device": ("runtime", "device"),
+    "run_dir": ("runtime", "run_dir"),
+    "name": ("runtime", "name"),
 }
 
 
@@ -242,6 +254,19 @@ def build_parser() -> argparse.ArgumentParser:
         "erasure.DEFAULT_INPAINT_RADIUS)",
     )
 
+    refine = subparsers.add_parser(
+        "refine",
+        help="run a stage-1 export through the cascade's frozen stage 2 (PiSA-SR, "
+        "cascade-gate ADR-01), into a new tree in the export's layout that `faithfulness` "
+        "and `completion` score as they are",
+    )
+    refine.add_argument("--config", type=Path, help="RefineConfig YAML; flags below override it")
+    refine.add_argument("--source", type=Path, help="the stage-1 export root to refine")
+    refine.add_argument("--checkpoint", type=Path, help="upstream's pisa_sr.pkl")
+    refine.add_argument("--device", help="null/auto, 'cpu', '0', or 'cuda:0'")
+    refine.add_argument("--run-dir", type=Path, help="parent of the refined tree")
+    refine.add_argument("--name", help="the refined tree's directory name; must be new or empty")
+
     train_detector = subparsers.add_parser(
         "train-detector",
         help="train a detector on real data, e.g. E3's independent zero-shot judge",
@@ -393,10 +418,12 @@ def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--normalize", choices=[m.value for m in Normalize])
 
 
-def overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
+def overrides_from_args(
+    args: argparse.Namespace, table: dict[str, tuple[str, ...]] = _OVERRIDES
+) -> dict[str, Any]:
     """Fold the CLI flags that were actually supplied into a nested override mapping."""
     overrides: dict[str, Any] = {}
-    for flag, path in _OVERRIDES.items():
+    for flag, path in table.items():
         value = getattr(args, flag, None)
         if value is None:
             continue
@@ -438,6 +465,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_completion(args)
     if args.command == "erase":
         return _run_erase(args)
+    if args.command == "refine":
+        return _run_refine(args)
     if args.command == "train-detector":
         return _run_train_detector(args)
     if args.command == "aggregate":
@@ -694,6 +723,27 @@ def _run_erase(args: argparse.Namespace) -> int:
         DatasetManifest.load(args.data), args.out, args.split, classes=args.classes, **tuning
     )
     logger.info("wrote %s", data_yaml)
+    return 0
+
+
+def _run_refine(args: argparse.Namespace) -> int:
+    import torch
+
+    from t2o.config import RefineConfig
+    from t2o.engine.refine import check_refine_paths, refine_export
+    from t2o.engine.trainer import resolve_device
+    from t2o.translators.pisa_sr import PiSASRRefiner, load_pisa_sr
+
+    config = RefineConfig.load(args.config, overrides_from_args(args, _REFINE_OVERRIDES))
+    # Checked here as well as in `refine_export`, so a bad path fails before SD-2.1 loads.
+    check_refine_paths(config)
+    refiner = PiSASRRefiner(load_pisa_sr(config.refiner.checkpoint)).to(
+        # AmpDtype's values are torch's own dtype names.
+        device=resolve_device(config.runtime.device),
+        dtype=getattr(torch, config.refiner.dtype.value),
+    )
+    logger.info("refine config hash %s", config.config_hash())
+    logger.info("wrote %s", refine_export(refiner, config))
     return 0
 
 
