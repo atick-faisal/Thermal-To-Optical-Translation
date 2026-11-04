@@ -289,3 +289,98 @@ Two things in the plan as resolved do not fit that:
   split gets a new folder.
 - **The gate's own ADR moves to ADR-04.** CASCADE-GATE-04's row still says "Gate ADR-03", so it
   needs a `/task-plan` update. That update can add the two code tasks too.
+
+## ADR-04 — The cascade gate: zero tolerance on completion, stage-1 spread margins on fuse and switch, and every test must pass
+
+**Date:** 2026-11-04
+**Status:** accepted
+**Tasks:** CASCADE-GATE-04, CASCADE-GATE-07
+
+**Context**
+Plan Q3 takes the completion-rate margin, and ADR-03 the fuse and switch per-class margins, from the
+stage-1 loop arm's seed spread on the probe. Record 034 has now measured it. Stage 1 put back none
+of the 234 erased fuses and switches on any of the nine e3b and e3t loop runs, so the completion
+rate is 0.0000 on every seed and its spread is 0 (F217). With a margin of 0, the pass rule from
+out-of-family-judge ADR-01 fails every cascade, whatever stage 2 does: it needs the interval to lie
+"below +margin", and stage 1 sits at zero, so cascade − stage 1 can never be negative (F218). The
+per-class spreads are all non-zero, but they are 1.2–4.7× the pooled ones (F219). Two more things
+were open. ADR-03 says a pass needs "fewer missed fuses/switches", while the task row says "on the
+safe side of each margin". And nothing said how the per-cell, per-rate verdicts combine into the one
+answer the gate exists to give: does the cascade enter the IEEE TIM paper?
+
+This entry supersedes plan Q3 for the completion rate only. ADR-03 stays accepted: only its "fewer
+missed" wording is read here, and its erasure decisions stand. As of this entry, no stage-2 output
+exists (CASCADE-GATE-05 is pending).
+
+**Decision**
+- **The comparison.** For each cell, e3b (pix2pix, seeds 0–5) and e3t (turbo, seeds 0, 1, 3), the
+  comparison is cascade − stage 1, paired by seed. Stage 1 is the loop arm's stage-3 export, and the
+  cascade is stage 2 applied to that same export. Everything is scored on val (out-of-family-judge
+  ADR-02) under the `rtdetr` checkpoint `runs/reference-rtdetr-l/weights/best.pt`, with the default
+  scorer settings (IoU 0.5, conf 0.25, imgsz 640, batch 16). The erased frames come from
+  `runs/cascade-gate/erased-custom-val-fuse-switch` (Fuse and Switch, Telea, 4 px, radius 3.0), as
+  record 034 scored them.
+- **Completion rate (erased val): zero tolerance.** A cell passes only if the cascade's completion
+  rate is 0.0000 on every seed. Because stage 1 is 0 on every seed, this is the same as the paired
+  95% CI's upper end being ≤ 0. This replaces plan Q3's spread margin, for the completion rate only.
+- **Fuse and Switch missed- and false-object rates (real val): not worse, within margin.** A rate
+  passes when the 95% seed-paired bootstrap CI of cascade − stage 1 lies below +margin, in the same
+  form as ADR-01. The margin is the stage-1 loop arm's seed sd (ddof = 1) from record 034:
+
+  | cell (seeds) | missed Fuse | false Fuse | missed Switch | false Switch |
+  | --- | --- | --- | --- | --- |
+  | e3b (6) | 0.0229 | 0.0284 | 0.0602 | 0.0487 |
+  | e3t (3) | 0.0209 | 0.0342 | 0.0546 | 0.0558 |
+
+  ADR-03's "fewer missed fuses/switches" is read as this not-worse test. Stage 2 does not have to
+  show a gain.
+- **Pooled false- and missed-object rates (real val):** ADR-01's margins, unchanged. They are e3b
+  0.0179 / 0.0094 and e3t 0.0315 / 0.0112, under the same "below +margin" rule.
+- **Pooled detection-consistency is reported, not gated.**
+- **The gate's answer.** That makes seven gated tests per cell, fourteen in all. The cascade enters
+  the paper only if all fourteen pass. Any fail keeps it in paper 2. Each test's verdict is still
+  reported per cell and per rate, and a fail is reported as a fail (out-of-family-judge ADR-02).
+- **How passes and fails read** follows out-of-family-judge ADR-02. A fail is robust. A pass rests
+  on an anti-conservative interval at n = 3–6 and is reported beside its exact sign-flip p.
+- **Scope.** These margins belong to record 026's `rtdetr` checkpoint and to record 034's erased
+  tree, and to nothing else.
+
+**Alternatives considered**
+- **Plan Q3's spread margin for completion, as written.** The margin comes out at 0, so the test
+  cannot pass under ADR-01's strict rule even when stage 2 puts back nothing (F218).
+- **A one-box resolution margin, 1/234 ≈ 0.0043, under the strict rule.** It tolerates a stray box
+  on one seed and fails a repeatable invention. It lost because ADR-03 already counts any put-back
+  as an invention, and the judge found nothing at the erased spots in 2,106 box checks after stage
+  1. A stray box is not noise to forgive.
+- **Report the completion rate without gating on it.** This is the weakest guard against the red
+  flag the gate exists for: a component drawn where the thermal frame holds no trace.
+- **Missed fuses and switches must improve (CI upper below 0).** This reads ADR-03 literally. But it
+  turns a faithfulness gate into a detection-gain claim, which the plan puts out of scope ("Margin
+  or Transfer numbers for the cascade"). At n = 3 (e3t), the CI may rarely clear zero.
+- **Per-cell entry**, where each backbone's cascade enters on its own verdict. It was rejected for
+  one answer that needs every test on both cells, which is how ADR-03's "a pass needs three things"
+  reads.
+- **Gate consistency too, at ADR-01's margins.** The task row gated insertion and deletion only.
+  e3t's consistency margin, 0.0038, is the tightest in ADR-01 and may fail on noise alone.
+
+**Consequences**
+- **Cost: this is the strictest possible completion test.** One fuse or switch put back on one seed
+  of nine fails the gate, and with it the cascade's entry into the January paper. A spurious judge
+  detection at an erased spot also counts. Stage 1 showed none, but stage 2 changes the image, so
+  that is not guaranteed.
+- **Cost: the gate no longer uses one method.** Plan Q3 chose spread margins so a reviewer sees one
+  rule in one unit. The completion test is now a count rule beside them, and the paper has to say
+  why (F218).
+- **Cost: fourteen tests must all pass.** Each one passing on an anti-conservative interval makes
+  the overall pass weaker than it looks. Any single fail decides the answer.
+- **The per-class margins are coarse** (F219). e3b's Switch missed-object margin, 0.0602, is about
+  four of val's 66 switches. A cascade can pass that test while missing a few more switches per
+  seed.
+- **e3t's margins rest on three seeds** and are unstable estimates, as ADR-01 noted for its own.
+- **Consistency is ungated.** A cascade can pass while it changes what the detector finds compared
+  with real visible frames. Only the report shows that.
+- **The CI needs a cascade-vs-stage-1 pairing.** Record 034 found that `t2o aggregate` refuses runs
+  from a single arm. CASCADE-GATE-06 and -07 must produce a seed-paired comparison it accepts, or
+  compute the same interval another way.
+- **Re-erasing val or retraining the judge voids these margins.** `runs/reference-rtdetr-l` and
+  `runs/cascade-gate/erased-custom-val-fuse-switch` must never be overwritten.

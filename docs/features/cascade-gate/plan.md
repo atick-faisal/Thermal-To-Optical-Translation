@@ -116,6 +116,8 @@ zero-shot reading, if the server install allows.
   matches ADR-01's "control spread" wording exactly. But the probe would need control-arm runs
   too, and the cascade is compared against its own stage 1, not against control.
 
+> Superseded by ADR-04 (2026-11-04)
+
 ### Q4: How does the erasure probe remove an object from the thermal input?
 
 - [x] OpenCV Telea inpainting of each GT box, slightly dilated (recommended) — a standard,
