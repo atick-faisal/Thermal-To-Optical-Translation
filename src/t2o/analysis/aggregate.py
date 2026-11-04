@@ -40,7 +40,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-from t2o.config.schema import CONFIG_FILENAME
+from t2o.config.base import CONFIG_FILENAME
 from t2o.engine.loop import METRICS_FILENAME
 from t2o.metrics.task import PrimaryClassError, primary_mean
 

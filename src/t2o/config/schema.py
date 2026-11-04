@@ -14,20 +14,14 @@ startup check in the engine layer.
 
 from __future__ import annotations
 
-import hashlib
-import json
-from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal
 
-import yaml
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, field_validator
 
-from t2o.config.base import ConfigBase, ConfigError, as_config_error, deep_merge
+from t2o.config.base import ConfigBase, RunConfigBase
 from t2o.imaging import Normalize
-
-CONFIG_FILENAME = "config.yaml"
 
 
 class AmpDtype(StrEnum):
@@ -484,7 +478,7 @@ class RuntimeConfig(ConfigBase):
         return self.run_dir / self.name
 
 
-class Config(ConfigBase):
+class Config(RunConfigBase):
     data: DataConfig = DataConfig()
     train: TrainConfig = TrainConfig()
     loss: LossConfig = LossConfig()
@@ -495,51 +489,73 @@ class Config(ConfigBase):
     export: ExportConfig = ExportConfig()
     runtime: RuntimeConfig = RuntimeConfig()
 
-    @classmethod
-    def load(
-        cls,
-        path: Path | str | None = None,
-        overrides: Mapping[str, Any] | None = None,
-    ) -> Self:
-        """Build a config from an optional YAML file plus optional nested overrides.
-
-        Overrides win over the file, which wins over the declared defaults.
-        """
-        merged: dict[str, Any] = {}
-        if path is not None:
-            loaded = yaml.safe_load(Path(path).read_text()) or {}
-            if not isinstance(loaded, Mapping):
-                raise ConfigError(f"{path}: expected a mapping at the top level")
-            merged = deep_merge(merged, loaded)
-        if overrides:
-            merged = deep_merge(merged, overrides)
-        try:
-            return cls.model_validate(merged)
-        except ValidationError as exc:
-            raise as_config_error(exc) from exc
-
-    def to_dict(self) -> dict[str, Any]:
-        """The resolved config as YAML-safe primitives: Path -> str, enum -> str."""
-        return self.model_dump(mode="json")
-
-    def config_hash(self) -> str:
-        """Short digest identifying the *experiment*, stored in checkpoints to catch drift.
-
-        `runtime` is excluded wholly: device, run name and W&B flags do not change what is
-        measured, so two invocations of one experiment must agree here. Diverges from
-        ``../Clean-SeAFusion/src/seafusion/engine/fusion_trainer.py:60``, which hashed
-        everything and therefore warned on a renamed run.
-        """
-        payload = self.model_dump(mode="json", exclude={"runtime"})
-        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
-
     def snapshot(self, run_dir: Path | None = None) -> Path:
-        """Write the fully resolved config into the run directory, for reproducibility.
+        """Snapshot into `run_dir`, defaulting to this run's own `runtime.path`."""
+        return super().snapshot(run_dir if run_dir is not None else self.runtime.path)
 
-        Includes `runtime`, unlike the hash -- provenance wants to know which machine.
-        """
-        target = Path(run_dir) if run_dir is not None else self.runtime.path
-        target.mkdir(parents=True, exist_ok=True)
-        destination = target / CONFIG_FILENAME
-        destination.write_text(yaml.safe_dump(self.to_dict(), sort_keys=False))
-        return destination
+
+class RefineSourceConfig(ConfigBase):
+    """The stage-1 output the cascade's stage 2 refines (cascade-gate plan Q1)."""
+
+    # (path) a stage-1 export root as `t2o export` or `run_loop` wrote it: `data.yaml` plus
+    # `<split>/images` and `<split>/labels`, e.g. `runs/e3b-loop-s0/stage3/translated`, or the
+    # export of an erased split for the probe. Naming another seed's or another stage's export
+    # refines the wrong cell, and nothing downstream can tell: the gate pairs by seed.
+    export: Path
+    # (train|val) the split refined. The gate reads val only (plan Q2); train is 600 frames
+    # nobody scores. An erased export names its one split as both, so either works there.
+    split: Literal["train", "val"] = "val"
+
+
+class RefinerConfig(ConfigBase):
+    """cascade-gate ADR-01's stage 2: PiSA-SR's default setting, both LoRAs merged at 1.0.
+
+    The base model (SD-2.1-base, its mirror and revision), the timestep and the LoRA weights
+    are pinned in `translators/pisa_sr.py`, not here. ADR-01 fixed them before any score, and
+    changing one needs a superseding ADR, not a config edit.
+    """
+
+    # (path) upstream's `pisa_sr.pkl`, fetched on the server and never committed. Its sha256
+    # goes in the server log on first fetch (ADR-01). A wrong file fails the strict load
+    # (ADR-02) rather than silently refining with stock SD-2.1.
+    checkpoint: Path
+    # (bfloat16|float16|float32) dtype the VAE and UNet run in. It changes every refined
+    # pixel slightly, so it is experiment identity. Upstream defaults to float16
+    # (`test_pisasr.py:97`). float32 takes precision out of the comparison at roughly twice
+    # the time, which 153 val frames per run make negligible.
+    dtype: AmpDtype = AmpDtype.FLOAT32
+
+
+class RefineRuntimeConfig(ConfigBase):
+    """Invocation details of a refine. **Excluded from config_hash**, as `RuntimeConfig` is.
+
+    Only the three fields a refine reads. `RuntimeConfig`'s workers, W&B and monitoring flags
+    would sit here doing nothing, which reads as if they did something.
+    """
+
+    # (str|null) null auto-selects. "cpu", "cuda:0", or a bare "0". One card: SD-2.1 at
+    # 640x480 fits a 40 GB A100 many times over, and no DDP exists on native Windows.
+    device: str | None = None
+    # (path) parent of the refined tree. Ignored by git, like every run output.
+    run_dir: Path = Path("runs")
+    # (str) the refined tree's directory name under `run_dir`. It must not exist yet, or be
+    # empty: a refine never writes over an earlier one, or over the stage-1 export itself.
+    name: str = "refined"
+
+    @property
+    def path(self) -> Path:
+        return self.run_dir / self.name
+
+
+class RefineConfig(RunConfigBase):
+    """`t2o refine`: one stage-1 export through the frozen stage 2 (cascade-gate plan Q1).
+
+    Its own config, not a section of :class:`Config`: a refine trains nothing and reads no
+    dataset manifest, so every `Config` section but `runtime` would be dead weight. It keeps
+    `Config`'s contract all the same: unknown keys rejected, `runtime` outside the hash, and
+    a `config.yaml` snapshot in the refined tree.
+    """
+
+    source: RefineSourceConfig
+    refiner: RefinerConfig
+    runtime: RefineRuntimeConfig = RefineRuntimeConfig()

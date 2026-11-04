@@ -10,10 +10,16 @@ costs a full run to discover, so the trade is heavily in favour of failing fast.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
-from typing import Any
+from pathlib import Path
+from typing import Any, Self
 
+import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
+
+CONFIG_FILENAME = "config.yaml"
 
 
 class ConfigError(ValueError):
@@ -30,6 +36,65 @@ class ConfigBase(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
+
+
+class RunConfigBase(ConfigBase):
+    """A config that is one whole run: loaded, hashed and snapshotted the same way every time.
+
+    Shared by the experiment :class:`~t2o.config.schema.Config` and the cascade's
+    :class:`~t2o.config.schema.RefineConfig`, so both reject unknown keys, hash the same way
+    and leave the same ``config.yaml`` behind. A subclass carries a ``runtime`` section; the
+    hash leaves it out.
+    """
+
+    @classmethod
+    def load(
+        cls,
+        path: Path | str | None = None,
+        overrides: Mapping[str, Any] | None = None,
+    ) -> Self:
+        """Build a config from an optional YAML file plus optional nested overrides.
+
+        Overrides win over the file, which wins over the declared defaults.
+        """
+        merged: dict[str, Any] = {}
+        if path is not None:
+            loaded = yaml.safe_load(Path(path).read_text()) or {}
+            if not isinstance(loaded, Mapping):
+                raise ConfigError(f"{path}: expected a mapping at the top level")
+            merged = deep_merge(merged, loaded)
+        if overrides:
+            merged = deep_merge(merged, overrides)
+        try:
+            return cls.model_validate(merged)
+        except ValidationError as exc:
+            raise as_config_error(exc) from exc
+
+    def to_dict(self) -> dict[str, Any]:
+        """The resolved config as YAML-safe primitives: Path -> str, enum -> str."""
+        return self.model_dump(mode="json")
+
+    def config_hash(self) -> str:
+        """Short digest identifying the *experiment*, stored in checkpoints to catch drift.
+
+        `runtime` is excluded wholly: device, run name and W&B flags do not change what is
+        measured, so two invocations of one experiment must agree here. Diverges from
+        ``../Clean-SeAFusion/src/seafusion/engine/fusion_trainer.py:60``, which hashed
+        everything and therefore warned on a renamed run.
+        """
+        payload = self.model_dump(mode="json", exclude={"runtime"})
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+    def snapshot(self, run_dir: Path) -> Path:
+        """Write the fully resolved config into the run directory, for reproducibility.
+
+        Includes `runtime`, unlike the hash -- provenance wants to know which machine.
+        """
+        target = Path(run_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        destination = target / CONFIG_FILENAME
+        destination.write_text(yaml.safe_dump(self.to_dict(), sort_keys=False))
+        return destination
 
 
 def deep_merge(base: Mapping[str, Any], update: Mapping[str, Any]) -> dict[str, Any]:

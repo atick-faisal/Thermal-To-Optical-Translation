@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from t2o.config.base import ConfigBase, ConfigError
+from t2o.config.base import CONFIG_FILENAME, ConfigBase, ConfigError, RunConfigBase
 from t2o.config.schema import (
-    CONFIG_FILENAME,
     AmpDtype,
     Backbone,
     Config,
@@ -20,6 +19,10 @@ from t2o.config.schema import (
     Pix2PixTranslatorConfig,
     Pix2PixTurboTranslatorConfig,
     ReferenceDetectorConfig,
+    RefineConfig,
+    RefinerConfig,
+    RefineRuntimeConfig,
+    RefineSourceConfig,
     RuntimeConfig,
     StubTranslatorConfig,
     TrainConfig,
@@ -45,6 +48,11 @@ __all__ = [
     "Pix2PixTranslatorConfig",
     "Pix2PixTurboTranslatorConfig",
     "ReferenceDetectorConfig",
+    "RefineConfig",
+    "RefineRuntimeConfig",
+    "RefineSourceConfig",
+    "RefinerConfig",
+    "RunConfigBase",
     "RuntimeConfig",
     "StubTranslatorConfig",
     "TrainConfig",
