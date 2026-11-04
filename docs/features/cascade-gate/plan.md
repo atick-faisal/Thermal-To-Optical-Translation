@@ -69,6 +69,15 @@ zero-shot reading, if the server install allows.
   so record 026's `metrics.json` still loads through `FaithfulnessMetrics(**…)`
   (`src/t2o/engine/loop.py:398,409`). `aggregate.metric_value` already walks nested keys, so
   `faithfulness.missed_object_rate_by_class.fuse` needs no aggregate change.
+- **Stage-2 refiner (CASCADE-GATE-05).** `src/t2o/translators/pisa_sr.py`, beside the turbo
+  wrapper, but not a `Translator` and not in `build_translator`: RGB `[0, 1]` in, the same shape
+  out, float32, whatever dtype its components are in. diffusers' `add_adapter` activates only the
+  adapter it just added (`diffusers/loaders/peft.py:544`), so the refiner activates both LoRAs
+  explicitly, and a test shows that zeroing either one changes the output. The strict load
+  matches checkpoint keys against the UNet's full `state_dict()`. AdaIN statistics are per image
+  and per channel, taken after the slice back to input size. A `slow` test, skipped unless
+  `pisa_sr.pkl` is present, strict-loads it into an SD-2.1 UNet built from the mirror's config
+  alone.
 - **`scripts/loss_share.py` is skipped by ADR.** A frozen zero-shot stage 2 has no objective.
   The precedent is modtr-baseline ADR-03 (`docs/features/modtr-baseline/decisions.md:132-176`).
 - **Constraints:**
