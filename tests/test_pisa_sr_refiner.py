@@ -5,6 +5,9 @@ the way upstream's `save_model` writes the real one (`pisasr.py:296-305`): six a
 module lists, two ranks, and every LoRA tensor in one `state_dict_unet`. The adapter injection,
 strict load and merge are the real ones; only the widths are small.
 
+The same tiny components drive `t2o refine` end to end over a real stage-1 export of
+conftest's synthetic pairs (CASCADE-GATE-06).
+
 What a tiny model cannot cover is whether the real checkpoint's keys still match a current
 diffusers UNet. That is the one `slow` test. It skips unless `T2O_PISA_SR_CKPT` names the
 downloaded `pisa_sr.pkl` and SD-2.1-base's `unet/config.json` is in the HuggingFace cache.
@@ -16,15 +19,25 @@ import os
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import pytest
 import torch
+import yaml
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 from peft import LoraConfig
 from peft.tuners.tuners_utils import BaseTunerLayer
+from PIL import Image
 from torch import Tensor, nn
 from transformers import CLIPTextConfig, CLIPTextModel
 
+from t2o.cli import _REFINE_OVERRIDES, build_parser, main, overrides_from_args
+from t2o.config import CONFIG_FILENAME, Config, ConfigError, RefineConfig, RefineRuntimeConfig
+from t2o.data.manifest import DatasetManifest
+from t2o.engine.export import export_translated
+from t2o.engine.refine import RefineError
+from t2o.metrics.faithfulness import _translated_counterparts
+from t2o.translators import build_translator
 from t2o.translators.pisa_sr import (
     SD21_BASE,
     SD21_BASE_REVISION,
@@ -290,6 +303,167 @@ def test_adain_gives_each_image_its_sources_statistics() -> None:
     torch.testing.assert_close(
         fixed.flatten(2).std(dim=2), source.flatten(2).std(dim=2), atol=0.0, rtol=1e-2
     )
+
+
+# ------------------------------------------------------------------------- `t2o refine`
+#
+# End to end (CASCADE-GATE-06): a real stage-1 export of conftest's synthetic pairs, refined
+# through `main` with the tiny components standing in for SD-2.1 and `pisa_sr.pkl`.
+
+
+def _refine_yaml(export: Path, root: Path) -> Path:
+    checkpoint = root / "pisa_sr.pkl"
+    checkpoint.touch()  # only its existence is checked; the tiny components replace the load
+    config = root / "refine.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "source": {"export": str(export)},
+                "refiner": {"checkpoint": str(checkpoint)},
+                "runtime": {"device": "cpu", "run_dir": str(root), "name": "refined"},
+            }
+        )
+    )
+    return config
+
+
+@pytest.fixture(scope="module")
+def stage1_export(data_yaml: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    config = Config.load(
+        overrides={
+            "data": {"manifest": str(data_yaml)},
+            "translator": {"backbone": "stub", "hidden_channels": 4},
+            "runtime": {"device": "cpu", "workers": 0},
+        }
+    )
+    root = tmp_path_factory.mktemp("stage1") / "translated"
+    export_translated(build_translator(config), config, root)
+    # What a scored export carries after ultralytics has read it; a refine must not copy it.
+    (root / "val" / "labels.cache").write_bytes(b"stale")
+    return root
+
+
+@pytest.fixture(scope="module")
+def refined(stage1_export: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    config = _refine_yaml(stage1_export, tmp_path_factory.mktemp("refine"))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("t2o.translators.pisa_sr.load_pisa_sr", lambda *_, **__: _components())
+        assert main(["refine", "--config", str(config)]) == 0
+    return config.parent / "refined"
+
+
+def test_refine_writes_every_frame_at_its_size_under_its_stem(
+    stage1_export: Path, refined: Path
+) -> None:
+    sources = sorted((stage1_export / "val" / "images").iterdir())
+    outputs = sorted((refined / "val" / "images").iterdir())
+
+    assert [p.name for p in outputs] == [p.name for p in sources]
+    for source, output in zip(sources, outputs, strict=True):
+        with Image.open(source) as before, Image.open(output) as after:
+            assert (after.size, after.mode) == (before.size, "RGB")
+            assert np.abs(np.asarray(after, float) - np.asarray(before, float)).mean() > 0
+
+
+def test_refine_copies_labels_byte_for_byte_and_never_the_cache(
+    stage1_export: Path, refined: Path
+) -> None:
+    sources = sorted((stage1_export / "val" / "labels").glob("*.txt"))
+
+    assert [(p.name, p.read_bytes()) for p in sorted((refined / "val" / "labels").iterdir())] == [
+        (p.name, p.read_bytes()) for p in sources
+    ]
+    assert not list(refined.rglob("labels.cache"))
+
+
+def test_refined_data_yaml_points_at_the_refined_split(stage1_export: Path, refined: Path) -> None:
+    """Absolute `path:`, since ultralytics honours it literally; classes kept from stage 1."""
+    data = yaml.safe_load((refined / "data.yaml").read_text())
+    source = yaml.safe_load((stage1_export / "data.yaml").read_text())
+
+    assert data["path"] == str(refined.resolve())
+    assert (data["train"], data["val"]) == ("val/images", "val/images")
+    assert (data["nc"], data["names"]) == (source["nc"], source["names"])
+
+
+def test_faithfulness_pairs_the_refined_frames_with_the_visible_split(
+    data_yaml: Path, refined: Path
+) -> None:
+    """The seam `t2o faithfulness` and `t2o completion` both read, with no change to either."""
+    visible = sorted(DatasetManifest.load(data_yaml).val_images.iterdir())
+
+    paired = _translated_counterparts(visible, refined / "val" / "images")
+
+    assert [p.stem for p in paired] == [p.stem for p in visible]
+
+
+def test_refine_snapshots_a_config_that_reloads_to_the_same_hash(refined: Path) -> None:
+    snapshot = RefineConfig.load(refined / CONFIG_FILENAME)
+    renamed = snapshot.model_copy(update={"runtime": RefineRuntimeConfig(name="elsewhere")})
+
+    assert snapshot.runtime.path == refined
+    assert renamed.config_hash() == snapshot.config_hash()
+
+
+def test_refine_config_rejects_unknown_keys_and_requires_its_inputs() -> None:
+    with pytest.raises(ConfigError) as error:
+        RefineConfig.load(overrides={"source": {"export": "x", "seed": 0}})
+
+    assert "source.seed" in str(error.value)
+    assert "refiner: Field required" in str(error.value)
+
+
+def test_the_dtype_is_part_of_the_experiment() -> None:
+    base = {"source": {"export": "x"}, "refiner": {"checkpoint": "c.pkl"}}
+    half = {**base, "refiner": {"checkpoint": "c.pkl", "dtype": "float16"}}
+
+    assert RefineConfig.load(overrides=base).config_hash() != (
+        RefineConfig.load(overrides=half).config_hash()
+    )
+
+
+def test_refine_flags_override_the_config_file(stage1_export: Path, tmp_path: Path) -> None:
+    config = _refine_yaml(stage1_export, tmp_path)
+    args = build_parser().parse_args(["refine", "--config", str(config), "--name", "second"])
+
+    loaded = RefineConfig.load(args.config, overrides_from_args(args, _REFINE_OVERRIDES))
+
+    assert loaded.runtime.path == tmp_path / "second"
+    assert loaded.source.export == stage1_export
+
+
+def _must_not_load(*_: object, **__: object) -> PiSASRComponents:
+    raise AssertionError("weights were loaded before the paths were checked")
+
+
+def test_refine_refuses_a_non_empty_output_before_loading_weights(
+    stage1_export: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pointed at the stage-1 export itself, a refine must not write a single frame over it."""
+    monkeypatch.setattr("t2o.translators.pisa_sr.load_pisa_sr", _must_not_load)
+    config = _refine_yaml(stage1_export, tmp_path)
+    before = sorted((p.name, p.stat().st_mtime_ns) for p in stage1_export.rglob("*"))
+    argv = ["refine", "--config", str(config)]
+
+    with pytest.raises(RefineError, match="is not empty"):
+        main([*argv, "--run-dir", str(stage1_export.parent), "--name", stage1_export.name])
+
+    assert sorted((p.name, p.stat().st_mtime_ns) for p in stage1_export.rglob("*")) == before
+
+
+def test_refine_lists_every_missing_input_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("t2o.translators.pisa_sr.load_pisa_sr", _must_not_load)
+    argv = ["refine", "--source", str(tmp_path / "nowhere"), "--checkpoint", "missing.pkl"]
+
+    with pytest.raises(RefineError) as error:
+        main([*argv, "--run-dir", str(tmp_path), "--name", "refined"])
+
+    message = str(error.value)
+    assert "no data.yaml" in message
+    assert "no images" in message
+    assert "no PiSA-SR checkpoint" in message
 
 
 # -------------------------------------------------------------------------------- slow
