@@ -264,7 +264,11 @@ class Pix2PixTurboTranslator(nn.Module):
         # Encoded once: the prompt is a config constant, so its embedding is one too. The
         # text encoder and tokenizer are dropped immediately afterwards -- keeping them would
         # cost ~250MB of device memory for a value that never changes again.
-        self.register_buffer("caption", _encode_prompt(components, prompt), persistent=False)
+        self.register_buffer(
+            "caption",
+            _encode_prompt(components.tokenizer, components.text_encoder, prompt),
+            persistent=False,
+        )
 
         self.optimizer_g = torch.optim.AdamW(
             [param for param in self.parameters() if param.requires_grad], lr=lr
@@ -501,12 +505,13 @@ def _prepare_vae(vae: AutoencoderKL, lora_rank: int) -> AutoencoderKL:
 
 
 @torch.no_grad()
-def _encode_prompt(components: SDTurboComponents, prompt: str) -> Tensor:
-    tokens = components.tokenizer(
+def _encode_prompt(tokenizer: Any, text_encoder: CLIPTextModel, prompt: str) -> Tensor:
+    """One CLIP embedding for a fixed prompt. Shared with `pisa_sr.py`, which encodes ``""``."""
+    tokens = tokenizer(
         prompt,
-        max_length=components.tokenizer.model_max_length,
+        max_length=tokenizer.model_max_length,
         padding="max_length",
         truncation=True,
         return_tensors="pt",
     ).input_ids
-    return components.text_encoder(tokens)[0].detach().clone()
+    return text_encoder(tokens)[0].detach().clone()
