@@ -1,0 +1,45 @@
+# The cascade gate's stage 2: PiSA-SR over the custom set's stage-1 loop exports (cascade-gate).
+#
+# One file for the whole campaign, read by `t2o refine` (plan Q1). It runs over plan Q2's runs,
+# e3b (pix2pix) seeds 0-5 and e3t (turbo) seeds 0, 1, 3, at stage 3, on two inputs each:
+#   - val:        runs/<cell>-loop-s<s>/stage3/translated
+#   - erased val: runs/<cell>-loop-s<s>/stage3/erased-translated (record 034's erasure probe)
+# The two inputs differ only in `source.export`, and the runbook supplies it per run anyway, so a
+# second file would be a copy with one placeholder changed. Each refine still snapshots its
+# resolved config, source included, into the refined tree.
+#
+# `source.export`, `refiner.checkpoint` and `runtime` are placeholders. Supply them per run with
+# `--source`, `--checkpoint`, `--run-dir`, `--name` and `--device`, as the loop campaigns did with
+# their `--data` placeholders. The refined tree goes beside its source, at
+# `runs/<cell>-loop-s<s>/stage3/cascade-<input>`, so `--write-back` files its scores in the same
+# run and stage as stage 1's.
+#
+# No `scripts/loss_share.py` probe: stage 2 is frozen and has no objective (ADR-02). The
+# runbook's smoke step replaces it, and it must pass before the campaign.
+# The scores apply gate ADR-04, which must be in place before any refined frame is scored.
+
+source:
+  # Placeholder, replaced per run by --source. The gate pairs by seed, so a source from the
+  # wrong seed or stage refines the wrong cell, and nothing downstream can tell.
+  export: runs/e3b-loop-s0/stage3/translated
+  # The gate reads val only (plan Q2). The erased export also holds a `train/` copy of the same
+  # 153 frames, which nothing scores.
+  split: val
+
+refiner:
+  # Placeholder, replaced by --checkpoint with the server's pisa_sr.pkl (fetched in the
+  # runbook's first step, never committed). A wrong file fails the strict load (ADR-02).
+  checkpoint: runs/cascade-gate/weights/pisa_sr.pkl
+  # float32 takes precision out of the comparison. Upstream's float16 would change every
+  # refined pixel slightly, and with it the experiment's hash.
+  dtype: float32
+
+runtime:
+  # Replaced by --device cuda:1: GPU1 is the cascade's card.
+  device: null
+  # Replaced per run by --run-dir runs/<cell>-loop-s<s>/stage3. Any directory without a
+  # `stage<N>` parent holding metrics.json makes `--write-back` refuse the scores.
+  run_dir: runs
+  # Replaced per run by --name cascade-translated or cascade-erased-translated. It must be new:
+  # refine refuses a non-empty output.
+  name: cascade-translated
