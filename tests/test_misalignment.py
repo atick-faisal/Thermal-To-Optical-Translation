@@ -3,15 +3,32 @@
 The load-bearing claims: each level moves every corner by exactly its stated pixels, level 0 is
 the identity *exactly* (a level-0 label tree must be byte-identical), and each level carries its
 own stable digest so a sweep row can be traced to the field that produced it.
+
+`write_misaligned_tree`'s: only the thermal train boxes move, by the level's homography; val and
+every image are the source's byte for byte; level 0 is the source tree; and no ultralytics label
+cache travels into a tree whose labels it does not describe.
 """
 
 from __future__ import annotations
 
+import json
+import shutil
+from pathlib import Path
+
 import numpy as np
 import pytest
 
+from conftest import IMG_SIZE, N_TRAIN, N_VAL
 from t2o.data.calibration import _image_corners
-from t2o.data.misalignment import REGISTRATION_LEVELS_PX, Misalignment, MisalignmentError
+from t2o.data.labels import load_yolo_labels
+from t2o.data.manifest import DatasetManifest
+from t2o.data.mirror import PROVENANCE_FILENAME, mirror_labels_onto_infrared
+from t2o.data.misalignment import (
+    REGISTRATION_LEVELS_PX,
+    Misalignment,
+    MisalignmentError,
+    write_misaligned_tree,
+)
 
 
 def _map(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
@@ -73,3 +90,130 @@ def test_the_digest_is_stable_and_differs_per_level_and_shape() -> None:
 def test_an_impossible_level_or_shape_is_refused(height: int, width: int, level: float) -> None:
     with pytest.raises(MisalignmentError):
         Misalignment(height=height, width=width, level_px=level)
+
+
+HEIGHT, WIDTH = IMG_SIZE
+
+
+@pytest.fixture
+def aligned(dataset_root: Path, tmp_path: Path) -> DatasetManifest:
+    """A copy of the shared fixture with thermal labels, standing in for an aligned dataset.
+
+    Copied because `dataset_root` is session-scoped; `path:` is rewritten because it is absolute
+    and would otherwise resolve back to the original tree (`test_mirror.py::mirrorable`). A stale
+    `labels.cache` is planted to prove the writer leaves it behind.
+    """
+    root = tmp_path / "aligned"
+    shutil.copytree(dataset_root, root)
+    manifest_path = root / "data.yaml"
+    manifest_path.write_text(
+        manifest_path.read_text().replace(f"path: {dataset_root}", f"path: {root}")
+    )
+    manifest = DatasetManifest.load(manifest_path)
+    mirror_labels_onto_infrared(manifest)
+    (root / "train" / "infrared" / "labels.cache").write_bytes(b"stale")
+    return manifest
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    """Every file under ``root`` by relative path, except the manifest and provenance."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name not in {"data.yaml", PROVENANCE_FILENAME}
+    }
+
+
+def _without_cache(files: dict[str, bytes]) -> dict[str, bytes]:
+    return {name: data for name, data in files.items() if not name.endswith(".cache")}
+
+
+def test_train_thermal_boxes_move_by_the_level_homography(
+    aligned: DatasetManifest, tmp_path: Path
+) -> None:
+    misalignment = Misalignment(HEIGHT, WIDTH, 24.0)
+    out = write_misaligned_tree(aligned, misalignment, tmp_path / "level-24").parent
+    matrix = misalignment.homography()
+
+    moved_any = False
+    for source in sorted((aligned.root / "train" / "infrared" / "labels").glob("*.txt")):
+        _, before = load_yolo_labels(source)
+        _, after = load_yolo_labels(out / "train" / "infrared" / "labels" / source.name)
+        assert len(after) == len(before)
+        for (cx, cy, _, _), (mx, my, _, _) in zip(before.tolist(), after.tolist(), strict=True):
+            # The roll field is affine, so a re-bounded box keeps its centre on the mapped centre.
+            ((ex, ey),) = _map(np.array([[cx * WIDTH, cy * HEIGHT]]), matrix)
+            assert mx * WIDTH == pytest.approx(ex, abs=1e-3)
+            assert my * HEIGHT == pytest.approx(ey, abs=1e-3)
+            moved_any |= bool(np.hypot(ex - cx * WIDTH, ey - cy * HEIGHT) > 1.0)
+    assert moved_any, "no box moved; the fixture would not catch a skipped warp"
+
+
+def test_everything_but_the_train_thermal_labels_is_the_source_byte_for_byte(
+    aligned: DatasetManifest, tmp_path: Path
+) -> None:
+    out = write_misaligned_tree(aligned, Misalignment(HEIGHT, WIDTH, 12.0), tmp_path / "l12").parent
+
+    source, copied = _without_cache(_files(aligned.root)), _files(out)
+    assert copied.keys() == source.keys()
+    changed = {name for name in source if source[name] != copied[name]}
+    assert changed, "a 12 px level changed no file"
+    assert all(name.startswith("train/infrared/labels/") for name in changed)
+    assert sum(name.startswith("val/") for name in copied) == 4 * N_VAL  # 2 images, 2 labels each
+
+
+def test_level_zero_is_the_source_tree_byte_for_byte(
+    aligned: DatasetManifest, tmp_path: Path
+) -> None:
+    out = write_misaligned_tree(aligned, Misalignment(HEIGHT, WIDTH, 0.0), tmp_path / "l0").parent
+
+    assert _files(out) == _without_cache(_files(aligned.root))
+
+
+def test_no_label_cache_travels_and_the_manifest_points_at_its_own_tree(
+    aligned: DatasetManifest, tmp_path: Path
+) -> None:
+    written = write_misaligned_tree(aligned, Misalignment(HEIGHT, WIDTH, 6.0), tmp_path / "l6")
+
+    assert not list(written.parent.rglob("*.cache"))
+    loaded = DatasetManifest.load(written)
+    assert loaded.root == written.parent.resolve()
+    assert loaded.train_images == written.parent.resolve() / "train" / "visible" / "images"
+    assert loaded.names == aligned.names
+
+
+def test_the_provenance_names_the_level_and_its_digest(
+    aligned: DatasetManifest, tmp_path: Path
+) -> None:
+    misalignment = Misalignment(HEIGHT, WIDTH, 3.0)
+    out = write_misaligned_tree(aligned, misalignment, tmp_path / "l3").parent
+
+    provenance = json.loads((out / "train" / "infrared" / PROVENANCE_FILENAME).read_text())
+    assert provenance["misalignment_level_px"] == 3.0
+    assert provenance["misalignment_digest"] == misalignment.digest()
+    assert provenance["files"] == N_TRAIN
+    assert provenance["boxes_dropped"] == 0
+    assert provenance["source_provenance"] is None  # a plain mirror carries no marker
+    assert not (out / "val" / "infrared" / PROVENANCE_FILENAME).exists()
+
+
+def test_a_misalignment_for_another_frame_size_is_refused(
+    aligned: DatasetManifest, tmp_path: Path
+) -> None:
+    with pytest.raises(MisalignmentError, match="built for"):
+        write_misaligned_tree(aligned, Misalignment(HEIGHT * 2, WIDTH * 2, 6.0), tmp_path / "x")
+
+
+def test_a_source_without_thermal_labels_is_refused(data_yaml: Path, tmp_path: Path) -> None:
+    with pytest.raises(MisalignmentError, match="no thermal labels"):
+        write_misaligned_tree(
+            DatasetManifest.load(data_yaml), Misalignment(HEIGHT, WIDTH, 6.0), tmp_path / "x"
+        )
+
+
+def test_a_non_empty_destination_is_refused(aligned: DatasetManifest, tmp_path: Path) -> None:
+    (tmp_path / "taken").mkdir()
+    (tmp_path / "taken" / "leftover.txt").write_text("")
+
+    with pytest.raises(MisalignmentError, match="not empty"):
+        write_misaligned_tree(aligned, Misalignment(HEIGHT, WIDTH, 6.0), tmp_path / "taken")
