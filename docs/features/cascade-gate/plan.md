@@ -1,7 +1,7 @@
 ---
 slug: cascade-gate
 title: Enhancer cascade faithfulness gate
-status: in-progress
+status: shipped
 created: 2026-11-03
 ---
 
