@@ -46,6 +46,16 @@ per validation pass, so it can always be re-averaged; only the report and the lo
 spread and gaps. J is scored once per V checkpoint, so V and J are paired by seed and T is not --
 which is why a gap is a difference of seed means and carries no spread of its own.
 
+**The label-transfer arm, and why it is T under another name.** C4's bracket wants a
+thermal-supervised and a label-transfer reference per dataset (docs/goal.md C4). On a dataset with
+no thermal labels of its own -- FLIR, whose thermal boxes are mirrored and de-rolled from visible --
+those are one detector: anything trained on its thermal side learns from transferred boxes.
+`--label-transfer-csv` takes that detector from `scripts/registration_sweep.py`'s 0 px cells and
+scores it as T, labelled for both roles, with the reason and the recipe printed under the table
+(docs/features/registration-axis/plan.md Q5). Each row's `calibration_digest` must be the gate's
+own: a 0 px detector trained on plain-mirrored boxes is not the de-rolled tree's reference, the
+same mismatch `_verified_digest` exists to catch.
+
 Standalone script, not part of the `t2o` package -- it owns its own `logging.basicConfig` the way
 `annotation_sweep.py` and `mirror_thermal_labels.py` do.
 """
@@ -73,6 +83,8 @@ logger = logging.getLogger(__name__)
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 CSV_FILENAME = "gate.csv"
 CEILING, FLOOR, THERMAL_TRAINED = "ceiling", "floor", "thermal-trained"
+# T read off the registration sweep: one detector in both C4 roles (module docstring).
+LABEL_TRANSFER = "thermal-supervised = label transfer"
 
 # Pre-registered in TASKS.md M3 E9 (blocker 3's rule table) *before* any public-dataset number
 # existed. Constants rather than prose so the band is fixed by the file rather than chosen by
@@ -246,6 +258,42 @@ def _verified_digest(manifest: DatasetManifest, calibration: Path | None) -> str
     )
 
 
+def _label_transfer_rows(csv_path: Path, dataset: str, digest: str) -> list[dict[str, str]]:
+    """The registration sweep's 0 px rows for ``dataset``, refused if they are not on ``digest``.
+
+    Read by column name rather than through the sweep's `Row`: this script is run standalone, and
+    `tests/test_gate_table.py` writes its fixture with the sweep's own writer, which is what keeps
+    the two column sets from drifting apart.
+    """
+    with csv_path.open(newline="") as handle:
+        rows = [
+            row
+            for row in csv.DictReader(handle)
+            if row["dataset"] == dataset and float(row["misalignment_px"]) == 0.0
+        ]
+    if not rows:
+        raise SystemExit(f"{csv_path} has no 0 px rows for dataset {dataset!r}")
+    stale = sorted({row["calibration_digest"] for row in rows} - {digest})
+    if stale:
+        raise SystemExit(
+            f"{csv_path}'s 0 px {dataset} rows were trained on labels de-rolled by "
+            f"{[d or 'a plain mirror' for d in stale]}, but this tree's val is "
+            f"{digest or 'a plain mirror'}; the bracket would mix two sets of boxes"
+        )
+    return rows
+
+
+def _coincidence_note(rows: Sequence[dict[str, str]], dataset: str) -> str:
+    """Why the label-transfer row is also the thermal-supervised one, and what trained it."""
+    recipes = "; ".join(sorted({f"{row['init_weights']}, {row['epochs']} epochs" for row in rows}))
+    return (
+        f"{LABEL_TRANSFER}: one detector fills both C4 references. {dataset} has no thermal "
+        "labels of its own -- its thermal boxes were transferred from visible -- so a detector "
+        f"trained on its thermal side is trained by label transfer. {len(rows)} seed(s) of the "
+        f"registration sweep's 0 px cell ({recipes})."
+    )
+
+
 def _verdict(headroom: float) -> str:
     if headroom >= STRONG_THRESHOLD:
         return "PASS -- the premise transfers. Run the cell."
@@ -331,9 +379,12 @@ def _cell(spread: Spread, seeds: int) -> str:
 
 
 def _report(
-    summaries: Sequence[ArmSummary], class_names: Sequence[str], primary: Sequence[str]
+    summaries: Sequence[ArmSummary],
+    class_names: Sequence[str],
+    primary: Sequence[str],
+    note: str = "",
 ) -> str:
-    """The gate table as markdown, ready to paste into an experiment record."""
+    """The gate table as markdown, ready to paste into an experiment record, ``note`` beneath."""
     header = ["arm", "mAP50", f"mAP50 ({len(primary)}-class)", "mAP50-95", *class_names]
     lines = [
         "| " + " | ".join(header) + " |",
@@ -352,8 +403,9 @@ def _report(
         ]
         lines.append("| " + " | ".join(cells) + " |")
     by_arm = {arm.arm: arm for arm in summaries}
-    if THERMAL_TRAINED in by_arm:
-        ceiling, floor, trained = by_arm[CEILING], by_arm[FLOOR], by_arm[THERMAL_TRAINED]
+    trained = by_arm.get(THERMAL_TRAINED) or by_arm.get(LABEL_TRANSFER)
+    if trained is not None:
+        ceiling, floor = by_arm[CEILING], by_arm[FLOOR]
         for label, minuend, subtrahend in (
             ("V - T (sensor gap)", ceiling, trained),
             ("T - J (domain gap)", trained, floor),
@@ -367,6 +419,8 @@ def _report(
                 *(f"{gap[name]:+.4f}" if name in gap else "--" for name in class_names),
             ]
             lines.append("| " + " | ".join(cells) + " |")
+    if note:
+        lines += ["", note]
     return "\n".join(lines)
 
 
@@ -389,7 +443,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="the independent visible-trained judge, one checkpoint per seed, e.g. "
         "runs/reference-flir-yolo11s/weights/best.pt",
     )
-    parser.add_argument(
+    thermal = parser.add_mutually_exclusive_group()
+    thermal.add_argument(
         "--thermal-weights",
         type=Path,
         nargs="+",
@@ -398,6 +453,20 @@ def build_parser() -> argparse.ArgumentParser:
         # not the sensor.
         help="the thermal-trained detector (T), one checkpoint per seed; adds a third row and the "
         "V - T / T - J gaps. Omitted, the output is the two-row gate",
+    )
+    thermal.add_argument(
+        "--label-transfer-csv",
+        type=Path,
+        # T from the registration sweep's 0 px cells instead of --thermal-weights. Its FLIR cells
+        # must be on the judge's recipe (yolo11s, 100 epochs) or V - T measures the recipe.
+        help="scripts/registration_sweep.py's CSV; its 0 px rows for --label-transfer-dataset "
+        "become T, labelled as both the thermal-supervised and the label-transfer reference",
+    )
+    parser.add_argument(
+        "--label-transfer-dataset",
+        # Not defaulted to flir: the sweep CSV holds both datasets, and a default would read the
+        # wrong one's checkpoints silently on any other tree.
+        help="which dataset's rows to read from --label-transfer-csv, e.g. flir",
     )
     parser.add_argument("--out", type=Path, default=Path("runs/gate"), help="output root")
     parser.add_argument(
@@ -428,7 +497,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     unknown = [name for name in primary if name not in manifest.class_names]
     if unknown:
         raise SystemExit(f"--primary-classes {unknown} not in {manifest.class_names}")
-    for flag, paths in (("--weights", args.weights), ("--thermal-weights", args.thermal_weights)):
+    if args.label_transfer_csv and not args.label_transfer_dataset:
+        raise SystemExit("--label-transfer-csv needs --label-transfer-dataset, e.g. flir")
+    for flag, paths in (
+        ("--weights", args.weights),
+        ("--thermal-weights", args.thermal_weights),
+        ("--label-transfer-csv", [args.label_transfer_csv] if args.label_transfer_csv else None),
+    ):
         missing = [str(path) for path in paths or () if not path.is_file()]
         if missing:
             raise SystemExit(f"{flag} not found: {missing}")
@@ -442,12 +517,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     thermal = write_budget_manifest(manifest, manifests / "thermal", 1.0, infrared=True)
 
     digest = _verified_digest(manifest, args.calibration)
+    thermal_arm, thermal_weights, note = THERMAL_TRAINED, list(args.thermal_weights or ()), ""
+    if args.label_transfer_csv:
+        transfer = _label_transfer_rows(
+            args.label_transfer_csv, args.label_transfer_dataset, digest
+        )
+        thermal_arm, thermal_weights = LABEL_TRANSFER, [Path(row["weights"]) for row in transfer]
+        note = _coincidence_note(transfer, args.label_transfer_dataset)
+        missing = [str(path) for path in thermal_weights if not path.is_file()]
+        if missing:
+            raise SystemExit(f"--label-transfer-csv names checkpoints not found: {missing}")
     rows = [
         *(_score(args, w, visible, CEILING, "visible", primary, digest) for w in args.weights),
         *(_score(args, w, thermal, FLOOR, "thermal", primary, digest) for w in args.weights),
         *(
-            _score(args, w, thermal, THERMAL_TRAINED, "thermal", primary, digest)
-            for w in args.thermal_weights or ()
+            _score(args, w, thermal, thermal_arm, "thermal", primary, digest)
+            for w in thermal_weights
         ),
     ]
     _write_csv(out / CSV_FILENAME, rows, manifest.class_names)
@@ -455,7 +540,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     summaries = _summarise(rows)
     ceiling, floor = summaries[:2]
     headroom = ceiling.primary_map50.mean - floor.primary_map50.mean
-    logger.info("gate table:\n%s", _report(summaries, manifest.class_names, primary))
+    logger.info("gate table:\n%s", _report(summaries, manifest.class_names, primary, note))
     logger.info(
         "headroom on %d-class mAP50 (%s): %.4f - %.4f = %+.4f  [all-class: %+.4f]",
         len(primary),
@@ -466,7 +551,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ceiling.map50.mean - floor.map50.mean,
     )
     logger.info("%s", _verdict(headroom))
-    if args.thermal_weights:
+    if thermal_weights:
         _log_sensor_gap(ceiling, floor, summaries[2], primary, headroom)
     logger.info("written: %s", out / CSV_FILENAME)
     return 0

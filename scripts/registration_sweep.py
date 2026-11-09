@@ -89,6 +89,9 @@ class Row:
     misalignment_px: float  # measured off the field, not echoed from the CLI
     misalignment_digest: str
     seed: int
+    # The recipe, with `epochs`. FLIR's 0 px cells are its C4 thermal-trained reference, which
+    # `scripts/gate_table.py` reads only on the judge's recipe (plan Q5, Approach).
+    init_weights: str
     epochs: int
     precision: float
     recall: float
@@ -211,6 +214,7 @@ def _cell(
         misalignment_px=misalignment.magnitude_px(),
         misalignment_digest=misalignment.digest(),
         seed=seed,
+        init_weights=str(args.init_weights),
         epochs=args.epochs,
         precision=metrics.precision,
         recall=metrics.recall,
