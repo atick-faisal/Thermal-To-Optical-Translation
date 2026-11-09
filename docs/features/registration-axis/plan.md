@@ -49,6 +49,10 @@ a new one. Each level is a frozen dataclass plus a digest, following `calibratio
   FLIR's missing C4 thermal-supervised and label-transfer reference (`docs/roadmap.md:260-262`),
   because FLIR has no thermal labels and the two references are the same detector. If FLIR is
   in scope, the C4 bracket folds into this feature as one task.
+- FLIR's sweep runs on the FLIR judge's recipe (`--init-weights yolo11s.pt --epochs 100`,
+  record 013), so the bracket's V − T compares sensors rather than recipes. The custom set keeps
+  E8's yolo11n at 50 epochs. At about 1.43 h per FLIR cell, FLIR's 15 cells cost about 21
+  GPU-hours, not minutes.
 
 **Translation half (expensive: one pix2pix run is about 10.5 GPU-hours).**
 - Add a misalignment field to `DataConfig` (`src/t2o/config/schema.py:48-77`). It warps the
@@ -97,6 +101,12 @@ hash is unchanged; val is untouched; a tiny sweep runs end to end under the `slo
 - [x] From scratch, 1 seed per non-zero level, reusing the existing 3-seed aligned runs as the zero point (recommended) — clean, about 4 levels × 2 datasets × ~10 h ≈ 80 GPU-hours, about two days on both A100s; the single seed per level is disclosed
 - [ ] From scratch, 3 seeds per level — seed-stable at every point, but about 250 GPU-hours competes with the remaining paper runs before 2027-01-31
 - [ ] Fine-tune the existing aligned checkpoints on warped pairs — cheapest, but the starting weights already learned the aligned mapping, so it likely understates the degradation and confounds the curve
+
+### Q5: Where is FLIR's C4 bracket built?
+
+- [x] Extend `scripts/gate_table.py` (recommended) — a `--label-transfer-csv` reads the sweep's FLIR 0 px rows, refuses a `calibration_digest` that differs from the gate's own, scores their checkpoints as the T row, and labels it "thermal-supervised = label transfer" with the reason; the sweep row gains `init_weights` so the recipe shows. One renderer, one command, and the de-roll check the E9 gate already learned
+- [ ] New report script joining `gate.csv` and the sweep CSV — no re-scoring, but a second renderer of a table the gate already prints, and the digest check would have to be written twice
+- [ ] No code: the runbook passes the 0 px checkpoints to the existing `--thermal-weights`, and the record states the coincidence — cheapest, but nothing checks the checkpoints are the de-rolled 0 px cells, and the row's "tests on a synthetic sweep CSV" has nothing to test
 
 ## Out of Scope
 
