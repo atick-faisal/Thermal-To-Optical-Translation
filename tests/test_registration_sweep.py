@@ -166,6 +166,7 @@ def test_every_row_is_stamped_with_its_field_and_scored_by_the_val_pass(
         assert level in (0.0, 24.0)
         assert row["misalignment_digest"] == Misalignment(HEIGHT, WIDTH, level).digest()
         assert row["dataset"] == "custom"
+        assert (row["init_weights"], row["epochs"]) == ("yolo11n.pt", "1")
         assert row["boxes_dropped"] == "0"
         assert row["calibration_digest"] == ""  # a plain mirror carries no de-roll
         assert float(row["map50"]) == 0.7  # the val pass's, not the training stub's 0.3

@@ -28,6 +28,7 @@ from scripts.gate_table import (
     CEILING,
     FLOOR,
     KILL_THRESHOLD,
+    LABEL_TRANSFER,
     PASSIVE_THRESHOLD,
     STRONG_THRESHOLD,
     THERMAL_TRAINED,
@@ -38,6 +39,8 @@ from scripts.gate_table import (
     _verdict,
     main,
 )
+from scripts.registration_sweep import Row as SweepRow
+from scripts.registration_sweep import _append as append_sweep_row
 
 from t2o.data.calibration import load_calibration
 from t2o.data.manifest import DatasetManifest
@@ -516,3 +519,124 @@ def test_refuses_a_missing_thermal_checkpoint_before_any_pass(
 def test_the_sensor_gap_band_is_the_pre_registered_one(gap: float, expected: str) -> None:
     """Driven off the constant, not 0.90 - 0.80: that is 0.0999... in floating point."""
     assert _sensor_gap_verdict(gap).startswith(expected)
+
+
+def _sweep_csv(tmp_path: Path, cells: list[tuple[str, float, str, Path]]) -> Path:
+    """A registration-sweep CSV, written by the sweep's own writer so the columns cannot drift.
+
+    Each cell is ``(dataset, misalignment_px, calibration_digest, weights)``; the scores are never
+    read, since the gate re-scores every checkpoint itself.
+    """
+    path = tmp_path / "registration-tidy.csv"
+    for seed, (dataset, px, digest, weights) in enumerate(cells):
+        row = SweepRow(
+            dataset=dataset,
+            misalignment_px=px,
+            misalignment_digest=f"level-{px:g}",
+            seed=seed,
+            init_weights="yolo11s.pt",
+            epochs=100,
+            precision=0.1,
+            recall=0.2,
+            map50=0.3,
+            primary_map50=None,
+            map50_95=0.4,
+            boxes_dropped=0,
+            calibration_digest=digest,
+            weights=str(weights),
+            data="data.yaml",
+            per_class_ap50={},
+        )
+        append_sweep_row(path, row, CLASSES)
+    return path
+
+
+def _transfer_argv(data: Path, judge: Path, out: Path, sweep: Path, *extra: str) -> list[str]:
+    return [
+        *_argv(data, judge, out),
+        "--label-transfer-csv",
+        str(sweep),
+        "--label-transfer-dataset",
+        "flir",
+        *extra,
+    ]
+
+
+def test_the_sweeps_zero_px_flir_rows_become_t_labelled_for_both_roles(
+    mirrored: Path,
+    judge: Path,
+    tmp_path: Path,
+    stubbed_gpu: StubbedGpu,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only FLIR's 0 px cells are T; a misaligned cell or the other dataset's would be wrong."""
+    t0, t1, t6, c0 = _checkpoints(tmp_path, "t0.pt", "t1.pt", "t6.pt", "c0.pt")
+    sweep = _sweep_csv(
+        tmp_path,
+        [
+            ("flir", 0.0, "", t0),
+            ("flir", 6.0, "", t6),
+            ("custom", 0.0, "", c0),
+            ("flir", 0.0, "", t1),
+        ],
+    )
+    with caplog.at_level("INFO"):
+        assert main(_transfer_argv(mirrored, judge, tmp_path / "gate", sweep)) == 0
+
+    rows = _rows(tmp_path / "gate")
+    assert [row["arm"] for row in rows] == [CEILING, FLOOR, LABEL_TRANSFER, LABEL_TRANSFER]
+    assert [call["weights"] for call in stubbed_gpu.calls] == [judge, judge, t0, t1]
+    # Scored on the floor's own thermal val, like any T.
+    assert stubbed_gpu.calls[2]["data_yaml"] == stubbed_gpu.calls[1]["data_yaml"]
+    assert f"| {LABEL_TRANSFER} (thermal) |" in caplog.text
+    assert "| V - T (sensor gap) |" in caplog.text
+    assert "one detector fills both C4 references" in caplog.text
+    assert "2 seed(s) of the registration sweep's 0 px cell (yolo11s.pt, 100 epochs)" in caplog.text
+
+
+def test_refuses_label_transfer_rows_trained_on_another_de_roll(
+    mirrored: Path, judge: Path, tmp_path: Path, stubbed_gpu: StubbedGpu
+) -> None:
+    """De-rolled boxes train a detector that is no plain-mirror tree's reference, or vice versa."""
+    (t0,) = _checkpoints(tmp_path, "t0.pt")
+    sweep = _sweep_csv(tmp_path, [("flir", 0.0, "abc123", t0)])
+
+    with pytest.raises(SystemExit, match="would mix two sets of boxes"):
+        main(_transfer_argv(mirrored, judge, tmp_path / "gate", sweep))
+    assert stubbed_gpu.calls == []
+
+
+def test_refuses_a_sweep_with_no_zero_px_rows_for_the_dataset(
+    mirrored: Path, judge: Path, tmp_path: Path, stubbed_gpu: StubbedGpu
+) -> None:
+    (c0, t6) = _checkpoints(tmp_path, "c0.pt", "t6.pt")
+    sweep = _sweep_csv(tmp_path, [("custom", 0.0, "", c0), ("flir", 6.0, "", t6)])
+
+    with pytest.raises(SystemExit, match="no 0 px rows for dataset 'flir'"):
+        main(_transfer_argv(mirrored, judge, tmp_path / "gate", sweep))
+    assert stubbed_gpu.calls == []
+
+
+def test_refuses_a_label_transfer_checkpoint_that_is_not_on_disk(
+    mirrored: Path, judge: Path, tmp_path: Path, stubbed_gpu: StubbedGpu
+) -> None:
+    sweep = _sweep_csv(tmp_path, [("flir", 0.0, "", tmp_path / "absent.pt")])
+
+    with pytest.raises(SystemExit, match="not found"):
+        main(_transfer_argv(mirrored, judge, tmp_path / "gate", sweep))
+    assert stubbed_gpu.calls == []
+
+
+def test_label_transfer_needs_a_dataset_and_excludes_thermal_weights(
+    mirrored: Path, judge: Path, tmp_path: Path, stubbed_gpu: StubbedGpu
+) -> None:
+    (t0,) = _checkpoints(tmp_path, "t0.pt")
+    sweep = _sweep_csv(tmp_path, [("flir", 0.0, "", t0)])
+    base = [*_argv(mirrored, judge, tmp_path / "gate"), "--label-transfer-csv", str(sweep)]
+
+    with pytest.raises(SystemExit, match="needs --label-transfer-dataset"):
+        main(base)
+    # Two sources for one T row: argparse refuses the pair outright.
+    with pytest.raises(SystemExit):
+        main([*base, "--label-transfer-dataset", "flir", "--thermal-weights", str(t0)])
+    assert stubbed_gpu.calls == []
