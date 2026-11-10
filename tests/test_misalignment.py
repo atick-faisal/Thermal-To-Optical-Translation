@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from conftest import IMG_SIZE, N_TRAIN, N_VAL
-from t2o.data.calibration import _image_corners
+from conftest import DEROLL_FIELD, IMG_SIZE, N_TRAIN, N_VAL
+from t2o.data.calibration import CalibrationError, _image_corners, load_calibration
 from t2o.data.labels import load_yolo_labels
 from t2o.data.manifest import DatasetManifest
 from t2o.data.mirror import PROVENANCE_FILENAME, mirror_labels_onto_infrared
@@ -27,9 +28,11 @@ from t2o.data.misalignment import (
     REGISTRATION_LEVELS_PX,
     Misalignment,
     MisalignmentError,
+    load_derolled_calibration,
     misalign_image,
     write_misaligned_tree,
 )
+from test_calibration import make_calibration
 
 
 def _map(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
@@ -251,3 +254,92 @@ def test_the_image_warp_refuses_another_frame_size() -> None:
         misalign_image(
             np.zeros((height // 2, width, 3), np.float32), Misalignment(height, width, 6)
         )
+
+
+# --------------------------------------------------------------------------- de-rolled runs
+
+
+def _dot_landing(image: np.ndarray) -> np.ndarray:
+    ys, xs = np.nonzero(image[:, :, 0] > 0.5)
+    return np.array([xs.mean(), ys.mean()])
+
+
+@pytest.mark.parametrize("level", [0.0, 12.0])
+def test_a_calibration_de_rolls_the_image_before_the_level_moves_it(level: float) -> None:
+    # ADR-02: content at visible p lands at level(inv(H) p) -- de-rolled onto the thermal frame,
+    # then misaligned by exactly the level.
+    height, width = IMG_SIZE
+    calibration = make_calibration(corner_shift=DEROLL_FIELD)
+    misalignment = Misalignment(height, width, level)
+    image = np.zeros((height, width, 1), dtype=np.float32)
+    image[40:43, 50:53] = 1.0
+
+    warped = misalign_image(image, misalignment, calibration)
+
+    expected = misalignment.homography() @ calibration.visible_to_infrared()
+    (target,) = _map(np.array([[51.0, 41.0]]), expected)
+    assert np.linalg.norm(_dot_landing(warped) - target) < 1.0
+    assert np.linalg.norm(target - np.array([51.0, 41.0])) > 3.0  # the de-roll is not a no-op
+
+
+def test_the_image_warp_refuses_a_calibration_for_another_frame_size() -> None:
+    height, width = IMG_SIZE
+    calibration = make_calibration(height=height * 2, width=width * 2)
+    with pytest.raises(MisalignmentError, match="calibration is built for"):
+        misalign_image(
+            np.zeros((height, width, 3), np.float32), Misalignment(height, width, 0), calibration
+        )
+
+
+def test_no_calibration_path_is_no_de_roll(data_yaml: Path) -> None:
+    assert load_derolled_calibration(DatasetManifest.load(data_yaml), None) is None
+
+
+def test_a_tree_de_rolled_by_the_constant_is_accepted(derolled_tree: tuple[Path, Path]) -> None:
+    data, calibration = derolled_tree
+    loaded = load_derolled_calibration(DatasetManifest.load(data), calibration)
+    assert loaded is not None
+    assert loaded.digest() == load_calibration(calibration).digest()
+
+
+def test_a_plainly_mirrored_tree_is_refused(
+    derolled_tree: tuple[Path, Path],
+) -> None:
+    data, calibration = derolled_tree
+    manifest = DatasetManifest.load(data)
+    mirror_labels_onto_infrared(manifest, force=True)  # back to plain copies, marker removed
+
+    with pytest.raises(CalibrationError, match="a plain mirror"):
+        load_derolled_calibration(manifest, calibration)
+
+
+def test_a_tree_de_rolled_by_another_constant_is_refused(
+    derolled_tree: tuple[Path, Path], tmp_path: Path
+) -> None:
+    data, _ = derolled_tree
+    other = make_calibration(dataset=data.parent.name, corner_shift=((1.0, 1.0),) * 4)
+    path = tmp_path / "other.json"
+    path.write_text(json.dumps(asdict(other)))
+
+    with pytest.raises(CalibrationError, match="was not de-rolled by"):
+        load_derolled_calibration(DatasetManifest.load(data), path)
+
+
+def test_only_val_de_rolled_is_still_refused(derolled_tree: tuple[Path, Path]) -> None:
+    # The run reads its train boxes from the thermal side too, so train is checked as well.
+    data, calibration = derolled_tree
+    (data.parent / "train" / "infrared" / PROVENANCE_FILENAME).unlink()
+
+    with pytest.raises(CalibrationError, match="train/infrared/labels was not de-rolled"):
+        load_derolled_calibration(DatasetManifest.load(data), calibration)
+
+
+def test_a_constant_for_another_dataset_is_refused(
+    derolled_tree: tuple[Path, Path], tmp_path: Path
+) -> None:
+    data, _ = derolled_tree
+    path = tmp_path / "flir.json"
+    path.write_text(json.dumps(asdict(make_calibration(dataset="flir"))))
+
+    with pytest.raises(CalibrationError, match="is for 'flir'"):
+        load_derolled_calibration(DatasetManifest.load(data), path)

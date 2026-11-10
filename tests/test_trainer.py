@@ -19,8 +19,10 @@ import torch
 from torch import Tensor, nn
 
 from t2o.config import Config
+from t2o.data.calibration import CalibrationError
 from t2o.data.dataset import TranslationBatch
 from t2o.data.manifest import DatasetManifest
+from t2o.data.mirror import mirror_labels_onto_infrared
 from t2o.engine.trainer import (
     BEST_CHECKPOINT,
     LAST_CHECKPOINT,
@@ -82,6 +84,38 @@ def test_misalignment_reaches_the_train_pairs_and_never_val(
     for index in range(len(trainer.val_dataset)):
         assert torch.equal(trainer.val_dataset[index].visible, aligned.val_dataset[index].visible)
         assert torch.equal(trainer.val_dataset[index].bboxes, aligned.val_dataset[index].bboxes)
+
+
+def test_a_calibration_reaches_the_train_pairs_and_never_val(
+    derolled_tree: tuple[Path, Path], tmp_path: Path
+) -> None:
+    # ADR-02 de-rolls the train targets only; val images stay the frozen scoring split.
+    data, calibration = derolled_tree
+    manifest = DatasetManifest.load(data)
+    derolled = Config.load(
+        overrides={"data": {"calibration": str(calibration)}, "runtime": {"workers": 0}}
+    )
+    trainer = Trainer(derolled, manifest, StubTranslator(hidden_channels=4), tmp_path / "a")
+    plain = Trainer(_config(), manifest, StubTranslator(hidden_channels=4), tmp_path / "b")
+
+    assert trainer.calibration is not None
+    assert trainer.train_dataset.calibration is trainer.calibration
+    assert not torch.equal(trainer.train_dataset[1].visible, plain.train_dataset[1].visible)
+    assert trainer.val_dataset.calibration is None
+    for index in range(len(trainer.val_dataset)):
+        assert torch.equal(trainer.val_dataset[index].visible, plain.val_dataset[index].visible)
+
+
+def test_a_calibration_the_tree_was_not_de_rolled_by_stops_the_run(
+    derolled_tree: tuple[Path, Path], tmp_path: Path
+) -> None:
+    data, calibration = derolled_tree
+    manifest = DatasetManifest.load(data)
+    mirror_labels_onto_infrared(manifest, force=True)
+    config = Config.load(overrides={"data": {"calibration": str(calibration)}})
+
+    with pytest.raises(CalibrationError, match="a plain mirror"):
+        Trainer(config, manifest, StubTranslator(hidden_channels=4), tmp_path / "run")
 
 
 def test_train_returns_epoch_stats_per_epoch(data_yaml: Path, tmp_path: Path) -> None:

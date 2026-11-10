@@ -9,6 +9,7 @@ import torch
 from PIL import Image
 
 from conftest import IMG_SIZE, N_TRAIN, TRAIN_STEMS
+from t2o.data.calibration import load_calibration
 from t2o.data.dataset import (
     TranslationPairDataset,
     TranslationSample,
@@ -454,3 +455,34 @@ def test_misalignment_keeps_an_unannotated_image_unlabelled(dataset_root: Path) 
     )
     counts = [sample[i].bboxes.shape[0] for i in range(len(sample))]
     assert counts.count(0) >= len(sample) - 1
+
+
+# --------------------------------------------------------------------------- de-rolled (ADR-02)
+
+
+@pytest.mark.parametrize("level", [0.0, 12.0])
+def test_a_calibration_de_rolls_the_target_and_reads_thermal_boxes(
+    derolled_tree: tuple[Path, Path], level: float
+) -> None:
+    data, calibration_path = derolled_tree
+    calibration = load_calibration(calibration_path)
+    root = data.parent
+    plain = TranslationPairDataset(_images(root))
+    derolled = TranslationPairDataset(_images(root), misalignment_px=level, calibration=calibration)
+    misalignment = Misalignment(H, W, level)
+    index = 1  # labelled
+
+    before, after = plain[index], derolled[index]
+    # Warped at every level, 0 px included: the de-roll is what makes 0 px mean "aligned".
+    expected = misalign_image(before.visible.permute(1, 2, 0).numpy(), misalignment, calibration)
+    torch.testing.assert_close(after.visible, torch.from_numpy(expected.transpose(2, 0, 1)))
+    assert not torch.equal(after.visible, before.visible)
+    assert torch.equal(after.infrared, before.infrared)
+
+    # The de-rolled thermal boxes, moved by the level and nothing else.
+    thermal = root / "train" / "infrared" / "labels" / f"{Path(after.name).stem}.txt"
+    lines, _ = misalign_label_lines(thermal, misalignment)
+    parsed = torch.tensor([[float(v) for v in line.split()] for line in lines])
+    assert torch.equal(after.cls, parsed[:, :1])
+    assert torch.equal(after.bboxes, parsed[:, 1:])
+    assert not torch.equal(after.bboxes, before.bboxes)

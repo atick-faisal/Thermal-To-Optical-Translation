@@ -299,6 +299,27 @@ def test_the_misalignment_stays_in_the_snapshot_at_zero(tmp_path: Path) -> None:
     assert yaml.safe_load(snapshot.read_text())["data"]["misalignment_px"] == 0
 
 
+def test_an_unset_calibration_leaves_the_default_hash_alone() -> None:
+    explicit_none = Config.load(overrides={"data": {"calibration": None}})
+    assert explicit_none.config_hash() == "4de85d4050b99bb7"
+
+
+def test_a_calibration_is_its_own_experiment() -> None:
+    # A de-rolled 0 px run is FLIR's new zero point (ADR-02), not the rolled aligned run.
+    derolled = Config.load(overrides={"data": {"calibration": "calibration/flir.json"}})
+    assert derolled.config_hash() != Config.load().config_hash()
+    both = Config.load(
+        overrides={"data": {"calibration": "calibration/flir.json", "misalignment_px": 6.0}}
+    )
+    level_only = Config.load(overrides={"data": {"misalignment_px": 6.0}})
+    assert len({both.config_hash(), derolled.config_hash(), level_only.config_hash()}) == 3
+
+
+def test_an_unset_calibration_stays_in_the_snapshot(tmp_path: Path) -> None:
+    snapshot = Config.load().snapshot(tmp_path)
+    assert yaml.safe_load(snapshot.read_text())["data"]["calibration"] is None
+
+
 @pytest.mark.parametrize("level", [-3.0, float("nan"), float("inf")])
 def test_a_misalignment_that_is_not_a_pixel_count_is_rejected(level: float) -> None:
     with pytest.raises(ConfigError, match="non-negative pixel count"):

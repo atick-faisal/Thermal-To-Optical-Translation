@@ -8,12 +8,19 @@ local 9-pair sample has train == val, which would hide any bug that conflates th
 
 from __future__ import annotations
 
+import json
+import shutil
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 from PIL import Image
+
+from t2o.data.calibration import ResidualCalibration
+from t2o.data.manifest import DatasetManifest
+from t2o.data.mirror import mirror_labels_onto_infrared
 
 NAMES = ["Fuse", "Pole", "Switch", "Transformer"]
 IMG_SIZE = (480, 640)  # (height, width) -- matches the real FLIR pairs, stride-32 divisible
@@ -117,3 +124,43 @@ def rtdetr_weights(tmp_path_factory: pytest.TempPathFactory) -> Path:
         path,
     )
     return path
+
+
+# A roll-like corner field for the de-rolled fixture below; the same numbers `test_mirror.py`
+# and `test_gate_table.py` use.
+DEROLL_FIELD = ((0.0, 6.0), (-12.0, 1.0), (0.0, -6.0), (13.0, 0.0))
+
+
+@pytest.fixture
+def derolled_tree(dataset_root: Path, tmp_path: Path) -> tuple[Path, Path]:
+    """A copy of the shared fixture with de-rolled thermal labels, and the constant that did it.
+
+    FLIR's state after `scripts/mirror_thermal_labels.py --calibration`: the thermal labels are
+    the visible ones carried through `visible_to_infrared`, and each split records the constant's
+    digest. `validate_for` checks the constant's dataset against the tree's directory name, so
+    the two are built together. Returns ``(data.yaml, calibration.json)``.
+    """
+    root = tmp_path / "derolled"
+    shutil.copytree(dataset_root, root)
+    # `path:` is absolute, so an unrewritten copy would resolve back to the original tree.
+    manifest_path = root / "data.yaml"
+    manifest_path.write_text(
+        manifest_path.read_text().replace(f"path: {dataset_root}", f"path: {root}")
+    )
+    calibration = ResidualCalibration(
+        dataset=root.name,
+        height=IMG_SIZE[0],
+        width=IMG_SIZE[1],
+        corner_shift=DEROLL_FIELD,
+        matchers=("roma",),
+        spread_px=1.0,
+        worst_case_px=2.0,
+        n_pairs=10,
+        split="val",
+        git_sha="abc1234",
+        note="synthetic",
+    )
+    mirror_labels_onto_infrared(DatasetManifest.load(manifest_path), calibration=calibration)
+    calibration_path = tmp_path / "calibration.json"
+    calibration_path.write_text(json.dumps(asdict(calibration)))
+    return manifest_path, calibration_path

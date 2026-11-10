@@ -19,7 +19,10 @@ from PIL import Image
 from torch import nn
 
 from t2o.config import Config
+from t2o.data.calibration import CalibrationError
 from t2o.data.dataset import TranslationPairDataset
+from t2o.data.manifest import DatasetManifest
+from t2o.data.mirror import mirror_labels_onto_infrared
 from t2o.data.misalignment import Misalignment, misalign_label_lines
 from t2o.engine.export import export_split, export_translated
 from t2o.imaging import Normalize
@@ -223,6 +226,62 @@ def test_export_misaligns_train_labels_and_leaves_val_verbatim(
     for exported in (tmp_path / "val" / "labels").glob("*.txt"):
         source = dataset_root / "val" / "visible" / "labels" / exported.name
         assert exported.read_text() == source.read_text()
+
+
+def _derolled_config(data: Path, calibration: Path, level: float) -> Config:
+    return Config.load(
+        overrides={
+            "data": {
+                "manifest": str(data),
+                "calibration": str(calibration),
+                "misalignment_px": level,
+            },
+            "runtime": {"workers": 0},
+            "detector": {"evaluation": {"batch": 4}},
+        }
+    )
+
+
+@pytest.mark.parametrize("level", [0.0, 12.0])
+def test_a_de_rolled_export_writes_thermal_side_labels(
+    translator: StubTranslator, derolled_tree: tuple[Path, Path], tmp_path: Path, level: float
+) -> None:
+    """ADR-02: train boxes are the de-rolled thermal ones moved by the level; val is scored on
+    the de-rolled thermal ones verbatim, never on the rolled visible-side boxes."""
+    data, calibration = derolled_tree
+    root = data.parent
+    export_translated(translator, _derolled_config(data, calibration, level), tmp_path / "out")
+
+    height, width = np.asarray(Image.open(next(root.rglob("*.jpg")))).shape[:2]
+    misalignment = Misalignment(height, width, level)
+    for exported in sorted((tmp_path / "out" / "train" / "labels").glob("*.txt")):
+        thermal = root / "train" / "infrared" / "labels" / exported.name
+        if level == 0:
+            assert exported.read_bytes() == thermal.read_bytes()
+        else:
+            lines, _ = misalign_label_lines(thermal, misalignment)
+            assert exported.read_text() == ("\n".join(lines) + "\n" if lines else "")
+
+    val = sorted((tmp_path / "out" / "val" / "labels").glob("*.txt"))
+    assert val
+    differs_from_visible = 0
+    for exported in val:
+        thermal = root / "val" / "infrared" / "labels" / exported.name
+        visible = root / "val" / "visible" / "labels" / exported.name
+        assert exported.read_bytes() == thermal.read_bytes()
+        differs_from_visible += exported.read_bytes() != visible.read_bytes()
+    assert differs_from_visible > 0, "the fixture would not catch visible-side val labels"
+
+
+def test_a_de_rolled_export_refuses_a_tree_the_constant_did_not_de_roll(
+    translator: StubTranslator, derolled_tree: tuple[Path, Path], tmp_path: Path
+) -> None:
+    data, calibration = derolled_tree
+    mirror_labels_onto_infrared(DatasetManifest.load(data), force=True)
+
+    with pytest.raises(CalibrationError, match="a plain mirror"):
+        export_translated(translator, _derolled_config(data, calibration, 0.0), tmp_path / "out")
+    assert not (tmp_path / "out").exists()
 
 
 def test_generated_data_yaml_is_loadable_by_ultralytics(
