@@ -254,6 +254,57 @@ def test_hash_changes_when_a_scientific_value_changes() -> None:
     assert Config.load(overrides={"data": {"max_train_images": 600}}).config_hash() != baseline
 
 
+EXPERIMENTS = Path(__file__).resolve().parent.parent / "experiments"
+
+# Every experiment config's hash as it stood before `data.misalignment_px` existed (computed at
+# 91fde9b). The aligned runs these configs produced are the registration axis's zero point, so
+# adding the field must not move a single one of them.
+PINNED_HASHES = {
+    "e3_pix2pix_control.yaml": "52d88dee442ff2de",
+    "e3_pix2pix_loop.yaml": "701e59cf82a55da4",
+    "e3_turbo_control.yaml": "3c37444f9999b52e",
+    "e3_turbo_loop.yaml": "6ff59691b89ef289",
+    "modtr_custom.yaml": "fae1a3d8e343dba3",
+    "modtr_flir.yaml": "a573c0580c1a4d7a",
+    "pix2pix_baseline.yaml": "5627f2c406b018ec",
+    "pix2pix_loop.yaml": "ffceb2a4f0533ddc",
+    "smoke.yaml": "273ff4ac46a9df63",
+}
+
+
+@pytest.mark.parametrize(("name", "expected"), sorted(PINNED_HASHES.items()))
+def test_the_misalignment_default_leaves_existing_hashes_alone(name: str, expected: str) -> None:
+    config = Config.load(EXPERIMENTS / name)
+    assert config.data.misalignment_px == 0
+    assert config.config_hash() == expected
+
+
+def test_the_misalignment_default_leaves_the_default_hash_alone() -> None:
+    assert Config.load().config_hash() == "4de85d4050b99bb7"
+    explicit_zero = Config.load(overrides={"data": {"misalignment_px": 0}})
+    assert explicit_zero.config_hash() == "4de85d4050b99bb7"
+
+
+def test_each_misalignment_level_is_its_own_experiment() -> None:
+    hashes = {
+        Config.load(overrides={"data": {"misalignment_px": level}}).config_hash()
+        for level in (0.0, 3.0, 6.0, 12.0, 24.0)
+    }
+    assert len(hashes) == 5
+
+
+def test_the_misalignment_stays_in_the_snapshot_at_zero(tmp_path: Path) -> None:
+    # Only the hash leaves it out; the resolved config still says what the run trained on.
+    snapshot = Config.load().snapshot(tmp_path)
+    assert yaml.safe_load(snapshot.read_text())["data"]["misalignment_px"] == 0
+
+
+@pytest.mark.parametrize("level", [-3.0, float("nan"), float("inf")])
+def test_a_misalignment_that_is_not_a_pixel_count_is_rejected(level: float) -> None:
+    with pytest.raises(ConfigError, match="non-negative pixel count"):
+        Config.load(overrides={"data": {"misalignment_px": level}})
+
+
 def test_an_image_cap_below_one_is_rejected() -> None:
     for field in ("max_train_images", "val_loss_images"):
         with pytest.raises(ConfigError, match=">= 1"):

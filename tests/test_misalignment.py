@@ -27,6 +27,7 @@ from t2o.data.misalignment import (
     REGISTRATION_LEVELS_PX,
     Misalignment,
     MisalignmentError,
+    misalign_image,
     write_misaligned_tree,
 )
 
@@ -217,3 +218,36 @@ def test_a_non_empty_destination_is_refused(aligned: DatasetManifest, tmp_path: 
 
     with pytest.raises(MisalignmentError, match="not empty"):
         write_misaligned_tree(aligned, Misalignment(HEIGHT, WIDTH, 6.0), tmp_path / "taken")
+
+
+def test_the_image_moves_the_way_the_boxes_do() -> None:
+    # A bright dot near the top-left corner must land where the homography that moves the boxes
+    # sends it -- the image and its labels have to agree, or the loop trains on mismatched boxes.
+    height, width = IMG_SIZE
+    misalignment = Misalignment(height, width, 24.0)
+    image = np.zeros((height, width, 1), dtype=np.float32)
+    image[40:43, 50:53] = 1.0
+    warped = misalign_image(image, misalignment)
+
+    (target,) = _map(np.array([[51.0, 41.0]]), misalignment.homography())
+    ys, xs = np.nonzero(warped[:, :, 0] > 0.5)
+    landed = np.array([xs.mean(), ys.mean()])
+    assert np.linalg.norm(landed - target) < 1.0
+    # Near a corner the field moves a point by most of the level (here ~20 of 24 px).
+    assert np.linalg.norm(landed - np.array([51.0, 41.0])) > 15.0
+
+
+def test_the_image_warp_keeps_shape_and_dtype() -> None:
+    height, width = IMG_SIZE
+    image = np.random.default_rng(0).random((height, width, 3), dtype=np.float32)
+    warped = misalign_image(image, Misalignment(height, width, 6.0))
+    assert warped.shape == image.shape
+    assert warped.dtype == np.float32
+
+
+def test_the_image_warp_refuses_another_frame_size() -> None:
+    height, width = IMG_SIZE
+    with pytest.raises(MisalignmentError, match="built for"):
+        misalign_image(
+            np.zeros((height // 2, width, 3), np.float32), Misalignment(height, width, 6)
+        )

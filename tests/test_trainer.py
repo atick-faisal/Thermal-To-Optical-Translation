@@ -65,6 +65,25 @@ def test_resolve_device_defaults_to_whatever_is_available() -> None:
     assert resolve_device(None) == expected
 
 
+def test_misalignment_reaches_the_train_pairs_and_never_val(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    # Invariant 2 (design.md §5): val is the frozen scoring split, at every misalignment level.
+    manifest = DatasetManifest.load(data_yaml)
+    misaligned = Config.load(
+        overrides={"data": {"misalignment_px": 12.0}, "runtime": {"workers": 0}}
+    )
+    trainer = Trainer(misaligned, manifest, StubTranslator(hidden_channels=4), tmp_path / "a")
+    aligned = Trainer(_config(), manifest, StubTranslator(hidden_channels=4), tmp_path / "b")
+
+    assert trainer.train_dataset.misalignment_px == 12.0
+    assert not torch.equal(trainer.train_dataset[1].visible, aligned.train_dataset[1].visible)
+    assert trainer.val_dataset.misalignment_px == 0
+    for index in range(len(trainer.val_dataset)):
+        assert torch.equal(trainer.val_dataset[index].visible, aligned.val_dataset[index].visible)
+        assert torch.equal(trainer.val_dataset[index].bboxes, aligned.val_dataset[index].bboxes)
+
+
 def test_train_returns_epoch_stats_per_epoch(data_yaml: Path, tmp_path: Path) -> None:
     manifest = DatasetManifest.load(data_yaml)
     config = _config()

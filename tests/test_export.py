@@ -20,6 +20,7 @@ from torch import nn
 
 from t2o.config import Config
 from t2o.data.dataset import TranslationPairDataset
+from t2o.data.misalignment import Misalignment, misalign_label_lines
 from t2o.engine.export import export_split, export_translated
 from t2o.imaging import Normalize
 from t2o.translators import StubTranslator
@@ -189,6 +190,39 @@ def test_export_caps_train_and_leaves_val_whole(
     assert len(list((tmp_path / "train" / "images").glob("*.png"))) == 3
     assert len(list((tmp_path / "train" / "images").glob("*.png"))) < len(dataset)
     assert len(list((tmp_path / "val" / "images").glob("*.png"))) == len(val_dataset)
+
+
+def test_export_misaligns_train_labels_and_leaves_val_verbatim(
+    translator: StubTranslator, dataset_root: Path, tmp_path: Path
+) -> None:
+    """The evaluation detector fine-tunes on the boxes the misaligned translator trained on.
+
+    Val is the scoring split: its labels stay the dataset's own (design.md §5, invariant 2).
+    """
+    config = Config.load(
+        overrides={
+            "data": {"manifest": str(dataset_root / "data.yaml"), "misalignment_px": 12.0},
+            "runtime": {"workers": 0},
+            "detector": {"evaluation": {"batch": 4}},
+        }
+    )
+    export_translated(translator, config, tmp_path)
+
+    height, width = np.asarray(Image.open(next((tmp_path / "train" / "images").iterdir()))).shape[
+        :2
+    ]
+    misalignment = Misalignment(height, width, 12.0)
+    moved = 0
+    for exported in sorted((tmp_path / "train" / "labels").glob("*.txt")):
+        source = dataset_root / "train" / "visible" / "labels" / exported.name
+        lines, _ = misalign_label_lines(source, misalignment)
+        assert exported.read_text() == ("\n".join(lines) + "\n" if lines else "")
+        moved += exported.read_text() != source.read_text()
+    assert moved > 0
+
+    for exported in (tmp_path / "val" / "labels").glob("*.txt"):
+        source = dataset_root / "val" / "visible" / "labels" / exported.name
+        assert exported.read_text() == source.read_text()
 
 
 def test_generated_data_yaml_is_loadable_by_ultralytics(

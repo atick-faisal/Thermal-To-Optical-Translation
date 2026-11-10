@@ -16,6 +16,7 @@ from t2o.data.dataset import (
     collate_translation_batch,
 )
 from t2o.data.labels import load_yolo_labels
+from t2o.data.misalignment import Misalignment, misalign_image, misalign_label_lines
 from t2o.data.pairing import Pairing
 
 H, W = IMG_SIZE
@@ -408,3 +409,48 @@ def test_annotation_fraction_applies_within_the_cap(dataset_root: Path) -> None:
     assert len(capped) == 4
     assert len(capped._annotated) == 2
     assert set(capped._annotated) <= set(capped.visible_paths)
+
+
+# --------------------------------------------------------------------------- misalignment
+
+
+def test_misalignment_moves_the_visible_target_and_its_boxes(dataset_root: Path) -> None:
+    aligned = TranslationPairDataset(_images(dataset_root))
+    misaligned = TranslationPairDataset(_images(dataset_root), misalignment_px=12.0)
+    misalignment = Misalignment(H, W, 12.0)
+    index = 1  # labelled
+
+    before, after = aligned[index], misaligned[index]
+    expected = misalign_image(before.visible.permute(1, 2, 0).numpy(), misalignment)
+    torch.testing.assert_close(after.visible, torch.from_numpy(expected.transpose(2, 0, 1)))
+    assert not torch.equal(after.visible, before.visible)
+    # The thermal input is the frame the level is measured against: it never moves.
+    assert torch.equal(after.infrared, before.infrared)
+
+    # The boxes are the label-transfer tree's boxes for this level, to the digit.
+    label = dataset_root / "train" / "visible" / "labels" / f"{Path(after.name).stem}.txt"
+    lines, _ = misalign_label_lines(label, misalignment)
+    parsed = torch.tensor([[float(v) for v in line.split()] for line in lines])
+    assert torch.equal(after.cls, parsed[:, :1])
+    assert torch.equal(after.bboxes, parsed[:, 1:])
+    centre_shift = (after.bboxes[:, :2] - before.bboxes[:, :2]) * torch.tensor([W, H])
+    # The fixture's first box sits at the image centre, which a roll about the centre leaves
+    # in place; the off-centre one has to move.
+    assert centre_shift.norm(dim=1).max() > 0
+    assert (centre_shift.norm(dim=1) <= 12.0).all()
+
+
+def test_misalignment_zero_is_the_aligned_dataset(dataset_root: Path) -> None:
+    aligned = TranslationPairDataset(_images(dataset_root))
+    zero = TranslationPairDataset(_images(dataset_root), misalignment_px=0.0)
+    for index in range(len(aligned)):
+        assert torch.equal(zero[index].visible, aligned[index].visible)
+        assert torch.equal(zero[index].bboxes, aligned[index].bboxes)
+
+
+def test_misalignment_keeps_an_unannotated_image_unlabelled(dataset_root: Path) -> None:
+    sample = TranslationPairDataset(
+        _images(dataset_root), misalignment_px=12.0, annotation_fraction=0.2
+    )
+    counts = [sample[i].bboxes.shape[0] for i in range(len(sample))]
+    assert counts.count(0) >= len(sample) - 1
