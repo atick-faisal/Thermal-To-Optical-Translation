@@ -37,7 +37,9 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+import cv2
 import numpy as np
+import numpy.typing as npt
 import yaml
 
 from t2o.data.calibration import (
@@ -46,7 +48,6 @@ from t2o.data.calibration import (
     _homography_from_corners,
     _image_corners,
 )
-from t2o.data.dataset import IMAGE_SUFFIXES
 from t2o.data.manifest import RGBT_BLOCK, DatasetManifest
 from t2o.data.mirror import (
     PROVENANCE_FILENAME,
@@ -55,7 +56,7 @@ from t2o.data.mirror import (
     deroll_label_lines,
     read_label_provenance,
 )
-from t2o.data.pairing import LABEL_SUFFIX, LABELS_SEGMENT
+from t2o.data.pairing import IMAGE_SUFFIXES, LABEL_SUFFIX, LABELS_SEGMENT
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,44 @@ class Misalignment:
         return hashlib.sha256(payload.encode()).hexdigest()[:_HASH_LENGTH]
 
 
+def misalign_label_lines(label_path: Path, misalignment: Misalignment) -> tuple[list[str], int]:
+    """One label file's boxes moved by ``misalignment``, as YOLO lines plus a dropped count.
+
+    The one box path of the axis: the label-transfer tree (:func:`write_misaligned_tree`), the
+    translator's training boxes (``data/dataset.py``) and the evaluation detector's exported
+    train labels (``engine/export.py``) all come through here, so a level means the same boxes
+    in both halves of the curve.
+    """
+    shape = (misalignment.height, misalignment.width)
+    return deroll_label_lines(label_path, misalignment.homography(), shape, _BOX_TRANSFORM)
+
+
+def misalign_image(
+    image: npt.NDArray[np.float32], misalignment: Misalignment
+) -> npt.NDArray[np.float32]:
+    """Warp an ``(H, W, C)`` image by ``misalignment``, so content at ``p`` lands at ``H p``.
+
+    The same direction as :func:`misalign_label_lines`, so a warped image and its moved boxes
+    still agree. Pixels pulled in from beyond the frame are **reflected**, not black: a real
+    misaligned camera sees scene there, and a black wedge is an edge artefact the translator
+    would learn to paint and the in-loop detector would score.
+    """
+    if (image.shape[0], image.shape[1]) != (misalignment.height, misalignment.width):
+        raise MisalignmentError(
+            f"misalignment is built for {misalignment.height}x{misalignment.width} but the "
+            f"image is {image.shape[0]}x{image.shape[1]}"
+        )
+    warped = cv2.warpPerspective(
+        image,
+        misalignment.homography(),
+        (misalignment.width, misalignment.height),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT_101,
+    )
+    # cv2 drops a trailing channel axis of size 1.
+    return np.asarray(warped.reshape(image.shape), dtype=np.float32)
+
+
 def _copy_split(manifest: DatasetManifest, images_dir: Path, out_split: Path) -> Path:
     """Copy one split's pairs, both cameras' images and labels, into ``out_split``.
 
@@ -208,9 +247,8 @@ def write_misaligned_tree(
     files = sorted(train_labels.glob(f"*{LABEL_SUFFIX}"))
     dropped = 0
     if misalignment.level_px > 0:
-        matrix = misalignment.homography()
         for label in files:
-            lines, lost = deroll_label_lines(label, matrix, shape, _BOX_TRANSFORM)
+            lines, lost = misalign_label_lines(label, misalignment)
             dropped += lost
             label.write_text("\n".join(lines) + "\n" if lines else "")
     (train_labels.parent / PROVENANCE_FILENAME).write_text(

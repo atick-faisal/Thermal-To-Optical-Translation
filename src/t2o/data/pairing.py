@@ -15,6 +15,10 @@ from pathlib import Path
 IMAGES_SEGMENT = "images"
 LABELS_SEGMENT = "labels"
 LABEL_SUFFIX = ".txt"
+# Defined here, beside the other path-level constants, rather than in `data/dataset.py`: that
+# module re-exports it, and `data/misalignment.py` -- which `dataset.py` itself imports -- reads
+# it from here, so the two never import each other.
+IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"})
 
 
 def _substitute_segment(path: Path, old: str, new: str) -> Path:

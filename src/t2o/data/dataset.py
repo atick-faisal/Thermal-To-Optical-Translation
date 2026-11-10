@@ -30,11 +30,10 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from t2o.data.labels import load_yolo_labels
-from t2o.data.pairing import Pairing
+from t2o.data.misalignment import Misalignment, misalign_image, misalign_label_lines
+from t2o.data.pairing import IMAGE_SUFFIXES, Pairing
 
 logger = logging.getLogger(__name__)
-
-IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"})
 
 # Boxes surviving a crop with less than this normalised side are dropped: a sliver of a
 # box is a worse training target than no box at all.
@@ -131,6 +130,13 @@ def _crop_bboxes(
     return cropped[keep], keep
 
 
+def _parse_label_lines(lines: list[str]) -> tuple[Tensor, Tensor]:
+    """YOLO ``cls cx cy w h`` lines as ``load_yolo_labels``' ``(M, 1)`` and ``(M, 4)`` tensors."""
+    rows = torch.tensor([[float(v) for v in line.split()] for line in lines], dtype=torch.float32)
+    rows = rows.reshape(-1, 5)
+    return rows[:, :1], rows[:, 1:]
+
+
 def annotated_subset(paths: list[Path], fraction: float, seed: int) -> frozenset[Path]:
     """Deterministically choose which paths keep their annotations (E8 sweep).
 
@@ -199,8 +205,13 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         augment_seed: int = 0,
         max_images: int | None = None,
         subset_seed: int = 0,
+        misalignment_px: float = 0.0,
     ) -> None:
         self.pairing = pairing or Pairing()
+        # C2's registration-error axis (`DataConfig.misalignment_px`). Moves the visible image
+        # *and* its boxes -- they are drawn on the visible frame, so on a misaligned rig they sit
+        # wherever it does. Only ever set on a training split: val is the frozen scoring split.
+        self.misalignment_px = misalignment_px
         self.hflip = hflip
         self.crop = crop
         self.augment_seed = augment_seed
@@ -231,11 +242,12 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         self._annotated = annotated_subset(self.visible_paths, annotation_fraction, annotation_seed)
 
         logger.info(
-            "%s: %d paired samples%s, %d annotated",
+            "%s: %d paired samples%s, %d annotated%s",
             self.images_dir,
             len(self.visible_paths),
             f" (capped from {available})" if len(self.visible_paths) != available else "",
             len(self._annotated),
+            f", visible side misaligned by {misalignment_px:g} px" if misalignment_px else "",
         )
 
     def _validate_class_ids(self, num_classes: int) -> None:
@@ -296,10 +308,21 @@ class TranslationPairDataset(Dataset[TranslationSample]):
                 f"{tuple(infrared.shape[1:])} differ in size"
             )
 
-        if visible_path in self._annotated:
-            cls, bboxes = load_yolo_labels(self.pairing.label_path(visible_path))
-        else:
+        # Before crop and flip: the level is measured on the full frame, and augmenting a
+        # misaligned pair is what a misaligned rig's training run does.
+        misalignment = None
+        if self.misalignment_px > 0:
+            misalignment = Misalignment(visible.shape[1], visible.shape[2], self.misalignment_px)
+            warped = misalign_image(visible.permute(1, 2, 0).numpy(), misalignment)
+            visible = torch.from_numpy(np.ascontiguousarray(warped.transpose(2, 0, 1)))
+
+        label_path = self.pairing.label_path(visible_path)
+        if visible_path not in self._annotated:
             cls, bboxes = torch.zeros(0, 1), torch.zeros(0, 4)
+        elif misalignment is not None:
+            cls, bboxes = _parse_label_lines(misalign_label_lines(label_path, misalignment)[0])
+        else:
+            cls, bboxes = load_yolo_labels(label_path)
 
         # One generator for both draws, built once so crop and flip share one stream.
         generator = self._augment_generator(index)
