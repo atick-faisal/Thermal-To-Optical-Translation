@@ -1,0 +1,85 @@
+# C2's registration-error axis, translation half: FLIR at 24 px (REGISTRATION-AXIS-06).
+#
+# The e3f loop cell (record 016; its values as experiments/modtr_flir.yaml writes them out) with
+# `data.calibration` and `data.misalignment_px` set and its own run name, nothing else (pinned by
+# tests/test_registration_experiments.py). One seed, train.seed 0.
+#
+# ADR-02: each train target is de-rolled onto the thermal frame by the calibration, then moved
+# by the level, so the total is exactly 24 px; train and exported val boxes are the de-rolled
+# thermal-side labels. FLIR's 0 px point is flir_00px.yaml, not e3f-loop-s0, which trained on
+# rolled pairs and scored visible-side boxes.
+
+data:
+  manifest: dataset/processed/flir/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+  # e3f's matched corpus and val-loss subsample (F125), cut by the same subset_seed.
+  max_train_images: 600
+  val_loss_images: 153
+  subset_seed: 0
+  # Refused at startup unless both splits' infrared/labels were de-rolled by this exact file
+  # (record 014's scripts/mirror_thermal_labels.py --calibration run).
+  calibration: calibration/flir.json
+  # The level, on FLIR's native 512x640 frame.
+  misalignment_px: 24.0
+
+train:
+  epochs_per_stage: 100
+  batch_size: 8
+  lr: 2.0e-4
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  hflip: 0.5
+  crop: null
+  seed: 0
+
+loss:
+  l2: 1.0
+  lpips: 5.0
+  gan: 1.0
+
+coupling:
+  task_weights: [0.0, 1.0, 2.0, 3.0]
+  grad_scale: 0.15
+  reward_target: null
+
+detector:
+  in_loop:
+    weights: runs/inloop-flir-yolo11n/weights/best.pt
+    imgsz: 640
+  evaluation:
+    init_weights: runs/inloop-flir-yolo11n/weights/best.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    weights: runs/reference-flir-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: pix2pix
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  gan_mode: vanilla
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  workers: 16
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: registration-flir
+  run_dir: runs
+  name: regf-24px-s0

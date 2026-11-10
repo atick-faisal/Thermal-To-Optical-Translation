@@ -1,0 +1,78 @@
+# C2's registration-error axis, translation half: the custom set at 24 px (REGISTRATION-AXIS-06).
+#
+# experiments/e3_pix2pix_loop.yaml with `data.misalignment_px` set and its own run name, nothing
+# else (pinned by tests/test_registration_experiments.py). One seed, train.seed 0, the first of
+# e3b's six; e3b-loop-s0..s5 are this curve's 0 px point (plan Q4). Same backbone and dose as
+# e3b, so no new scripts/loss_share.py run.
+#
+# The visible target and its train boxes move together (ADR-01); val never moves. The server
+# passes the custom set's manifest and the optical yolo11n with --data, --in-loop-weights and
+# --eval-init-weights, exactly as e3b was launched (record 007).
+
+data:
+  manifest: dataset/yolo_rgbt/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+  # The level. Read at the custom set's native frame; it is not 24 px on a resized copy.
+  misalignment_px: 24.0
+
+train:
+  epochs_per_stage: 100
+  batch_size: 8
+  lr: 2.0e-4
+  lr_gamma: 0.95
+  amp: true
+  amp_dtype: bfloat16
+  hflip: 0.5
+  crop: null
+  seed: 0
+
+loss:
+  l2: 1.0
+  lpips: 5.0
+  gan: 1.0
+
+coupling:
+  task_weights: [0.0, 1.0, 2.0, 3.0]
+  grad_scale: 0.15
+  reward_target: null
+
+detector:
+  in_loop:
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    weights: runs/reference-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: pix2pix
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  gan_mode: vanilla
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  workers: 16
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: registration-custom
+  run_dir: runs
+  name: regc-24px-s0
