@@ -44,9 +44,12 @@ import yaml
 
 from t2o.data.calibration import (
     _HASH_LENGTH,
+    CalibrationError,
     FloatArray,
+    ResidualCalibration,
     _homography_from_corners,
     _image_corners,
+    load_calibration,
 )
 from t2o.data.manifest import RGBT_BLOCK, DatasetManifest
 from t2o.data.mirror import (
@@ -151,7 +154,9 @@ def misalign_label_lines(label_path: Path, misalignment: Misalignment) -> tuple[
 
 
 def misalign_image(
-    image: npt.NDArray[np.float32], misalignment: Misalignment
+    image: npt.NDArray[np.float32],
+    misalignment: Misalignment,
+    calibration: ResidualCalibration | None = None,
 ) -> npt.NDArray[np.float32]:
     """Warp an ``(H, W, C)`` image by ``misalignment``, so content at ``p`` lands at ``H p``.
 
@@ -159,21 +164,72 @@ def misalign_image(
     still agree. Pixels pulled in from beyond the frame are **reflected**, not black: a real
     misaligned camera sees scene there, and a black wedge is an edge artefact the translator
     would learn to paint and the in-loop detector would score.
+
+    With a ``calibration`` the visible image is first carried onto the thermal frame by
+    :meth:`ResidualCalibration.visible_to_infrared` (ADR-02), so the level is added to the
+    calibrated alignment rather than to the rig's own roll. The two maps are composed into one
+    homography so the image is resampled once, not twice.
     """
-    if (image.shape[0], image.shape[1]) != (misalignment.height, misalignment.width):
+    shape = (image.shape[0], image.shape[1])
+    if shape != (misalignment.height, misalignment.width):
         raise MisalignmentError(
             f"misalignment is built for {misalignment.height}x{misalignment.width} but the "
-            f"image is {image.shape[0]}x{image.shape[1]}"
+            f"image is {shape[0]}x{shape[1]}"
         )
+    matrix = misalignment.homography()
+    if calibration is not None:
+        if calibration.shape != shape:
+            raise MisalignmentError(
+                f"calibration is built for {calibration.height}x{calibration.width} but the "
+                f"image is {shape[0]}x{shape[1]}"
+            )
+        matrix = matrix @ calibration.visible_to_infrared()
     warped = cv2.warpPerspective(
         image,
-        misalignment.homography(),
+        matrix,
         (misalignment.width, misalignment.height),
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_REFLECT_101,
     )
     # cv2 drops a trailing channel axis of size 1.
     return np.asarray(warped.reshape(image.shape), dtype=np.float32)
+
+
+def load_derolled_calibration(
+    manifest: DatasetManifest, path: Path | None
+) -> ResidualCalibration | None:
+    """The calibration ``DataConfig.calibration`` names, once the dataset is proven de-rolled by it.
+
+    ``None`` for no path. Otherwise both splits' thermal labels must carry this constant's digest
+    in their ``LABELS_PROVENANCE.json``: the run reads its train boxes and scores its val against
+    them (ADR-02), and a plain mirror or another constant's de-roll would leave those boxes on a
+    different frame from the de-rolled visible targets -- a run that trains cleanly and reports a
+    curve against the wrong boxes. The same check ``scripts/gate_table.py::_verified_digest``
+    makes for val; train is checked too because here its boxes are read as well.
+    """
+    if path is None:
+        return None
+    calibration = load_calibration(path)
+    expected = calibration.digest()
+    for images_dir in (manifest.train_images, manifest.val_images):
+        infrared_images = manifest.pairing.infrared_path(images_dir)
+        calibration.validate_for(manifest.root.name, _split_image_shape(infrared_images))
+        labels_dir = infrared_images.parent / LABELS_SEGMENT
+        recorded = read_label_provenance(labels_dir)
+        on_disk = str(recorded.get("calibration_digest", "")) if recorded else ""
+        if on_disk != expected:
+            raise CalibrationError(
+                f"{labels_dir} was not de-rolled by {path} (digest {expected}): it records "
+                f"{on_disk or 'a plain mirror'}. Run scripts/mirror_thermal_labels.py --data "
+                f"{manifest.path} --calibration {path} --force first."
+            )
+    logger.info(
+        "de-rolled run: %s (digest %s, %.2f px) matches both splits' thermal labels",
+        path,
+        expected,
+        calibration.magnitude_px(),
+    )
+    return calibration
 
 
 def _copy_split(manifest: DatasetManifest, images_dir: Path, out_split: Path) -> Path:

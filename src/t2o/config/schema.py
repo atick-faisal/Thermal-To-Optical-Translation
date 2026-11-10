@@ -83,6 +83,14 @@ class DataConfig(ConfigBase):
     # the native frame: the same number on a resized dataset is a different misalignment. Val
     # is never warped -- a warped val would score every arm against moved boxes.
     misalignment_px: float = 0.0
+    # (path|null) a residual calibration (`calibration/flir.json`) that de-rolls each *train*
+    # pair's visible target onto the thermal frame before the level above is added, and switches
+    # every box the run reads -- train and the exported val -- to the de-rolled thermal-side
+    # labels (ADR-02). Without it, FLIR's real ~9.3 px roll partly cancels the injected one and
+    # no level is the pixels it claims. Refused at startup unless both splits' thermal labels
+    # were de-rolled by this exact constant. null is the dataset as it is, and is left out of
+    # config_hash() for the same reason misalignment_px's 0 is.
+    calibration: Path | None = None
 
     @field_validator("annotation_fraction")
     @classmethod
@@ -505,14 +513,20 @@ class Config(RunConfigBase):
     runtime: RuntimeConfig = RuntimeConfig()
 
     def _hash_exclude(self) -> dict[str, Any]:
-        """Also drop `data.misalignment_px` while it is 0.
+        """Also drop `data.misalignment_px` while it is 0, and `data.calibration` while unset.
 
-        The field arrived after every aligned run was hashed. Hashing its default would give
-        each of those runs a new hash, and they would stop counting as the axis's zero point.
+        Both fields arrived after every aligned run was hashed. Hashing their defaults would
+        give each of those runs a new hash, and they would stop counting as the axis's zero
+        point.
         """
         excluded = super()._hash_exclude()
+        unset: dict[str, bool] = {}
         if self.data.misalignment_px == 0:
-            excluded["data"] = {"misalignment_px": True}
+            unset["misalignment_px"] = True
+        if self.data.calibration is None:
+            unset["calibration"] = True
+        if unset:
+            excluded["data"] = unset
         return excluded
 
     def snapshot(self, run_dir: Path | None = None) -> Path:

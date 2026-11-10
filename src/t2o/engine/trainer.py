@@ -66,6 +66,7 @@ from torch.utils.data import DataLoader
 from t2o.config import Config
 from t2o.data.dataset import TranslationBatch, TranslationPairDataset, collate_translation_batch
 from t2o.data.manifest import DatasetManifest
+from t2o.data.misalignment import load_derolled_calibration
 from t2o.engine.export import export_split, write_data_yaml
 from t2o.metrics.task import evaluate_detector
 from t2o.seeding import seed_worker
@@ -185,6 +186,9 @@ class Trainer:
             task_loss.to(self.device)
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
+        # Checked before any data is loaded: a tree not de-rolled by this constant would train
+        # cleanly and report a curve against the wrong boxes.
+        self.calibration = load_derolled_calibration(manifest, config.data.calibration)
         self.train_dataset = TranslationPairDataset(
             manifest.train_images,
             pairing=manifest.pairing,
@@ -202,6 +206,7 @@ class Trainer:
             subset_seed=config.data.subset_seed,
             # Train only. The val dataset below never takes it (design.md §5, invariant 2).
             misalignment_px=config.data.misalignment_px,
+            calibration=self.calibration,
         )
         # No augmentation on val -- matches Clean-SeAFusion. Val loss never touches
         # cls/bboxes, so annotation_fraction is irrelevant here and left at its default.
@@ -398,6 +403,8 @@ class Trainer:
             device=self.device,
             batch_size=self.config.train.batch_size,
             workers=self.config.runtime.workers,
+            # Scored on the same boxes the final export's val is (ADR-02).
+            thermal_labels=self.calibration is not None,
         )
         # Its `train:` points at nothing; ultralytics' val checks only `val:`.
         data_yaml = write_data_yaml(root, self.manifest)

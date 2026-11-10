@@ -22,7 +22,11 @@ from torch.utils.data import DataLoader
 from t2o.config import Config
 from t2o.data.dataset import TranslationPairDataset, collate_translation_batch
 from t2o.data.manifest import DatasetManifest
-from t2o.data.misalignment import Misalignment, misalign_label_lines
+from t2o.data.misalignment import (
+    Misalignment,
+    load_derolled_calibration,
+    misalign_label_lines,
+)
 from t2o.imaging import Normalize, to_uint8
 from t2o.translators.protocol import Translator
 
@@ -42,6 +46,7 @@ def export_split(
     batch_size: int = 8,
     workers: int = 0,
     misalignment_px: float = 0.0,
+    thermal_labels: bool = False,
 ) -> int:
     """Translate every pair in ``dataset`` into ``out_dir/{images,labels}``.
 
@@ -49,6 +54,10 @@ def export_split(
     (``DataConfig.misalignment_px``): the evaluation detector then fine-tunes on the boxes a
     misaligned rig would hand it, the same ones the translator trained against. The images are
     the translator's output from the thermal side, which nothing warps.
+
+    ``thermal_labels`` takes each label from the thermal side instead of the visible one: a
+    de-rolled run (``DataConfig.calibration``, ADR-02) trains in the thermal frame, so its
+    translations are scored against the de-rolled thermal boxes, not the rolled visible ones.
 
     Normalisation is per image, always (``t2o.imaging.to_uint8``). The original min-max
     normalised across the whole batch (``train.py:369``), so an exported pixel depended on
@@ -86,11 +95,12 @@ def export_split(
             array = to_uint8(image, normalize).permute(1, 2, 0).numpy()
             Image.fromarray(array, mode="RGB").save(images_dir / f"{stem}{EXPORT_SUFFIX}")
             destination = labels_dir / f"{stem}.txt"
+            source = _source_label(dataset, name, thermal_labels)
             if misalignment_px > 0:
                 misalignment = Misalignment(image.shape[-2], image.shape[-1], misalignment_px)
-                _misalign_label(dataset, name, destination, misalignment)
+                _misalign_label(source, destination, misalignment)
             else:
-                _mirror_label(dataset, name, destination)
+                _mirror_label(source, destination)
             written += 1
 
     translator.train(was_training)
@@ -98,27 +108,29 @@ def export_split(
     return written
 
 
-def _mirror_label(dataset: TranslationPairDataset, name: str, destination: Path) -> None:
-    """Copy the visible-side label verbatim.
+def _source_label(dataset: TranslationPairDataset, name: str, thermal_labels: bool) -> Path:
+    visible = dataset.images_dir / name
+    if thermal_labels:
+        return dataset.pairing.infrared_label_path(visible)
+    return dataset.pairing.label_path(visible)
+
+
+def _mirror_label(source: Path, destination: Path) -> None:
+    """Copy the source label verbatim.
 
     Copying rather than re-serialising the parsed tensors keeps the exported labels
     byte-identical to the source. Export applies no augmentation, so the geometry is
     unchanged and a copy is exactly right.
     """
-    source = dataset.pairing.label_path(dataset.images_dir / name)
     if source.exists():
         shutil.copyfile(source, destination)
     else:
         destination.write_text("")
 
 
-def _misalign_label(
-    dataset: TranslationPairDataset, name: str, destination: Path, misalignment: Misalignment
-) -> None:
-    """Write the visible-side label moved by ``misalignment``, as the training loop saw it."""
-    lines, _ = misalign_label_lines(
-        dataset.pairing.label_path(dataset.images_dir / name), misalignment
-    )
+def _misalign_label(source: Path, destination: Path, misalignment: Misalignment) -> None:
+    """Write the source label moved by ``misalignment``, as the training loop saw it."""
+    lines, _ = misalign_label_lines(source, misalignment)
     destination.write_text("\n".join(lines) + "\n" if lines else "")
 
 
@@ -135,6 +147,9 @@ def export_translated(
     """
     out_root = Path(out_root)
     manifest = manifest or DatasetManifest.load(config.data.manifest)
+    # Checked here too, not only in `Trainer`: `t2o export` reaches this without training, and
+    # the val labels it writes are the ones every reported number is scored against.
+    derolled = load_derolled_calibration(manifest, config.data.calibration) is not None
 
     for split, images_dir in (
         ("train", manifest.train_images),
@@ -166,6 +181,8 @@ def export_translated(
             # Train labels only: val is where every reported number is scored, against the
             # dataset's own boxes (design.md §5, invariant 2).
             misalignment_px=config.data.misalignment_px if split == "train" else 0.0,
+            # Both splits: a de-rolled run trains and is scored on the thermal-side boxes.
+            thermal_labels=derolled,
         )
 
     return write_data_yaml(out_root, manifest)

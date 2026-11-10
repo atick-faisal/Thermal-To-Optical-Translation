@@ -29,6 +29,7 @@ from PIL import Image
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from t2o.data.calibration import ResidualCalibration
 from t2o.data.labels import load_yolo_labels
 from t2o.data.misalignment import Misalignment, misalign_image, misalign_label_lines
 from t2o.data.pairing import IMAGE_SUFFIXES, Pairing
@@ -206,12 +207,18 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         max_images: int | None = None,
         subset_seed: int = 0,
         misalignment_px: float = 0.0,
+        calibration: ResidualCalibration | None = None,
     ) -> None:
         self.pairing = pairing or Pairing()
         # C2's registration-error axis (`DataConfig.misalignment_px`). Moves the visible image
         # *and* its boxes -- they are drawn on the visible frame, so on a misaligned rig they sit
         # wherever it does. Only ever set on a training split: val is the frozen scoring split.
         self.misalignment_px = misalignment_px
+        # `DataConfig.calibration` (ADR-02): de-rolls the visible image onto the thermal frame
+        # at every level, 0 px included, and reads the de-rolled thermal-side boxes instead of
+        # the visible ones. Training split only, like the level; the caller has already checked
+        # the labels were de-rolled by this constant (`misalignment.load_derolled_calibration`).
+        self.calibration = calibration
         self.hflip = hflip
         self.crop = crop
         self.augment_seed = augment_seed
@@ -249,6 +256,17 @@ class TranslationPairDataset(Dataset[TranslationSample]):
             len(self._annotated),
             f", visible side misaligned by {misalignment_px:g} px" if misalignment_px else "",
         )
+        if calibration is not None:
+            logger.info(
+                "%s: visible side de-rolled by calibration %s; boxes read from the thermal side",
+                self.images_dir,
+                calibration.digest(),
+            )
+
+    def _label_path(self, visible_path: Path) -> Path:
+        if self.calibration is not None:
+            return self.pairing.infrared_label_path(visible_path)
+        return self.pairing.label_path(visible_path)
 
     def _validate_class_ids(self, num_classes: int) -> None:
         """Refuse to start if any label names a class the manifest does not declare.
@@ -259,7 +277,7 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         """
         offenders: dict[int, str] = {}
         for visible_path in self.visible_paths:
-            cls, _ = load_yolo_labels(self.pairing.label_path(visible_path))
+            cls, _ = load_yolo_labels(self._label_path(visible_path))
             for value in cls.reshape(-1).tolist():
                 if not 0 <= int(value) < num_classes:
                     offenders.setdefault(int(value), visible_path.name)
@@ -311,15 +329,18 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         # Before crop and flip: the level is measured on the full frame, and augmenting a
         # misaligned pair is what a misaligned rig's training run does.
         misalignment = None
-        if self.misalignment_px > 0:
+        if self.misalignment_px > 0 or self.calibration is not None:
             misalignment = Misalignment(visible.shape[1], visible.shape[2], self.misalignment_px)
-            warped = misalign_image(visible.permute(1, 2, 0).numpy(), misalignment)
+            warped = misalign_image(
+                visible.permute(1, 2, 0).numpy(), misalignment, self.calibration
+            )
             visible = torch.from_numpy(np.ascontiguousarray(warped.transpose(2, 0, 1)))
 
-        label_path = self.pairing.label_path(visible_path)
+        label_path = self._label_path(visible_path)
         if visible_path not in self._annotated:
             cls, bboxes = torch.zeros(0, 1), torch.zeros(0, 4)
-        elif misalignment is not None:
+        elif misalignment is not None and misalignment.level_px > 0:
+            # Only the level moves boxes: de-rolled thermal-side ones already sit on its frame.
             cls, bboxes = _parse_label_lines(misalign_label_lines(label_path, misalignment)[0])
         else:
             cls, bboxes = load_yolo_labels(label_path)

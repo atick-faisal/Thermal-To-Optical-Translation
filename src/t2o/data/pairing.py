@@ -49,6 +49,10 @@ class Pairing:
             LABEL_SUFFIX
         )
 
+    def infrared_label_path(self, visible: Path) -> Path:
+        """The thermal-side label for this pair, e.g. FLIR's de-rolled mirrored boxes."""
+        return self.label_path(self.infrared_path(visible))
+
     def validate_pairs(self, visible_paths: Iterable[Path]) -> None:
         """Raise if any visible image lacks an infrared counterpart.
 
