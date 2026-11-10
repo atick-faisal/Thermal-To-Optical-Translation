@@ -252,8 +252,10 @@ Rows here do not come from `TASKS.md`; the sections above carry every open row i
       validation is the reporting split (`goal.md` Constraints). Source: `TASKS.md:788-793` at
       the tag.
 - [ ] C2's registration-error axis: how fast label transfer and translation each degrade as
-      alignment worsens. Required (`goal.md` C2, amended 2026-11-03); nothing in `src/` or
-      `scripts/` measures it yet.
+      alignment worsens. Required (`goal.md` C2, amended 2026-11-03). Built, not yet run:
+      `scripts/registration_sweep.py` (label transfer) and `data.misalignment_px` /
+      `data.calibration` (translation), planned in
+      [registration-axis](features/registration-axis/plan.md). Open until the runs are recorded.
 - [ ] C2's never-seen-visible comparison: label transfer with the visible detector trained on
       visible data the translator never saw. Optional — run if GPU time allows before January,
       otherwise stated as a limitation (`goal.md` C2).
