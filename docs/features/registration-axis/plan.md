@@ -69,12 +69,31 @@ a new one. Each level is a frozen dataclass plus a digest, following `calibratio
 thermal by the sister repo's registration. Every custom-set curve is therefore scored against
 boxes that already carry that error, so its "0 px" point is not truly zero. FLIR's measured
 residual is 5.90 px, with about 4-5 px of scatter that can't be removed (record 012:47-58).
+On the levels' own measure, mean corner displacement, FLIR's calibration reads 9.32 px; the
+5.90 px is per-pixel EPE. About 2.25 px of median per-pair scatter survives calibration, so
+FLIR's 0 px is not truly zero either.
+
+**FLIR's translation half (ADR-02).** Thermal-side boxes are
+`pairing.label_path(pairing.infrared_path(visible))`, the path `data/inner_split.py:96` already
+derives. The target warp is one homography, the level's composed with
+`calibration.visible_to_infrared()`, applied in one `warpPerspective` so the target is resampled
+once; at 0 px the export copies the thermal label byte for byte. Only the export reads val boxes
+(the trainer's val loss never touches them, `engine/trainer.py:208`), so the label switch lives in
+the train dataset and `engine/export.py`. The digest check reads both splits' `infrared/labels`
+with `read_label_provenance`, as `scripts/gate_table.py:229-256` does for val. The faithfulness
+metrics keep visible-side boxes; they are not on this curve.
 
 **Tests.** Synthetic `tmp_path_factory` pairs on CPU, as always: the warp moves boxes and
 pixels by the expected amount; level zero is the identity, byte for byte; the default config
 hash is unchanged; val is untouched; a tiny sweep runs end to end under the `slow` marker.
 
 ## Open Questions
+
+### Q6: Which boxes score FLIR's translation half at val, once its train targets are de-rolled?
+
+- [ ] De-rolled thermal-side labels, the ones the label-transfer half and the gate floor already use (recommended) — both halves are scored against the same val boxes, so 0 px means the calibrated alignment on both; costs a label-side switch in the export, and the new FLIR runs are not comparable with record 016's
+- [ ] Visible-side labels, as every translation run so far — no evaluation change, but a translator trained on de-rolled targets is then scored against boxes ~9.3 px away at every level, so the de-roll makes the curve worse, not cleaner
+- [ ] Drop the de-roll; train on rolled pairs with `e3f-loop-s0` as the zero point, as Q4 planned — no new code or run, but the real roll partly cancels the injected one (totals 9.3 / 7.6 / 7.1 / 9.6 / 19.1 px), so the curve is not against the stated levels
 
 ## Resolved
 
@@ -101,6 +120,8 @@ hash is unchanged; val is untouched; a tiny sweep runs end to end under the `slo
 - [x] From scratch, 1 seed per non-zero level, reusing the existing 3-seed aligned runs as the zero point (recommended) — clean, about 4 levels × 2 datasets × ~10 h ≈ 80 GPU-hours, about two days on both A100s; the single seed per level is disclosed
 - [ ] From scratch, 3 seeds per level — seed-stable at every point, but about 250 GPU-hours competes with the remaining paper runs before 2027-01-31
 - [ ] Fine-tune the existing aligned checkpoints on warped pairs — cheapest, but the starting weights already learned the aligned mapping, so it likely understates the degradation and confounds the curve
+
+> Superseded by ADR-02 (2026-11-10) for FLIR's zero point; the custom set still reuses its aligned runs
 
 ### Q5: Where is FLIR's C4 bracket built?
 
