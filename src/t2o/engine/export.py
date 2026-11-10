@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 from t2o.config import Config
 from t2o.data.dataset import TranslationPairDataset, collate_translation_batch
 from t2o.data.manifest import DatasetManifest
+from t2o.data.misalignment import Misalignment, misalign_label_lines
 from t2o.imaging import Normalize, to_uint8
 from t2o.translators.protocol import Translator
 
@@ -40,8 +41,14 @@ def export_split(
     device: torch.device | None = None,
     batch_size: int = 8,
     workers: int = 0,
+    misalignment_px: float = 0.0,
 ) -> int:
     """Translate every pair in ``dataset`` into ``out_dir/{images,labels}``.
+
+    ``misalignment_px`` moves the exported *labels* by that registration level
+    (``DataConfig.misalignment_px``): the evaluation detector then fine-tunes on the boxes a
+    misaligned rig would hand it, the same ones the translator trained against. The images are
+    the translator's output from the thermal side, which nothing warps.
 
     Normalisation is per image, always (``t2o.imaging.to_uint8``). The original min-max
     normalised across the whole batch (``train.py:369``), so an exported pixel depended on
@@ -78,7 +85,12 @@ def export_split(
             stem = Path(name).stem
             array = to_uint8(image, normalize).permute(1, 2, 0).numpy()
             Image.fromarray(array, mode="RGB").save(images_dir / f"{stem}{EXPORT_SUFFIX}")
-            _mirror_label(dataset, name, labels_dir / f"{stem}.txt")
+            destination = labels_dir / f"{stem}.txt"
+            if misalignment_px > 0:
+                misalignment = Misalignment(image.shape[-2], image.shape[-1], misalignment_px)
+                _misalign_label(dataset, name, destination, misalignment)
+            else:
+                _mirror_label(dataset, name, destination)
             written += 1
 
     translator.train(was_training)
@@ -98,6 +110,16 @@ def _mirror_label(dataset: TranslationPairDataset, name: str, destination: Path)
         shutil.copyfile(source, destination)
     else:
         destination.write_text("")
+
+
+def _misalign_label(
+    dataset: TranslationPairDataset, name: str, destination: Path, misalignment: Misalignment
+) -> None:
+    """Write the visible-side label moved by ``misalignment``, as the training loop saw it."""
+    lines, _ = misalign_label_lines(
+        dataset.pairing.label_path(dataset.images_dir / name), misalignment
+    )
+    destination.write_text("\n".join(lines) + "\n" if lines else "")
 
 
 def export_translated(
@@ -141,6 +163,9 @@ def export_translated(
             device=device,
             batch_size=config.detector.evaluation.batch,
             workers=config.runtime.workers,
+            # Train labels only: val is where every reported number is scored, against the
+            # dataset's own boxes (design.md §5, invariant 2).
+            misalignment_px=config.data.misalignment_px if split == "train" else 0.0,
         )
 
     return write_data_yaml(out_root, manifest)

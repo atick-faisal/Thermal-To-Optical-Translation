@@ -82,8 +82,16 @@ class RunConfigBase(ConfigBase):
         ``../Clean-SeAFusion/src/seafusion/engine/fusion_trainer.py:60``, which hashed
         everything and therefore warned on a renamed run.
         """
-        payload = self.model_dump(mode="json", exclude={"runtime"})
+        payload = self.model_dump(mode="json", exclude=self._hash_exclude())
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+    def _hash_exclude(self) -> dict[str, Any]:
+        """What :meth:`config_hash` leaves out, in pydantic's nested ``exclude`` form.
+
+        ``runtime`` always. A subclass adds a field that arrived after runs were hashed, while
+        it holds the value those runs implicitly had, so adding a knob orphans no checkpoint.
+        """
+        return {"runtime": True}
 
     def snapshot(self, run_dir: Path) -> Path:
         """Write the fully resolved config into the run directory, for reproducibility.

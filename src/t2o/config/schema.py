@@ -14,9 +14,10 @@ startup check in the engine layer.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 
@@ -75,12 +76,26 @@ class DataConfig(ConfigBase):
     # annotation_seed is: E3 sweeps train.seed across its six paired runs, and a corpus that
     # redrew with it would make corpus identity a second difference between the seeds.
     subset_seed: int = 0
+    # (float) C2's registration-error axis: px of corner-field misalignment injected into each
+    # *train* pair at load time, moving the visible target and its boxes together
+    # (t2o.data.misalignment). 0 is the dataset's own alignment, and is left out of
+    # config_hash() so every aligned run keeps its hash and stays the zero point. Measured on
+    # the native frame: the same number on a resized dataset is a different misalignment. Val
+    # is never warped -- a warped val would score every arm against moved boxes.
+    misalignment_px: float = 0.0
 
     @field_validator("annotation_fraction")
     @classmethod
     def _fraction_in_unit_range(cls, value: float) -> float:
         if not 0.0 < value <= 1.0:
             raise ValueError("must be in (0, 1]; 0 would leave nothing to train on")
+        return value
+
+    @field_validator("misalignment_px")
+    @classmethod
+    def _non_negative_finite(cls, value: float) -> float:
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("must be a finite, non-negative pixel count; 0 is no misalignment")
         return value
 
     @field_validator("max_train_images", "val_loss_images")
@@ -488,6 +503,17 @@ class Config(RunConfigBase):
     metrics: MetricsConfig = MetricsConfig()
     export: ExportConfig = ExportConfig()
     runtime: RuntimeConfig = RuntimeConfig()
+
+    def _hash_exclude(self) -> dict[str, Any]:
+        """Also drop `data.misalignment_px` while it is 0.
+
+        The field arrived after every aligned run was hashed. Hashing its default would give
+        each of those runs a new hash, and they would stop counting as the axis's zero point.
+        """
+        excluded = super()._hash_exclude()
+        if self.data.misalignment_px == 0:
+            excluded["data"] = {"misalignment_px": True}
+        return excluded
 
     def snapshot(self, run_dir: Path | None = None) -> Path:
         """Snapshot into `run_dir`, defaulting to this run's own `runtime.path`."""

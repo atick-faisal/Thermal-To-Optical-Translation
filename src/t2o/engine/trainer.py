@@ -200,6 +200,8 @@ class Trainer:
             # detector fine-tunes on exactly the corpus the translator was trained on.
             max_images=config.data.max_train_images,
             subset_seed=config.data.subset_seed,
+            # Train only. The val dataset below never takes it (design.md §5, invariant 2).
+            misalignment_px=config.data.misalignment_px,
         )
         # No augmentation on val -- matches Clean-SeAFusion. Val loss never touches
         # cls/bboxes, so annotation_fraction is irrelevant here and left at its default.
