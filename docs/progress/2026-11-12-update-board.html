@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thermal-to-Visible Research Board · 12 Nov 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@87,500;87,600;87,700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  color-scheme: light;
+  --paper: #f3f5f6;
+  --panel: #fbfcfc;
+  --ink: #15202a;
+  --ink-2: #44515d;
+  --muted: #6a7782;
+  --rule: #d9dee2;
+  --rule-soft: #e7ebee;
+  --accent: #1f5f8b;
+  --accent-soft: #e2edf4;
+
+  --s-thermal: #eb6834;
+  --s-translated: #1baf7a;
+  --s-visible: #2a78d6;
+  --s-loop: #4a3aa7;
+  --s-noloop: #727d87;
+
+  --ok: #1d7a46;      --ok-bg: #e0f1e6;
+  --run: #9a6200;     --run-bg: #fbeed2;
+  --plan: #56626c;    --plan-bg: #e8ecef;
+  --no: #a8412f;      --no-bg: #f6e3de;
+
+  --display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #12181d;
+    --panel: #192128;
+    --ink: #e8edf1;
+    --ink-2: #b9c3cb;
+    --muted: #8d99a3;
+    --rule: #2c3740;
+    --rule-soft: #222b33;
+    --accent: #7fb6de;
+    --accent-soft: #1d2d3a;
+    --s-thermal: #d95926;
+    --s-translated: #199e70;
+    --s-visible: #3987e5;
+    --s-loop: #a197f0;
+    --s-noloop: #727d87;
+    --ok: #6fcf97;   --ok-bg: #173325;
+    --run: #f0b54a;  --run-bg: #3a2c12;
+    --plan: #aab5be; --plan-bg: #252e36;
+    --no: #f0907c;   --no-bg: #3a211c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #12181d;
+  --panel: #192128;
+  --ink: #e8edf1;
+  --ink-2: #b9c3cb;
+  --muted: #8d99a3;
+  --rule: #2c3740;
+  --rule-soft: #222b33;
+  --accent: #7fb6de;
+  --accent-soft: #1d2d3a;
+  --s-thermal: #d95926;
+  --s-translated: #199e70;
+  --s-visible: #3987e5;
+  --s-loop: #a197f0;
+  --s-noloop: #727d87;
+  --ok: #6fcf97;   --ok-bg: #173325;
+  --run: #f0b54a;  --run-bg: #3a2c12;
+  --plan: #aab5be; --plan-bg: #252e36;
+  --no: #f0907c;   --no-bg: #3a211c;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.55;
+  padding-inline: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 40px 72px; }
+
+h1, h2, h3 { font-family: var(--display); font-stretch: 87%; text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(30px, 4.4vw, 46px); line-height: 1.08; font-weight: 700; }
+h2 { font-size: 28px; line-height: 1.15; font-weight: 700; }
+h3 { font-size: 20px; line-height: 1.25; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted);
+}
+.muted { color: var(--muted); }
+.note { font-size: 14.5px; color: var(--muted); max-width: 72ch; }
+a { color: var(--accent); }
+
+/* ---------- header ---------- */
+header.top { display: grid; gap: 16px; padding-bottom: 28px; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; }
+.question { font-size: 19px; color: var(--ink-2); max-width: 62ch; }
+.question em { font-style: italic; }
+.spectrum {
+  height: 6px; border-radius: 3px; margin-top: 4px;
+  background: linear-gradient(90deg, #000004 0%, #3b0f70 14%, #8c2981 28%, #de4968 42%, #fe9f6d 54%, #fcfdbf 62%, #cfe3ef 74%, #7fb3d5 86%, #2f6f9f 100%);
+}
+.spectrum-labels { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11.5px; color: var(--muted); letter-spacing: 0.04em; }
+.status-line {
+  margin-top: 6px; padding: 14px 18px; background: var(--accent-soft); border-radius: 8px;
+  font-size: 18px; max-width: none;
+}
+.status-line strong { font-weight: 600; }
+
+/* ---------- nav ---------- */
+nav.tabs {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--rule);
+  margin-inline: -20px; padding: 10px 20px;
+  overflow-x: auto;
+}
+nav.tabs ul { list-style: none; margin: 0 auto; padding: 0; display: flex; gap: 6px; max-width: 1080px; }
+nav.tabs a {
+  display: block; white-space: nowrap; text-decoration: none; color: var(--ink-2);
+  font-family: var(--display); font-stretch: 87%; font-weight: 600; font-size: 15px;
+  padding: 6px 12px; border-radius: 6px;
+}
+nav.tabs a:hover { background: var(--rule-soft); color: var(--ink); }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+section.block { padding-top: 56px; display: grid; gap: 22px; scroll-margin-top: 56px; }
+.section-head { display: grid; gap: 6px; }
+
+/* ---------- headline figures ---------- */
+.figures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; margin-top: 28px; }
+.figure { background: var(--panel); padding: 18px 18px 20px; display: grid; gap: 6px; align-content: start; }
+.figure .big { font-family: var(--display); font-stretch: 87%; font-weight: 700; font-size: 34px; line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.figure .big small { font-size: 18px; font-weight: 600; color: var(--muted); }
+.figure p { font-size: 15.5px; color: var(--ink-2); }
+.figure .tag { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+
+/* ---------- pipeline ---------- */
+.pipeline { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; overflow-x: auto; }
+.pipeline svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.pipeline text { font-family: var(--body); fill: var(--ink); }
+
+/* ---------- literature ---------- */
+.lit { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; }
+.lit-row { display: grid; grid-template-columns: 1.15fr 1fr 1.25fr 0.95fr; gap: 20px; padding: 16px 18px; border-top: 1px solid var(--rule-soft); align-items: start; }
+.lit-row:first-child { border-top: 0; }
+.lit-row p { font-size: 15px; color: var(--ink-2); }
+.lit-row p b { color: var(--ink); font-weight: 600; }
+.lit-head { padding-block: 10px; }
+.lit-head span { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.lit-area { display: grid; gap: 6px; }
+.lit-area b { font-family: var(--display); font-stretch: 87%; font-weight: 600; font-size: 17px; line-height: 1.25; }
+.refs { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.fills { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; font-size: 14.5px; color: var(--ink); }
+.c { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); padding: 1px 7px; border-radius: 5px; line-height: 1.5; align-self: start; }
+.contribs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.contribs div { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-content: start; padding-top: 12px; border-top: 2px solid var(--accent); }
+.contribs b { font-weight: 600; line-height: 1.3; }
+.contribs div > span:last-child { grid-column: 2; font-size: 14.5px; color: var(--muted); }
+
+/* ---------- board lanes ---------- */
+.lanes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
+.lane { display: grid; gap: 10px; }
+.lane-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; border-bottom: 2px solid var(--rule); }
+.lane-head h3 { font-size: 17px; }
+.lane-head .count { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.item { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; }
+.item b { font-weight: 600; line-height: 1.3; }
+.item span { font-size: 14.5px; color: var(--muted); line-height: 1.4; }
+.item.live { border-color: var(--run); box-shadow: 0 0 0 1px var(--run) inset; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; width: fit-content;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 99px; font-weight: 500;
+}
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip.ok { color: var(--ok); background: var(--ok-bg); }
+.chip.run { color: var(--run); background: var(--run-bg); }
+.chip.plan { color: var(--plan); background: var(--plan-bg); }
+.chip.no { color: var(--no); background: var(--no-bg); }
+.chip.run::before { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+/* ---------- findings ---------- */
+.finding { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 28px; padding-block: 28px; border-top: 1px solid var(--rule); }
+.finding:first-of-type { border-top: 0; padding-top: 4px; }
+.finding .text { display: grid; gap: 12px; align-content: start; }
+.finding .label { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+.meaning { border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; font-size: 16px; color: var(--ink-2); }
+.meaning b { color: var(--ink); font-weight: 600; }
+.caveat { font-size: 14.5px; color: var(--muted); }
+.caveat b { color: var(--ink-2); font-weight: 600; }
+.chart { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart svg text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+.chart svg .lbl { font-family: var(--body); font-size: 13px; fill: var(--ink-2); }
+.chart svg .val { fill: var(--ink); font-weight: 500; }
+.chart svg .grid { stroke: var(--rule-soft); stroke-width: 1; }
+.chart svg .axis { stroke: var(--rule); stroke-width: 1; }
+.chart svg .zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart-title { font-family: var(--display); font-stretch: 87%; font-weight: 600; font-size: 15px; color: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.legend i.line { height: 3px; border-radius: 2px; vertical-align: 3px; width: 18px; }
+.legend i.dash { background: repeating-linear-gradient(90deg, var(--s-noloop) 0 5px, transparent 5px 8px) !important; }
+
+details.data { font-size: 14px; }
+details.data summary { cursor: pointer; color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--rule-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; white-space: normal; }
+th { font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom-color: var(--rule); }
+td.num { font-family: var(--mono); font-size: 14px; }
+td.good { color: var(--ok); font-weight: 500; }
+.panel-table { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 6px 12px 10px; }
+
+.method-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px 28px; margin: 0; padding: 0; list-style: none; }
+.method-list li { display: grid; gap: 4px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.method-list li b { font-weight: 600; }
+.method-list li span { color: var(--ink-2); font-size: 15.5px; }
+
+/* ---------- now / next ---------- */
+.now-next { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.col { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; display: grid; gap: 16px; }
+.col-head { display: flex; align-items: center; gap: 10px; }
+.progress { display: grid; gap: 8px; }
+.runs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.runs div { height: 22px; border-radius: 4px; background: var(--rule-soft); border: 1px solid var(--rule); position: relative; overflow: hidden; }
+.runs div.done { background: var(--ok); border-color: var(--ok); }
+.runs div.part, .legend i.hatch { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--run) 45%, transparent) 0 4px, transparent 4px 8px), var(--rule-soft); border-color: color-mix(in srgb, var(--run) 50%, var(--rule)); }
+.runs div.part.near { background: color-mix(in srgb, var(--ok) 45%, transparent); border-color: var(--ok); }
+.runs-labels { display: grid; grid-template-columns: 70px 1fr; gap: 6px 10px; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.bullets { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.bullets li { display: grid; gap: 2px; padding-left: 16px; position: relative; }
+.bullets li::before { content: ""; position: absolute; left: 0; top: 0.62em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.bullets b { font-weight: 600; }
+.bullets span { font-size: 15.5px; color: var(--ink-2); }
+ol.sequence { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 0; }
+ol.sequence li { counter-increment: s; display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding-block: 10px; border-top: 1px solid var(--rule-soft); }
+ol.sequence li:first-child { border-top: 0; }
+ol.sequence li::before { content: counter(s); font-family: var(--mono); font-size: 13px; color: var(--accent); background: var(--accent-soft); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; margin-top: 1px; }
+ol.sequence b { font-weight: 600; display: block; line-height: 1.3; }
+ol.sequence span { font-size: 15px; color: var(--ink-2); }
+
+.readiness { display: grid; gap: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; }
+.crit { display: grid; grid-template-columns: 200px 110px 1fr; gap: 16px; align-items: center; padding: 14px 18px; border-top: 1px solid var(--rule-soft); }
+.crit:first-child { border-top: 0; }
+.crit b { font-family: var(--display); font-stretch: 87%; font-weight: 600; font-size: 17px; }
+.crit span.why { color: var(--ink-2); font-size: 15.5px; }
+
+footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--rule); display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; font-size: 14.5px; color: var(--ink-2); }
+footer h3 { font-size: 15px; margin-bottom: 4px; }
+
+.runs div.drop, .legend i.drop { background: var(--no-bg); border: 1px solid color-mix(in srgb, var(--no) 50%, var(--rule)); }
+.subblock { padding-top: 18px; border-top: 1px solid var(--rule); display: grid; gap: 14px; }
+.subblock .sub-head { display: flex; align-items: center; gap: 10px; }
+.subblock .sub-head h3 { font-size: 17px; }
+
+/* ---------- tooltip ---------- */
+#tip {
+  position: fixed; pointer-events: none; z-index: 20; background: var(--ink); color: var(--paper);
+  font-family: var(--mono); font-size: 12.5px; padding: 6px 9px; border-radius: 6px; white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 10px)); opacity: 0; transition: opacity 0.1s;
+}
+#tip.on { opacity: 1; }
+[data-tip] { cursor: default; }
+
+@media (max-width: 900px) {
+  .figures { grid-template-columns: repeat(2, 1fr); }
+  .lanes { grid-template-columns: 1fr; }
+  .finding { grid-template-columns: 1fr; gap: 18px; }
+  .now-next { grid-template-columns: 1fr; }
+  .crit { grid-template-columns: 1fr auto; }
+  .crit span.why { grid-column: 1 / -1; }
+  footer { grid-template-columns: 1fr; }
+  .method-list { grid-template-columns: 1fr; }
+  .lit-head { display: none; }
+  .lit-row { grid-template-columns: 1fr; gap: 8px; }
+  .lit-row > p:nth-of-type(1)::before { content: "What exists · "; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .lit-row > p:nth-of-type(2)::before { content: "What is missing · "; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .contribs { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 460px) {
+  .contribs { grid-template-columns: 1fr; }
+}
+@media (max-width: 460px) {
+  body { font-size: 16px; padding-inline: 16px; }
+  nav.tabs { margin-inline: -16px; padding-inline: 16px; }
+  .figures { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chip.run::before { animation: none; }
+  #tip { transition: none; }
+}
+
+/* ---------- additions for the 12 November board ---------- */
+.contribs b { font-size: 16px; }
+.lit-row.prior { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.lit-row .flag { font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent); }
+
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; }
+.timeline li { display: grid; grid-template-columns: 112px 22px 1fr; gap: 0 12px; padding: 12px 18px; border-top: 1px solid var(--rule-soft); align-items: start; }
+.timeline li:first-child { border-top: 0; }
+.timeline .when { font-family: var(--mono); font-size: 13px; color: var(--muted); padding-top: 2px; }
+.timeline .mark { width: 12px; height: 12px; border-radius: 50%; margin-top: 6px; background: var(--accent); }
+.timeline .mark.ok { background: var(--ok); }
+.timeline .mark.no { background: var(--no); }
+.timeline .mark.run { background: var(--run); }
+.timeline .mark.plan { background: var(--plan); }
+.timeline b { font-weight: 600; display: block; line-height: 1.3; }
+.timeline span.what { font-size: 15px; color: var(--ink-2); }
+.cite { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+
+.legend i.dot { border-radius: 50%; }
+.legend i.hollow { border-radius: 50%; background: transparent !important; box-shadow: inset 0 0 0 2px var(--s-noloop); }
+.legend i.diamond { width: 10px; height: 10px; border-radius: 1px; transform: rotate(45deg); background: var(--ink); margin-right: 8px; }
+.legend i.tick { width: 3px; height: 14px; border-radius: 1px; vertical-align: -2px; }
+.legend i.soft { opacity: 0.45; }
+
+.faith td .p { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.faith td.pass, .faith td.fail { white-space: nowrap; }
+.faith td.fail { color: var(--no); font-weight: 600; }
+.mini { font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+.mini.ok { color: var(--ok); background: var(--ok-bg); }
+.mini.no { color: var(--no); background: var(--no-bg); }
+
+.lane .group-label { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding-top: 8px; }
+.item.closed { border-color: color-mix(in srgb, var(--no) 45%, var(--rule)); }
+.item.later { background: transparent; border-style: dashed; }
+
+.side { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--no); border-radius: 10px; padding: 20px; display: grid; gap: 14px; }
+.side .figures { margin-top: 0; grid-template-columns: repeat(3, 1fr); }
+.side .figure { background: var(--paper); }
+
+.crit { grid-template-columns: 180px 150px 1fr; }
+
+@media (max-width: 900px) {
+  .timeline li { grid-template-columns: 1fr; gap: 4px; }
+  .timeline .mark { display: none; }
+  .side .figures { grid-template-columns: 1fr; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="meta-row">
+      <span class="eyebrow">Research update · 12 November 2026</span>
+      <span class="eyebrow">Covers 1 October – 12 November</span>
+      <span class="eyebrow">Power-line component inspection</span>
+    </div>
+    <h1>Thermal-to-visible translation with a detector in the training loop</h1>
+    <p class="question">When does a thermal→visible translator that stays faithful to the visible image, trained against a frozen visible detector, let visible-trained detectors work on thermal-only imagery better than direct thermal detection or registration-based label transfer — and does it do so <em>without inventing or erasing</em> safety-relevant components?</p>
+    <div>
+      <div class="spectrum" role="img" aria-label="Colour strip from a thermal colour map to daylight blue"></div>
+      <div class="spectrum-labels"><span>thermal frame</span><span>translated</span><span>visible frame</span></div>
+    </div>
+    <p class="status-line"><strong>Where we stand:</strong> the detection loop's gain now holds on <em>all three</em> datasets, and it survives scoring by a detector from a different family that never took part in training. All six success criteria are now measured: four are met, and two are reported with their limits. On our power-line set the loop beats ModTr, the closest published method, by a wide margin. On the public FLIR set ModTr beats us, and the loop only reaches raw-thermal accuracy there. The last required experiment, the <b>registration-error axis</b>, is running on the server now. The paper is going to <b>IEEE Transactions on Instrumentation and Measurement</b>, submitted by 31 January 2027.</p>
+
+    <div class="figures">
+      <div class="figure">
+        <span class="tag">Loop vs same translator without it</span>
+        <div class="big num">3 <small>of 3 datasets</small></div>
+        <p>Gain in detection accuracy (mAP@50): +0.051 on ours, +0.351 on FLIR, +0.167 on MSRS. On every dataset, all six seeds agree.</p>
+      </div>
+      <div class="figure">
+        <span class="tag">Transfer to an outside detector</span>
+        <div class="big num">85–99<small>%</small></div>
+        <p>Share of the gain that remains when RT-DETR, a detector family the loop never saw, does the scoring.</p>
+      </div>
+      <div class="figure">
+        <span class="tag">Against ModTr (ECCV 2024)</span>
+        <div class="big num">+13.8 <small>/ −8.6</small></div>
+        <p>mAP@50 points: well ahead on our power-line set, clearly behind on FLIR. Both are reported.</p>
+      </div>
+      <div class="figure">
+        <span class="tag">Hallucination audit</span>
+        <div class="big num">11 <small>of 12 tests</small></div>
+        <p>The loop does not invent or erase more objects than the translator without it. The one failure, on the diffusion translator, is reported as a failure.</p>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Sections">
+    <ul>
+      <li><a href="#literature">Literature &amp; gaps</a></li>
+      <li><a href="#directions">Directions</a></li>
+      <li><a href="#since">Since 1 October</a></li>
+      <li><a href="#findings">Key findings</a></li>
+      <li><a href="#cascade">Side quest</a></li>
+      <li><a href="#now">Now &amp; next</a></li>
+      <li><a href="#readiness">Paper readiness</a></li>
+    </ul>
+  </nav>
+
+  <!-- ================= LITERATURE ================= -->
+  <section class="block" id="literature">
+    <div class="section-head">
+      <span class="eyebrow">Literature review</span>
+      <h2>Six bodies of work meet here, and each leaves a gap</h2>
+      <p class="muted">Why this matters: a detector trained on visible photos almost completely fails on thermal images of the same scene. On our validation set it scores 0.19 mAP@50 on raw thermal against 0.92 on the real photo <span class="cite">F02</span>. Thermal images are also hard to label by hand, and some surveys exist only in thermal. Translation needs registered pairs once, for training. After that it needs only a thermal image.</p>
+      <p class="muted">Training a translator against a frozen detector is <b>not new</b>: HalluciDet and ModTr do it. We claim no "first". What remains open is whether a translator that stays <em>faithful to the visible image</em> can carry the detector loss, whether its gain transfers to other detectors, and <em>when</em> translation beats the alternatives.</p>
+    </div>
+
+    <div class="lit">
+      <div class="lit-row lit-head" aria-hidden="true">
+        <span>Area</span><span>What exists</span><span>What is missing</span><span>We fill it with</span>
+      </div>
+      <div class="lit-row prior">
+        <div class="lit-area"><span class="flag">Direct prior art</span><b>Translation trained against a frozen detector</b><span class="refs">HalluciDet (WACV 2024) · ModTr (ECCV 2024)</span></div>
+        <p>A translator is trained with a detector's loss alone, so a frozen visible detector can be reused on thermal images.</p>
+        <p>The outputs are <b>detector-friendly, not visible-faithful</b>: nothing ties them to the real photo. Neither reports an object-level audit of invented or erased components. We measured ModTr ourselves, and its images sit about twice as far from the visible photo as ours do <span class="cite">F202</span>.</p>
+        <div class="fills"><span class="c">C1</span><span>Image reconstruction plus a frozen detector's loss, on a GAN and on a one-step diffusion translator</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Thermal-to-visible translation, open loop</b><span class="refs">IR2VI / CycleGAN lineage · pix2pix · pix2pix-turbo · task-conditioned adaptation (ECCV 2020)</span></div>
+        <p>Thermal frames are translated so that detectors built for visible images can be reused.</p>
+        <p>The translator gets <b>no detector feedback</b>. It is judged by image-quality scores, or by detectors fine-tuned on its own output, and those two can rank methods in opposite order.</p>
+        <div class="fills"><span class="c">C1</span><span>Closed loop, scored zero-shot by independent judges outside the loop</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Detection-driven infrared–visible fusion</b><span class="refs">SeAFusion · DetFusion (ACM MM 2022) · TarDAL (CVPR 2022) · MetaFusion (CVPR 2023)</span></div>
+        <p>A detection or segmentation loss shapes the fused image. This shows that a task signal can guide image generation.</p>
+        <p>Every method needs <b>both cameras at inference time</b>, so none is a competitor for thermal-only input. TarDAL's released code never actually passes the detection gradient to its generator.</p>
+        <div class="fills"><span class="c">—</span><span>Context only; the fused-input setting is a non-goal</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>When translation pays</b><span class="refs">Registration-based label transfer · thermal-supervised detectors · annotation-budget studies</span></div>
+        <p>Each route — label a thermal detector directly, transfer labels from a registered photo, or translate — is evaluated on its own.</p>
+        <p>Nobody has <b>mapped when one beats another</b>: across how much room for improvement there is, how many labels you can afford, and how good the registration is.</p>
+        <div class="fills"><span class="c">C2</span><span>A map along three axes: headroom, annotation budget, registration error</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Faithfulness of generated images</b><span class="refs">PSNR · SSIM · LPIPS · FID/KID · Hallucination Index (MICCAI 2024)</span></div>
+        <p>Pixel and perceptual scores are standard. A hallucination index exists in medical imaging.</p>
+        <p>These scores <b>cannot say whether a component was invented or erased</b>. FID relies on ImageNet features and is unreliable on small sets.</p>
+        <div class="fills"><span class="c">C3</span><span>Object-level invented / erased-object audit, scored by a detector never in the loop</span></div>
+      </div>
+      <div class="lit-row">
+        <div class="lit-area"><b>Power-line inspection datasets</b><span class="refs">InsPLAD · TTPLA · CPLID · Yetgin &amp; Gerek · VITLD</span></div>
+        <p>Large visible-only datasets for asset detection. Yetgin &amp; Gerek is thermal and visible but unpaired, 128×128, with presence labels only. VITLD has ~400 registered pairs with conductor masks only.</p>
+        <p><b>No public set has registered thermal–visible pairs of power-line components with boxes.</b></p>
+        <div class="fills"><span class="c">C4</span><span>A testbed and protocol: 753 registered pairs, frozen splits, and a reference bracket for every dataset</span></div>
+      </div>
+    </div>
+
+    <div class="contribs">
+      <div><span class="c">C1</span><b>Visible-faithful detection-in-the-loop translation</b><span>Reconstruction plus a frozen detector's loss, on pix2pix and pix2pix-turbo. Builds on HalluciDet and ModTr.</span></div>
+      <div><span class="c">C2</span><b>A map of when translation pays</b><span>Headroom, annotation budget and registration error.</span></div>
+      <div><span class="c">C3</span><b>An object-level hallucination audit</b><span>Were components invented or erased?</span></div>
+      <div><span class="c">C4</span><b>A power-line testbed and protocol</b><span>Frozen splits, per-dataset reference bracket, and a public benchmark if the second set is labelled.</span></div>
+    </div>
+  </section>
+
+  <!-- ================= DIRECTIONS ================= -->
+  <section class="block" id="directions">
+    <div class="section-head">
+      <span class="eyebrow">Experimental directions</span>
+      <h2>The method, and where each line of inquiry stands</h2>
+      <p class="muted">A translator turns thermal frames into visible-looking images. During training, a frozen detector scores those images and its loss flows back into the translator. Separate judge detectors that never trained on anything we produce score every result.</p>
+    </div>
+
+    <div class="pipeline">
+      <svg viewBox="0 -44 940 254" role="img" aria-label="Pipeline: thermal frame into translator, visible-like image into frozen in-loop detector, detection loss fed back to translator; independent judge detectors score the output.">
+        <defs>
+          <linearGradient id="thermalG" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="#1b0c41"/><stop offset="0.45" stop-color="#bc3754"/><stop offset="0.8" stop-color="#f98e09"/><stop offset="1" stop-color="#fcffa4"/>
+          </linearGradient>
+          <linearGradient id="visG" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="#cfe3ef"/><stop offset="1" stop-color="#5b8fb9"/>
+          </linearGradient>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arrL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--s-loop)"/>
+          </marker>
+        </defs>
+        <rect x="10" y="40" width="120" height="90" rx="6" fill="url(#thermalG)"/>
+        <text x="70" y="152" text-anchor="middle" font-size="14" font-weight="600">Thermal frame</text>
+        <text x="70" y="170" text-anchor="middle" font-size="12" style="fill:var(--muted)">3 datasets</text>
+        <line x1="136" y1="85" x2="196" y2="85" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <rect x="200" y="45" width="170" height="80" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="285" y="80" text-anchor="middle" font-size="15" font-weight="600">Translator</text>
+        <text x="285" y="100" text-anchor="middle" font-size="12" style="fill:var(--ink-2)">GAN or one-step diffusion</text>
+        <line x1="376" y1="85" x2="436" y2="85" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <rect x="440" y="40" width="120" height="90" rx="6" fill="url(#visG)"/>
+        <text x="500" y="152" text-anchor="middle" font-size="14" font-weight="600">Visible-like image</text>
+        <line x1="566" y1="70" x2="646" y2="50" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="566" y1="105" x2="646" y2="150" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <rect x="650" y="20" width="180" height="58" rx="8" fill="var(--panel)" stroke="var(--s-loop)" stroke-width="1.5"/>
+        <text x="740" y="45" text-anchor="middle" font-size="14" font-weight="600">In-loop detector</text>
+        <text x="740" y="63" text-anchor="middle" font-size="12" style="fill:var(--ink-2)">frozen, guides training</text>
+        <rect x="650" y="122" width="180" height="58" rx="8" fill="var(--panel)" stroke="var(--rule)" stroke-width="1.5"/>
+        <text x="740" y="147" text-anchor="middle" font-size="14" font-weight="600">Two independent judges</text>
+        <text x="740" y="165" text-anchor="middle" font-size="12" style="fill:var(--ink-2)">YOLO11s and RT-DETR-l</text>
+        <text x="850" y="156" font-size="12" style="fill:var(--muted)">→ mAP, faithfulness</text>
+        <path d="M740,20 C740,-30 285,-30 285,40" fill="none" stroke="var(--s-loop)" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrL)"/>
+        <text x="512" y="-24" text-anchor="middle" font-size="13" font-weight="600" style="fill:var(--s-loop)">detection loss, weighted by λ</text>
+        <text x="285" y="200" text-anchor="middle" font-size="12" style="fill:var(--muted)">λ = 0 is the control: same translator, no loop</text>
+      </svg>
+    </div>
+
+    <div class="lanes">
+      <div class="lane">
+        <div class="lane-head"><h3>Answered</h3><span class="count">9</span></div>
+        <div class="item"><span class="chip ok">Done · Yes, 3 of 3</span><b>Does the loop cause a gain?</b><span>On our set, on FLIR and on MSRS, every one significance-tested over six paired seeds. It is repeated on the diffusion translator with three seeds.</span></div>
+        <div class="item"><span class="chip ok">Done · Yes</span><b>Does the gain transfer to other detectors?</b><span>RT-DETR, a different family, keeps 85–99% of it on every dataset.</span></div>
+        <div class="item"><span class="chip ok">Done · 11 of 12</span><b>Does the loop hallucinate?</b><span>No rate gets significantly worse anywhere. The diffusion translator's invented-object test fails its margin on a wide three-seed interval.</span></div>
+        <div class="item"><span class="chip ok">Done · ≈214 / ≈173</span><b>How many labels is translation worth?</b><span>With the loop, about 214 hand-labelled thermal images on our set and about 173 on MSRS's passive classes. Without it, ≈150 and ≈48.</span></div>
+        <div class="item"><span class="chip ok">Done · No</span><b>Can 153 images resolve a +2-point margin?</b><span>No: the 95% interval's half-width reaches 9.41 points. As goal.md specified in advance, Margin became a non-inferiority test against ModTr.</span></div>
+        <div class="item"><span class="chip ok">Done · Mixed</span><b>Do we beat ModTr?</b><span>Yes on our power-line set, by +13.8 and +15.1 points. No on FLIR, where we trail by 8.6.</span></div>
+        <div class="item closed"><span class="chip no">Closed · Negative</span><b>Can the loop beat a thermal-trained detector on thermally passive objects?</b><span>No. On MSRS it stays 0.20 below. We report it as part of the map and are not chasing it further.</span></div>
+        <div class="item closed"><span class="chip no">Closed · Gate failed</span><b>Can an off-the-shelf enhancer restore faint components?</b><span>The paper-2 side quest. It failed its pre-set gate, 2 of 14 tests, and is out of the January paper.</span></div>
+        <div class="item"><span class="chip ok">Done</span><b>Reference brackets</b><span>Visible ceiling and raw-thermal floor on all three datasets. Ours and MSRS also have thermal-trained references.</span></div>
+      </div>
+      <div class="lane">
+        <div class="lane-head"><h3>In progress</h3><span class="count">1</span></div>
+        <div class="item live"><span class="chip run">Running</span><b>How fast do label transfer and translation degrade as alignment worsens?</b><span>The registration-error axis, the last experiment goal.md requires. We inject known misalignment of 3–24 pixels into the training pairs and score on untouched validation images. Both GPUs are running it now. As a by-product it gives FLIR its missing thermal-trained reference.</span></div>
+      </div>
+      <div class="lane">
+        <div class="lane-head"><h3>Planned</h3><span class="count">5 + 5</span></div>
+        <span class="group-label">Before January</span>
+        <div class="item"><span class="chip plan">Planned</span><b>Uncertainty budget</b><span>For the headline measurement: spread across seeds, across validation images, and across judges. Built from existing runs, with no new GPU time.</span></div>
+        <div class="item"><span class="chip plan">Planned</span><b>Ground-truth quality ceiling</b><span>No-reference quality, sharpness and noise of the real visible photos against the translations, so that "the outputs are only as good as the targets" becomes a measurement.</span></div>
+        <div class="item"><span class="chip plan">Planned</span><b>Field check on thermal-only imagery</b><span>About 300 very-high-resolution thermal images that have no visible counterpart. They have no labels, so this is a figure, not a score.</span></div>
+        <div class="item"><span class="chip plan">Optional</span><b>Label transfer with never-seen visible data</b><span>Run if GPU time allows before January. Otherwise it is stated as a limitation.</span></div>
+        <div class="item"><span class="chip plan">Waiting</span><b>Second power-line set (Bangladesh)</b><span>About 2,500 pairs from two camera models. Nothing depends on it until it is labelled. If it is labelled, it becomes the public benchmark, with cross-camera and cross-country tests.</span></div>
+        <span class="group-label">On the roadmap, not needed for January</span>
+        <div class="item later"><b>Pretrain on public pairs</b><span>FLIR as a pretraining corpus, then fine-tune on ours.</span></div>
+        <div class="item later"><b>Multi-step diffusion arm</b><span>Exact against truncated gradients.</span></div>
+        <div class="item later"><b>Coupling comparison</b><span>Cascaded against bilevel training.</span></div>
+        <div class="item later"><b>Faithfulness stress tests</b><span>Push the loop past its calibrated strength.</span></div>
+        <div class="item later"><b>Wider baseline suite</b><span>ModTr now carries Margin. We cite HalluciDet rather than re-run it.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SINCE 1 OCTOBER ================= -->
+  <section class="block" id="since">
+    <div class="section-head">
+      <span class="eyebrow">Six weeks in one list</span>
+      <h2>What happened since the last update</h2>
+      <p class="muted">Fifteen recorded server experiments and two amendments to the project goal. Green: a question answered. Red: a negative result or a failed gate, recorded rather than dropped. Amber: running now.</p>
+    </div>
+    <ol class="timeline">
+      <li><span class="when">1 Oct</span><span class="mark ok"></span><div><b>FLIR twelve-run campaign finishes</b><span class="what">The loop beats its control by +0.351 mAP@50, but lands on the raw-thermal floor. <span class="cite">rec. 016</span></span></div></li>
+      <li><span class="when">7 Oct</span><span class="mark ok"></span><div><b>Third dataset opened: MSRS daytime</b><span class="what">It passes its feasibility gate with lots of room: +0.77 headroom, and two "passive" classes that thermal barely shows. <span class="cite">rec. 021–023</span></span></div></li>
+      <li><span class="when">15 Oct</span><span class="mark no"></span><div><b>MSRS campaign: the loop wins, the passive-class claim does not</b><span class="what">+0.167 over the control, but 0.204 below a thermal-trained detector. The claim is closed as negative. <span class="cite">rec. 024</span></span></div></li>
+      <li><span class="when">15 Oct</span><span class="mark ok"></span><div><b>MSRS annotation-budget sweep</b><span class="what">The loop is worth ≈173 labelled thermal images on the passive classes. <span class="cite">rec. 025</span></span></div></li>
+      <li><span class="when">19 Oct</span><span class="mark ok"></span><div><b>Outside judge: RT-DETR</b><span class="what">The gain holds under a detector family never used in the loop. Transfer is met. <span class="cite">rec. 026</span></span></div></li>
+      <li><span class="when">20 Oct</span><span class="mark no"></span><div><b>Margin gate: +2 points cannot be resolved on 153 images</b><span class="what">As goal.md specified in advance, Margin becomes non-inferiority to ModTr. <span class="cite">rec. 027</span></span></div></li>
+      <li><span class="when">22 Oct</span><span class="mark plan"></span><div><b>Goal: validation is the reporting split</b><span class="what">Our set has no held-out test split. The paper states this as a limitation.</span></div></li>
+      <li><span class="when">23–27 Oct</span><span class="mark ok"></span><div><b>ModTr reimplemented, calibrated and run on two datasets</b><span class="what">Non-inferior on ours with a wide lead. Not non-inferior on FLIR. <span class="cite">rec. 028–032</span></span></div></li>
+      <li><span class="when">28 Oct</span><span class="mark ok"></span><div><b>Faithfulness verdict: 11 of 12 tests pass</b><span class="what">The diffusion translator's invented-object rate fails, and we report it as a failure without retuning the margin. <span class="cite">rec. 033</span></span></div></li>
+      <li><span class="when">29 Oct · 3 Nov</span><span class="mark plan"></span><div><b>Goal amended: IEEE TIM, all six criteria reported pass or fail</b><span class="what">A failed criterion goes in as a characterised limit instead of holding up the draft. The registration-error axis is made required. The HalluciDet re-run and the M3FD dataset are dropped.</span></div></li>
+      <li><span class="when">3–8 Nov</span><span class="mark no"></span><div><b>Enhancer cascade gate fails</b><span class="what">0 of 234 erased components put back, and every rate gets worse. Out of the January paper. <span class="cite">rec. 034–035</span></span></div></li>
+      <li><span class="when">8–10 Nov</span><span class="mark ok"></span><div><b>Registration-error axis built and tested on the Mac</b><span class="what">Misalignment injection, label-transfer sweep, translation configs, and de-rolled FLIR targets.</span></div></li>
+      <li><span class="when">10–12 Nov</span><span class="mark run"></span><div><b>First launch crashed; restarted and running</b><span class="what">The server ran out of committed memory overnight. It is diagnosed, fixed and relaunched, and no finished work was lost. Details under Now &amp; next.</span></div></li>
+    </ol>
+  </section>
+
+  <!-- ================= FINDINGS ================= -->
+  <section class="block" id="findings">
+    <div class="section-head">
+      <span class="eyebrow">Key findings</span>
+      <h2>What the experiments have shown</h2>
+      <p class="note">Detection numbers are mAP@50 (0–1, higher is better), scored zero-shot on each dataset's validation split by an independently trained judge that never saw a translated image. Our set: 4 classes, 153 images. FLIR: car, person and bicycle, 1,013 images. MSRS: the two passive classes, car_stop and color_cone. Small grey codes (F35, rec. 024) point to the experiment ledger.</p>
+    </div>
+
+    <div>
+      <!-- F1 -->
+      <article class="finding">
+        <div class="text">
+          <span class="label">Finding 1 · consistency</span>
+          <h3>The loop's gain holds on all three datasets, but on public data translation only reaches thermal's own level</h3>
+          <p>On every dataset, the translator trained with the loop beats the same translator trained without it, and all six paired seeds agree each time (p = 0.031, the smallest value six seeds can give): <span class="num">+0.051</span> on ours <span class="cite">F35</span>, <span class="num">+0.351</span> on FLIR <span class="cite">F136</span>, <span class="num">+0.167</span> on MSRS <span class="cite">F168</span>.</p>
+          <p><b>The negative half:</b> on FLIR, the loop lands <i>on</i> the raw-thermal floor (0.4415 against 0.4499) <span class="cite">F137</span>. On MSRS it stays <span class="num">0.204</span> below a detector trained on thermal labels <span class="cite">F169</span>. That gap is not specific to the passive classes; the loop is below it on every class <span class="cite">F170</span>. We closed the passive-class claim as negative on 15 October.</p>
+          <p class="meaning"><b>What this means:</b> the loop prevents a loss that plain translation incurs, and that holds everywhere. "Translation beats raw thermal" depends on the dataset. It does on ours, where components are nearly invisible in thermal. On FLIR's cars and people, which are already visible in thermal, it does not. goal.md treats this as a reported outcome, not a criterion.</p>
+          <p class="caveat"><b>Caveat:</b> on FLIR the no-loop translator collapses on 7 of 24 stage checkpoints and the loop on none <span class="cite">F139</span>. Part of the FLIR gain is the loop keeping training stable.</p>
+        </div>
+        <div class="chart">
+          <div class="chart-title">mAP@50 at the final stage, mean of six seeds, with each dataset's reference bracket</div>
+          <div class="legend">
+            <span><i class="tick" style="background:var(--s-thermal)"></i>Raw thermal (floor)</span>
+            <span><i class="hollow"></i>Translated, no loop</span>
+            <span><i class="dot" style="background:var(--s-loop)"></i>Translated, with loop</span>
+            <span><i class="diamond"></i>Thermal-trained detector</span>
+            <span><i class="tick" style="background:var(--s-visible)"></i>Real visible (ceiling)</span>
+          </div>
+          <div id="chart-bracket"></div>
+          <details class="data"><summary>Show numbers</summary>
+            <div class="tbl-wrap"><table>
+              <thead><tr><th>Dataset</th><th>Raw thermal</th><th>No loop</th><th>With loop</th><th>Thermal-trained</th><th>Real visible</th></tr></thead>
+              <tbody>
+                <tr><td>Our power-line set</td><td class="num">0.1552</td><td class="num">0.7975</td><td class="num good">0.8487</td><td class="num">0.9300</td><td class="num">0.9366</td></tr>
+                <tr><td>FLIR (3 classes)</td><td class="num">0.4499</td><td class="num">0.0902</td><td class="num good">0.4415</td><td class="num muted">running</td><td class="num">0.6566</td></tr>
+                <tr><td>MSRS day (passive)</td><td class="num">0.0526</td><td class="num">0.1920</td><td class="num good">0.3592</td><td class="num">0.5628</td><td class="num">0.8251</td></tr>
+              </tbody>
+            </table></div>
+            <p class="caveat">Thermal-trained on our set is a YOLO11n trained on all 600 labelled thermal images <span class="cite">F82</span>. FLIR's comes out of the registration sweep now running.</p>
+          </details>
+        </div>
+      </article>
+
+      <!-- F2 -->
+      <article class="finding">
+        <div class="text">
+          <span class="label">Finding 2 · transfer</span>
+          <h3>A detector from a different family confirms the gain</h3>
+          <p>Every result above was scored by a YOLO11s judge. YOLO is the same family as the detector inside the loop, so the gain might in principle be a YOLO-specific trick. We trained a second judge from a different family, <b>RT-DETR-l</b>, on visible images only, and re-scored every final-stage export.</p>
+          <p>The gain holds in every campaign and keeps <span class="num">85–99%</span> of its size <span class="cite">F182</span>. It is significant on our GAN, FLIR and MSRS campaigns (p = 0.031). The diffusion translator has three seeds, so all three agree but cannot reach significance (p = 0.25).</p>
+          <p class="meaning"><b>What this means:</b> Transfer, one of the six criteria, is met. The loop teaches the translator something any detector can read, not a quirk of the one it trained with.</p>
+          <p class="caveat"><b>Caveat:</b> FLIR's RT-DETR judge is its epoch-1 checkpoint. Its training went unstable at epoch 47 and never recovered <span class="cite">F187</span>.</p>
+        </div>
+        <div class="chart">
+          <div class="chart-title">Gain from the loop (loop − no loop, mAP@50) under each judge</div>
+          <div class="legend">
+            <span><i class="soft" style="background:var(--s-loop)"></i>YOLO11s judge (same family as the loop)</span>
+            <span><i style="background:var(--s-loop)"></i>RT-DETR-l judge (outside the loop)</span>
+          </div>
+          <div id="chart-transfer"></div>
+        </div>
+      </article>
+
+      <!-- F3 -->
+      <article class="finding">
+        <div class="text">
+          <span class="label">Finding 3 · margin</span>
+          <h3>Against ModTr: far ahead on our data, clearly behind on FLIR</h3>
+          <p><b>First, a null about our own instrument.</b> The original criterion asked for +2 mAP@50 over the strongest baseline with a 95% interval excluding zero. Bootstrapping 100 of the 153 validation images, the interval's half-width reaches <span class="num">9.41</span> points, nearly five times the bar, and even the loop against its own control is at least 3.03 <span class="cite">F189 F190</span>. As goal.md specified in advance, Margin became <b>non-inferiority to ModTr</b>, with a 5-point margin fixed before scoring.</p>
+          <p>On our set the loop clears ModTr by <span class="num">+13.8</span> (GAN) and <span class="num">+15.1</span> (diffusion) <span class="cite">F200</span>. On FLIR it trails by <span class="num">8.6</span> on the 3-class primary, with the whole interval past the margin <span class="cite">F210</span>.</p>
+          <p class="meaning"><b>What this means:</b> on FLIR, ModTr is the best zero-shot translator we measured <span class="cite">F207</span>, and its images are the furthest from the real photo (LPIPS 0.77 against our 0.42) <span class="cite">F208</span>. There, being detector-friendly and being visible-faithful pull apart. Our method chooses faithfulness, and the paper will report the cost on FLIR as a characterised limit.</p>
+          <p class="caveat"><b>Caveat:</b> the ModTr we reimplemented is weaker on our set than our own no-loop translator (0.7121 against 0.8084) <span class="cite">F201</span>. So on our data, the stronger evidence is still loop against no-loop.</p>
+        </div>
+        <div class="chart">
+          <div class="chart-title">Loop − ModTr, mAP@50 points, 95% interval over validation images</div>
+          <div id="chart-margin"></div>
+          <p class="caveat">An interval wholly to the right of −5 means non-inferior. The FLIR all-class row excludes zero but its upper end (−3.65) is above −5. The 3-class primary, fixed in advance as FLIR's headline, lies entirely below −5.</p>
+        </div>
+      </article>
+
+      <!-- F4 -->
+      <article class="finding">
+        <div class="text">
+          <span class="label">Finding 4 · annotation budget</span>
+          <h3>With the loop, translation is worth about 170–215 hand-labelled thermal images</h3>
+          <p>We trained thermal detectors on growing numbers of labelled thermal images and found where they catch up with translation, which uses no thermal labels at all.</p>
+          <p>On our set, translation without the loop matches <span class="num">≈150</span> labelled images, and with the loop <span class="num">≈214</span> <span class="cite">F81</span>. On MSRS's passive classes the loop matters more. Without it translation is worth only <span class="num">≈48</span> images. With it, it is worth <span class="num">≈173</span>, turning 9% of the training split into 32% <span class="cite">F178 F179</span>.</p>
+          <p class="meaning"><b>What this means:</b> this is the annotation axis of the "when does translation pay" map. Translation is worth it when thermal labels are scarce, which is the situation with thermal-only survey footage.</p>
+          <p class="caveat"><b>Conceded:</b> with all 600 labels, a thermal-trained detector wins (0.9300 against the loop's 0.8487) <span class="cite">F82</span>. goal.md lists beating fully supervised thermal detection as a non-goal.</p>
+        </div>
+        <div class="chart">
+          <div class="chart-title">Labelled thermal images a thermal-trained detector needs to match translation</div>
+          <div class="legend">
+            <span><i style="background:var(--s-noloop)"></i>Translation, no loop</span>
+            <span><i style="background:var(--s-loop)"></i>Translation, with loop</span>
+          </div>
+          <div id="chart-budget"></div>
+          <p class="caveat">The pale track is the whole training split. Whiskers show the interval where one was measured. ≈214 on our set has no interval in the record.</p>
+        </div>
+      </article>
+
+      <!-- F5 -->
+      <article class="finding">
+        <div class="text">
+          <span class="label">Finding 5 · faithfulness</span>
+          <h3>The loop does not buy detections by inventing objects, with one failed test</h3>
+          <p>The risk with any detector-in-the-loop method is that the translator paints fake components to please the detector. Before scoring, we fixed a margin for each rate in each campaign, equal to the no-loop arm's seed-to-seed spread. A test passes when the 95% interval for loop − no-loop stays inside that margin. The scoring detector is RT-DETR, which was never in the loop.</p>
+          <p><b>11 of 12 pass</b> <span class="cite">F213</span>. On FLIR and MSRS every rate moves in the loop's favour. The failure is the <b>diffusion translator's invented-object rate</b>. Its average change is +0.004, well inside the margin, but with three seeds the interval reaches +0.054, past the margin of 0.032. We report it as a failure. We did not retune the margin or add seeds afterwards.</p>
+          <p class="caveat"><b>Disclosed in the paper:</b> with no held-out split, the margins come from the same validation data they are scored on. Our GAN's invented-object pass also crosses zero (p = 0.156). That shows no difference, not proven equivalence.</p>
+        </div>
+        <div class="chart">
+          <div class="chart-title">Change with the loop (loop − no loop), final stage, RT-DETR judge</div>
+          <div class="panel-table tbl-wrap">
+            <table class="faith">
+              <thead><tr><th>Campaign · seeds</th><th>Invented<br><span class="muted">lower is better</span></th><th>Erased<br><span class="muted">lower is better</span></th><th>Agreement<br><span class="muted">higher is better</span></th></tr></thead>
+              <tbody>
+                <tr><td>Ours · GAN · 6</td><td class="num pass">−0.018<span class="mini ok">pass</span></td><td class="num pass">−0.030<span class="mini ok">pass</span></td><td class="num pass">+0.031<span class="mini ok">pass</span></td></tr>
+                <tr><td>Ours · diffusion · 3</td><td class="num fail">+0.004<span class="mini no">fail</span></td><td class="num pass">−0.017<span class="mini ok">pass</span></td><td class="num pass">+0.027<span class="mini ok">pass</span></td></tr>
+                <tr><td>FLIR · GAN · 6</td><td class="num pass">−0.149<span class="mini ok">pass</span></td><td class="num pass">−0.336<span class="mini ok">pass</span></td><td class="num pass">+0.200<span class="mini ok">pass</span></td></tr>
+                <tr><td>MSRS · GAN · 6</td><td class="num pass">−0.099<span class="mini ok">pass</span></td><td class="num pass">−0.131<span class="mini ok">pass</span></td><td class="num pass">+0.100<span class="mini ok">pass</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="caveat">Invented: share of detections with no real object. Erased: share of real components the judge cannot find. Agreement: overlap with the judge's detections on the real visible photo. On our set ModTr is the least faithful arm. On FLIR it is the most faithful (point estimates, no interval) <span class="cite">F214 F215</span>.</p>
+        </div>
+      </article>
+
+      <!-- F6 -->
+      <article class="finding" style="grid-template-columns: 1fr;">
+        <div class="text">
+          <span class="label">Finding 6 · methodology</span>
+          <h3>Lessons from these six weeks that hold regardless of the headline</h3>
+        </div>
+        <ul class="method-list">
+          <li><b>A +2-point claim needs more images than any of our splits has.</b><span>On our validation split one seed's interval reaches a half-width of 9.41 points, and the spread between seeds is as large as one seed's image noise <span class="cite">F189 F192</span>. A one-seed interval would understate the uncertainty, so every margin test averages over seeds.</span></li>
+          <li><b>A judge's best checkpoint can be its first.</b><span>FLIR's RT-DETR peaked at epoch 1, drifted down, then hit numerical failure at epoch 47 and never recovered <span class="cite">F187</span>. We would have missed it without reading every epoch.</span></li>
+          <li><b>Some detectors cannot be made bit-reproducible.</b><span>Same command, seed and GPU: RT-DETR gave 0.6798 against 0.6468 after 3 epochs, because one of its GPU operations has no deterministic version <span class="cite">F188</span>.</span></li>
+          <li><b>Absolute hallucination rates belong to the judge.</b><span>On the same FLIR images, RT-DETR's invented-object rate is 3.3× YOLO's <span class="cite">F185</span>. We compare only paired loop − no-loop differences under one judge, never raw rates across judges.</span></li>
+          <li><b>Calibrate a baseline's budget before running it, and say when the trigger is noise.</b><span>ModTr's training length was fixed by a calibration run we specified in advance: 400 epochs on ours, 339 on FLIR. FLIR's stopping rule fired inside the curve's own noise, and we say so <span class="cite">F193 F196 F197</span>.</span></li>
+          <li><b>A shared server needs memory budgeting, not only GPU budgeting.</b><span>The 10 November crash was the machine's total memory commitment, not the GPUs: every data-loader worker on Windows reserves about 2 GB.</span></li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= CASCADE ================= -->
+  <section class="block" id="cascade">
+    <div class="section-head">
+      <span class="eyebrow">Side quest · paper 2</span>
+      <h2>The enhancer cascade failed its gate, and stays out of the January paper</h2>
+    </div>
+    <div class="side">
+      <p><b>The idea:</b> run a second-stage enhancer on the loop's output to restore faint components, such as fuses and switches, that the translator loses. We used PiSA-SR, a diffusion super-resolution model, as it comes, with no extra training. The risk is that an enhancer <em>invents</em> components. So before the first score we fixed a gate of 14 tests, to be passed by 10 January 2027.</p>
+      <p><b>The test:</b> we erased 234 fuses and switches from the validation images and asked whether the cascade puts them back without making anything else worse.</p>
+      <div class="figures">
+        <div class="figure"><span class="tag">Erased components restored</span><div class="big num">0 <small>of 234</small></div><p>On all nine runs, by the translator alone and with the enhancer added <span class="cite">F217 F220</span>.</p></div>
+        <div class="figure"><span class="tag">Gate tests passed</span><div class="big num">2 <small>of 14</small></div><p>Only the two "puts nothing back" tests pass. All 12 rate tests fail, each by at least twice its margin <span class="cite">F220</span>.</p></div>
+        <div class="figure"><span class="tag">Missed components</span><div class="big num">+55<small>% / +52%</small></div><p>Pooled, on the GAN and diffusion runs. The enhancer misses more fuses and switches on all 18 seed pairs, from a mean pixel change of only 0.033 <span class="cite">F221</span>.</p></div>
+      </div>
+      <p class="meaning"><b>What this means:</b> a zero-shot enhancer does not restore faint components. It erases more of them. goal.md admits the cascade into this paper only if it passes its gate, so it stays out. Paper 2 continues separately.</p>
+    </div>
+  </section>
+
+  <!-- ================= NOW / NEXT ================= -->
+  <section class="block" id="now">
+    <div class="section-head">
+      <span class="eyebrow">Current work and roadmap</span>
+      <h2>Now and next</h2>
+    </div>
+
+    <div class="now-next">
+      <div class="col">
+        <div class="col-head"><span class="chip run">Now</span><h3>The registration-error axis</h3></div>
+        <p>Label transfer — drawing boxes on the visible photo and moving them onto the thermal image — is only as good as the registration between the two cameras. Translation needs registered pairs only once, to train. goal.md requires us to measure <b>how fast each route degrades as alignment worsens</b>. We add a known misalignment of 3, 6, 12 or 24 pixels to the training pairs, and score every level on validation images that are left untouched.</p>
+        <div class="panel-table tbl-wrap">
+          <table>
+            <thead><tr><th>Job</th><th>GPU</th><th>Runs</th><th>Est. each</th></tr></thead>
+            <tbody>
+              <tr><td>Label transfer · ours · 0–24 px</td><td class="num">0</td><td class="num">5 levels × 3 seeds</td><td class="num">~2.5 h total</td></tr>
+              <tr><td>Translation · ours · 3–24 px</td><td class="num">0</td><td class="num">4</td><td class="num">~10 h</td></tr>
+              <tr><td>Translation · FLIR · 24 px</td><td class="num">0</td><td class="num">1</td><td class="num">~10.5 h</td></tr>
+              <tr><td>Translation · FLIR · 0 px (corrected alignment)</td><td class="num">1</td><td class="num">1</td><td class="num">~10.5 h</td></tr>
+              <tr><td>Label transfer · FLIR · 0–24 px</td><td class="num">1</td><td class="num">5 levels × 3 seeds</td><td class="num">~21 h total</td></tr>
+              <tr><td>Translation · FLIR · 3–12 px</td><td class="num">1</td><td class="num">3</td><td class="num">~10.5 h</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="bullets">
+          <li><b>The first launch crashed, and nothing was lost</b><span>On the night of 10 November both jobs hung. The server had reached its memory commit limit (RAM plus page file): about 100 GB was held by another account's idle notebooks and about 26 GB by our data-loader workers. The notebooks are now closed, our worker count is halved, and the translation run resumed from its epoch-20 checkpoint. Worker count does not change any result.</span></li>
+          <li><b>FLIR's missing reference comes out of this sweep</b><span>The FLIR detector trained on labels at 0 px misalignment is both FLIR's thermal-trained reference and its label-transfer reference. It completes FLIR's reference bracket (C4).</span></li>
+          <li><b>A disclosure we will carry into the paper</b><span>Our set's validation boxes were themselves moved onto thermal by registration, so its "0 px" point already carries some alignment error. FLIR's error was measured and corrected.</span></li>
+        </ul>
+      </div>
+
+      <div class="col">
+        <div class="col-head"><span class="chip plan">Next</span><h3>Roadmap to the paper</h3></div>
+        <ol class="sequence">
+          <li><div><b>Record the registration axis</b><span>Build the degradation report — two curves per dataset, label transfer and translation, against misalignment in pixels — and log it. This closes C2, the last required experiment.</span></div></li>
+          <li><div><b>Uncertainty budget</b><span>Seeds, image bootstrap and judge spread for the headline measurement, framed for an instrumentation journal. No new GPU time.</span></div></li>
+          <li><div><b>Ground-truth quality ceiling and field check</b><span>Measure the quality of the real visible photos, and translate the ~300 thermal-only images for a qualitative figure.</span></div></li>
+          <li><div><b>Optional: never-seen visible data</b><span>Only if GPU time remains. Otherwise it is a stated limitation.</span></div></li>
+          <li><div><b>Draft for IEEE TIM</b><span>Framed as a characterised measurement procedure. Submission by 31 January 2027. If TIM rejects it without review, it goes to Engineering Applications of AI the same week.</span></div></li>
+        </ol>
+        <p class="note">From the company's side, the one open dependency is the <b>second power-line set</b> (Bangladesh, about 2,500 pairs). No January task waits on it. If it is labelled, it becomes the public power-line benchmark, with cross-camera and cross-country tests.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= READINESS ================= -->
+  <section class="block" id="readiness">
+    <div class="section-head">
+      <span class="eyebrow">Towards the paper</span>
+      <h2>Readiness against the six success criteria</h2>
+      <p class="muted">The rule changed on 29 October. Every criterion is measured and <b>reported, passed or not</b>, and drafting no longer waits for all six to hold. A criterion that fails goes into the paper as a characterised limit, with its numbers. <b>All six are now measured: four are met, and two are reported with mixed results.</b></p>
+    </div>
+    <div class="readiness">
+      <div class="crit"><b>Margin</b><span class="chip run">Reported · mixed</span><span class="why">+2 points is not resolvable on our validation images (half-width up to 9.41), so as goal.md specified it becomes non-inferiority to ModTr. Passes on our set (+13.8 GAN, +15.1 diffusion). Fails on FLIR (−8.6).</span></div>
+      <div class="crit"><b>Transfer</b><span class="chip ok">Met</span><span class="why">RT-DETR, never in the loop, keeps 85–99% of the gain in every campaign. Significant on three, with every seed agreeing on the fourth.</span></div>
+      <div class="crit"><b>Consistency</b><span class="chip ok">Met · 3 of 3</span><span class="why">The loop beats its no-loop control on our set, FLIR and MSRS (two required).</span></div>
+      <div class="crit"><b>Causality</b><span class="chip ok">Met</span><span class="why">The loop-strength ablation shows the loop drives the gain at the calibrated dose, and it repeats on the diffusion translator.</span></div>
+      <div class="crit"><b>Stability</b><span class="chip ok">Met · GAN</span><span class="why">Six paired seeds, exact sign-flip tests, on three datasets. The diffusion translator's three seeds agree but cannot reach significance.</span></div>
+      <div class="crit"><b>Faithfulness</b><span class="chip run">Reported · 11 of 12</span><span class="why">No rate significantly worse anywhere. The diffusion translator's invented-object test fails on a wide three-seed interval, and we report it as a failure.</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <div>
+      <h3>Datasets</h3>
+      <b>Ours:</b> 753 registered thermal/visible pairs from Brazil, 640×480, split 600 train / 153 validation, with 4 classes (Fuse, Pole, Switch, Transformer). There is no held-out test split, so validation is the reporting split, as on every public set. The data is never released. <b>FLIR-aligned:</b> a matched 600-pair training subset, 1,013 validation. <b>MSRS daytime:</b> 536 / 179.
+    </div>
+    <div>
+      <h3>How results are scored</h3>
+      One shared evaluation path for every method. Headline accuracy comes from judges that never train on anything this project produces: YOLO11s, and RT-DETR-l as the outside family. Significance uses exact paired sign-flip tests across seeds, never a bootstrap interval alone.
+    </div>
+    <div>
+      <h3>Reading the metrics</h3>
+      <b>mAP@50</b>: detection accuracy, 0–1, higher is better. A <b>point</b> is 0.01 mAP@50. <b>LPIPS</b>: perceptual distance to the real visible image, lower is better. <b>Seed</b>: one independent training run. <b>p = 0.031</b>: the strongest result six seeds can give.
+    </div>
+  </footer>
+</div>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+(function () {
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function txt(parent, x, y, s, attrs) {
+    var t = el("text", Object.assign({ x: x, y: y }, attrs || {}), parent);
+    t.textContent = s;
+    return t;
+  }
+  function svgIn(id, W, H, aria) {
+    return el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": aria }, document.getElementById(id));
+  }
+  function signed(v, d) { return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d); }
+
+  /* Horizontal bar, square at the baseline, rounded at the data end. */
+  function hbarPath(x, y, w, h, r) {
+    r = Math.min(r, h / 2, w);
+    return "M" + x + "," + y + "H" + (x + w - r) + "Q" + (x + w) + "," + y + " " + (x + w) + "," + (y + r) +
+      "V" + (y + h - r) + "Q" + (x + w) + "," + (y + h) + " " + (x + w - r) + "," + (y + h) + "H" + x + "Z";
+  }
+  function hit(svg, cx, cy, tip) { el("circle", { cx: cx, cy: cy, r: 12, fill: "transparent", "data-tip": tip }, svg); }
+
+  /* ---- Finding 1: per-dataset bracket, dot plot on one 0–1 axis ---- */
+  (function () {
+    var rows = [
+      { name: "Our power-line set · 4 classes", floor: 0.1552, control: 0.7975, loop: 0.8487, thermal: 0.9300, ceiling: 0.9366 },
+      { name: "FLIR · car, person, bicycle", floor: 0.4499, control: 0.0902, loop: 0.4415, thermal: null, ceiling: 0.6566 },
+      { name: "MSRS day · passive classes", floor: 0.0526, control: 0.1920, loop: 0.3592, thermal: 0.5628, ceiling: 0.8251 }
+    ];
+    var W = 620, rowH = 84, m = { l: 12, r: 16, t: 6, b: 30 }, H = m.t + rows.length * rowH + m.b;
+    var svg = svgIn("chart-bracket", W, H, "Dot plot of final-stage mAP@50 per dataset: raw-thermal floor, no-loop and loop translators, thermal-trained detector and visible ceiling");
+    var pw = W - m.l - m.r;
+    function x(v) { return m.l + pw * v; }
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (t) {
+      el("line", { x1: x(t), x2: x(t), y1: m.t, y2: H - m.b, class: "grid" }, svg);
+      txt(svg, x(t), H - 10, t.toFixed(2), { "text-anchor": t === 0 ? "start" : t === 1 ? "end" : "middle" });
+    });
+    rows.forEach(function (r, i) {
+      var y0 = m.t + i * rowH, cy = y0 + 50;
+      txt(svg, m.l, y0 + 18, r.name, { class: "lbl" });
+      el("line", { x1: x(0), x2: x(1), y1: cy, y2: cy, class: "axis" }, svg);
+      // floor and ceiling as reference ticks
+      [["floor", "var(--s-thermal)", "Raw thermal"], ["ceiling", "var(--s-visible)", "Real visible"]].forEach(function (k) {
+        el("rect", { x: x(r[k[0]]) - 1.5, y: cy - 13, width: 3, height: 26, rx: 1, fill: k[1] }, svg);
+        hit(svg, x(r[k[0]]), cy, r.name + " · " + k[2] + ": " + r[k[0]].toFixed(4));
+      });
+      // the loop's gain, as a connector from control to loop
+      el("line", { x1: x(r.control), x2: x(r.loop), y1: cy, y2: cy, stroke: "var(--s-loop)", "stroke-width": 3, opacity: 0.35 }, svg);
+      if (r.thermal != null) {
+        var d = 6.5, tx = x(r.thermal);
+        el("path", { d: "M" + tx + "," + (cy - d) + "L" + (tx + d) + "," + cy + "L" + tx + "," + (cy + d) + "L" + (tx - d) + "," + cy + "Z", fill: "var(--ink)", stroke: "var(--panel)", "stroke-width": 2 }, svg);
+        hit(svg, tx, cy, r.name + " · Thermal-trained detector: " + r.thermal.toFixed(4));
+      }
+      el("circle", { cx: x(r.control), cy: cy, r: 5.5, fill: "var(--panel)", stroke: "var(--s-noloop)", "stroke-width": 2 }, svg);
+      hit(svg, x(r.control), cy, r.name + " · No loop: " + r.control.toFixed(4));
+      el("circle", { cx: x(r.loop), cy: cy, r: 6.5, fill: "var(--s-loop)", stroke: "var(--panel)", "stroke-width": 2 }, svg);
+      hit(svg, x(r.loop), cy, r.name + " · With loop: " + r.loop.toFixed(4));
+      txt(svg, x(r.loop), cy - 14, r.loop.toFixed(2), { "text-anchor": "middle", class: "val" });
+    });
+  })();
+
+  /* ---- Finding 2: gain under each judge ---- */
+  (function () {
+    var rows = [
+      ["Ours · GAN", 0.0512, 0.0435, "6 seeds"],
+      ["Ours · diffusion", 0.0306, 0.0304, "3 seeds"],
+      ["FLIR · GAN", 0.3512, 0.3051, "6 seeds"],
+      ["MSRS · GAN", 0.1672, 0.1451, "6 seeds"]
+    ];
+    var W = 620, rowH = 48, m = { l: 124, r: 54, t: 8, b: 28 }, H = m.t + rows.length * rowH + m.b, hi = 0.4;
+    var svg = svgIn("chart-transfer", W, H, "Paired horizontal bars of the loop's mAP@50 gain under the YOLO11s and RT-DETR-l judges for four campaigns");
+    var pw = W - m.l - m.r;
+    function x(v) { return m.l + pw * v / hi; }
+    [0, 0.1, 0.2, 0.3, 0.4].forEach(function (t) {
+      el("line", { x1: x(t), x2: x(t), y1: m.t, y2: H - m.b, class: t === 0 ? "axis" : "grid" }, svg);
+      txt(svg, x(t), H - 8, t === 0 ? "0" : "+" + t.toFixed(1), { "text-anchor": "middle" });
+    });
+    rows.forEach(function (r, i) {
+      var y0 = m.t + i * rowH + 8, bh = 14;
+      txt(svg, m.l - 10, y0 + 13, r[0], { "text-anchor": "end", class: "lbl" });
+      txt(svg, m.l - 10, y0 + 28, r[3], { "text-anchor": "end" });
+      [[r[1], 0.45, "YOLO11s"], [r[2], 1, "RT-DETR-l"]].forEach(function (b, j) {
+        var by = y0 + j * (bh + 2);
+        el("path", { d: hbarPath(x(0), by, x(b[0]) - x(0), bh, 4), fill: "var(--s-loop)", "fill-opacity": b[1], "data-tip": r[0] + " · " + b[2] + " judge: " + signed(b[0], 4) }, svg);
+        txt(svg, x(b[0]) + 6, by + 11, signed(b[0], 3), { class: j ? "val" : "" });
+      });
+    });
+  })();
+
+  /* ---- Finding 3: loop − ModTr with 95% intervals ---- */
+  (function () {
+    var rows = [
+      ["Ours · GAN loop", 13.78, 10.20, 17.01, true],
+      ["Ours · diffusion loop", 15.11, 10.87, 18.97, true],
+      ["FLIR · all classes", -5.80, -7.00, -3.65, false],
+      ["FLIR · 3-class primary", -8.56, -9.87, -7.27, false]
+    ];
+    var W = 620, rowH = 66, m = { l: 12, r: 12, t: 26, b: 30 }, H = m.t + rows.length * rowH + m.b, lo = -12, hi = 22;
+    var svg = svgIn("chart-margin", W, H, "Interval plot of loop minus ModTr in mAP@50 points with 95% intervals against the −5 non-inferiority margin");
+    var pw = W - m.l - m.r;
+    function x(v) { return m.l + pw * (v - lo) / (hi - lo); }
+    el("rect", { x: x(lo), y: m.t, width: x(-5) - x(lo), height: H - m.t - m.b, fill: "var(--no-bg)", opacity: 0.7 }, svg);
+    [-10, -5, 0, 5, 10, 15, 20].forEach(function (t) {
+      el("line", { x1: x(t), x2: x(t), y1: m.t, y2: H - m.b, class: t === 0 ? "zero" : "grid" }, svg);
+      txt(svg, x(t), H - 10, t === 0 ? "0" : signed(t, 0), { "text-anchor": "middle" });
+    });
+    el("line", { x1: x(-5), x2: x(-5), y1: m.t - 6, y2: H - m.b, stroke: "var(--no)", "stroke-width": 1.5 }, svg);
+    txt(svg, x(-5) + 6, m.t - 10, "−5 margin: ModTr ahead by more than this fails", { fill: "var(--no)" });
+    rows.forEach(function (r, i) {
+      var y0 = m.t + i * rowH, cy = y0 + 48;
+      txt(svg, m.l + 2, y0 + 16, r[0], { class: "lbl" });
+      txt(svg, W - m.r, y0 + 16, r[4] ? "✓ non-inferior" : "✗ not non-inferior", { "text-anchor": "end", class: "lbl", style: "fill:" + (r[4] ? "var(--ok)" : "var(--no)") });
+      el("line", { x1: x(r[2]), x2: x(r[3]), y1: cy, y2: cy, stroke: "var(--ink)", "stroke-width": 2 }, svg);
+      [r[2], r[3]].forEach(function (v) { el("line", { x1: x(v), x2: x(v), y1: cy - 5, y2: cy + 5, stroke: "var(--ink)", "stroke-width": 2 }, svg); });
+      el("circle", { cx: x(r[1]), cy: cy, r: 5, fill: "var(--ink)", stroke: "var(--panel)", "stroke-width": 2 }, svg);
+      // Label above the interval, kept inside the plot: right-aligned near the right edge, left-aligned near the left.
+      txt(svg, r[1] > 0 ? x(r[3]) : x(r[2]), cy - 11, signed(r[1], 2) + "  [" + signed(r[2], 2) + ", " + signed(r[3], 2) + "]",
+        { class: "val", "text-anchor": r[1] > 0 ? "end" : "start", stroke: "var(--paper)", "stroke-width": 4, "paint-order": "stroke", "stroke-linejoin": "round" });
+      el("rect", { x: x(r[2]) - 6, y: cy - 12, width: x(r[3]) - x(r[2]) + 12, height: 24, fill: "transparent", "data-tip": r[0] + ": " + signed(r[1], 2) + " points, 95% CI [" + signed(r[2], 2) + ", " + signed(r[3], 2) + "]" }, svg);
+    });
+  })();
+
+  /* ---- Finding 4: label equivalence ---- */
+  (function () {
+    var groups = [
+      { name: "Our power-line set · all classes", split: 600, bars: [["No loop", 150, 114, 185, "var(--s-noloop)"], ["With loop", 214, null, null, "var(--s-loop)"]] },
+      { name: "MSRS day · passive classes", split: 536, bars: [["No loop", 48, 43, 59, "var(--s-noloop)"], ["With loop", 173, 100, 200, "var(--s-loop)"]] }
+    ];
+    var W = 620, gH = 82, m = { l: 12, r: 60, t: 6, b: 30 }, H = m.t + groups.length * gH + m.b, hi = 600;
+    var svg = svgIn("chart-budget", W, H, "Horizontal bars of how many labelled thermal images match translation without and with the loop, on two datasets");
+    var pw = W - m.l - m.r;
+    function x(v) { return m.l + pw * v / hi; }
+    [0, 100, 200, 300, 400, 500, 600].forEach(function (t) {
+      el("line", { x1: x(t), x2: x(t), y1: m.t, y2: H - m.b, class: t === 0 ? "axis" : "grid" }, svg);
+      txt(svg, x(t), H - 10, String(t), { "text-anchor": t === 0 ? "start" : "middle" });
+    });
+    groups.forEach(function (g, gi) {
+      var y0 = m.t + gi * gH, ty = y0 + 28, bh = 16;
+      txt(svg, m.l, y0 + 18, g.name, { class: "lbl" });
+      el("rect", { x: x(0), y: ty - 3, width: x(g.split) - x(0), height: 2 * bh + 8, rx: 4, fill: "var(--rule-soft)" }, svg);
+      txt(svg, x(g.split) + 6, ty + bh + 6, "of " + g.split, {});
+      g.bars.forEach(function (b, j) {
+        var by = ty + j * (bh + 2), cy = by + bh / 2;
+        el("path", { d: hbarPath(x(0), by, x(b[1]) - x(0), bh, 4), fill: b[4], "data-tip": g.name + " · " + b[0] + ": ≈" + b[1] + (b[2] != null ? " [" + b[2] + ", " + b[3] + "]" : "") }, svg);
+        var end = b[1];
+        if (b[2] != null) {
+          el("line", { x1: x(b[2]), x2: x(b[3]), y1: cy, y2: cy, stroke: "var(--ink)", "stroke-width": 1.5 }, svg);
+          [b[2], b[3]].forEach(function (v) { el("line", { x1: x(v), x2: x(v), y1: cy - 4, y2: cy + 4, stroke: "var(--ink)", "stroke-width": 1.5 }, svg); });
+          end = Math.max(end, b[3]);
+        }
+        txt(svg, x(end) + 6, cy + 4, "≈" + b[1], { class: j ? "val" : "" });
+      });
+    });
+  })();
+
+  /* ---- tooltip ---- */
+  var tip = document.getElementById("tip");
+  document.addEventListener("pointerover", function (e) {
+    var t = e.target.closest && e.target.closest("[data-tip]");
+    if (!t) return;
+    tip.textContent = t.getAttribute("data-tip");
+    tip.classList.add("on");
+  });
+  document.addEventListener("pointermove", function (e) {
+    if (!tip.classList.contains("on")) return;
+    tip.style.left = e.clientX + "px";
+    tip.style.top = e.clientY + "px";
+  });
+  document.addEventListener("pointerout", function (e) {
+    var t = e.target.closest && e.target.closest("[data-tip]");
+    if (t) tip.classList.remove("on");
+  });
+})();
+</script>
