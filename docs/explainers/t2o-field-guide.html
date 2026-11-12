@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>t2o Field Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with full-width instrument panels for each toy; sticky section bar. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --sunken: #e9edf3;
+  --ink: #141a24;
+  --muted: #586374;
+  --line: #d5dce6;
+  --accent: #c9500c;        /* ironbow orange: the thermal side */
+  --accent-soft: #fbe6d9;
+  --vis: #1f63c4;           /* visible-photo blue */
+  --vis-soft: #dde9fb;
+  --good: #1b7f48;
+  --good-soft: #dcf1e5;
+  --bad: #c0362b;
+  --bad-soft: #f8dfdc;
+  --warn: #a8700f;
+  /* Image panels are pictures, not UI: same colours in both themes. */
+  --img-sky1: #b9cbe0; --img-sky2: #e6edf4; --img-ground: #8d9a7c;
+  --img-wood: #5d4b3b; --img-metal: #7c838e; --img-metal-dark: #4b515a; --img-tx: #6d7d70;
+  --th-bg1: #160a2e; --th-bg2: #2b0f45; --th-cool: #4a1a6b; --th-mid: #a0287a; --th-warm: #f0731e; --th-hot: #ffd447;
+  --img-ink: #ffffff;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --surface: #151b24; --sunken: #1c2430; --ink: #e5eaf1; --muted: #9aa6b6; --line: #2a3442;
+    --accent: #ff8340; --accent-soft: #3a2316; --vis: #62a4ff; --vis-soft: #16263d;
+    --good: #43c27e; --good-soft: #13301f; --bad: #ff6f62; --bad-soft: #3a1a17; --warn: #e5b04b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --surface: #151b24; --sunken: #1c2430; --ink: #e5eaf1; --muted: #9aa6b6; --line: #2a3442;
+  --accent: #ff8340; --accent-soft: #3a2316; --vis: #62a4ff; --vis-soft: #16263d;
+  --good: #43c27e; --good-soft: #13301f; --bad: #ff6f62; --bad-soft: #3a1a17; --warn: #e5b04b;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+.wrap {
+  max-width: 1040px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2rem, 5vw, 3.1rem); font-weight: 750; font-stretch: 112%; letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.6rem, 3.6vw, 2.2rem); font-weight: 720; font-stretch: 108%; }
+h3 { font-size: 1.2rem; font-weight: 650; font-stretch: 100%; }
+p { margin: 0; }
+.prose { max-width: 68ch; display: grid; gap: 0.9rem; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--sunken); padding: 0.05em 0.35em; border-radius: 4px; }
+.muted { color: var(--muted); }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+a { color: var(--vis); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Sticky section bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.bar .wrap { display: flex; align-items: center; gap: 1rem; padding-block: 0.6rem; flex-wrap: wrap; }
+.bar .brand { font-family: var(--font-display); font-weight: 700; font-stretch: 115%; font-size: 1rem; margin-right: auto; }
+.bar .brand span { color: var(--accent); }
+.bar nav { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.bar nav a { text-decoration: none; color: var(--muted); font-size: 0.88rem; padding: 0.25rem 0.6rem; border-radius: 999px; }
+.bar nav a:hover { background: var(--sunken); color: var(--ink); }
+.bar nav a b { font-family: var(--font-mono); color: var(--accent); font-weight: 500; margin-right: 0.3rem; }
+
+header.hero .wrap { padding-block: 2.6rem 1.6rem; display: grid; gap: 1.1rem; }
+header.hero .lede { font-size: 1.15rem; max-width: 62ch; color: var(--muted); }
+
+section.part { border-top: 1px solid var(--line); }
+section.part > .wrap { padding-block: 2.8rem; display: grid; gap: 1.6rem; }
+.part-head { display: grid; gap: 0.5rem; }
+.part-head .idx { font-family: var(--font-display); font-stretch: 125%; font-weight: 800; font-size: 0.95rem; color: var(--accent); letter-spacing: 0.04em; }
+
+/* Panels */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem; display: grid; gap: 1rem; min-width: 0; }
+.panel-title { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.panel-title .tag { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--surface); background: var(--accent); padding: 0.1rem 0.45rem; border-radius: 4px; }
+.split { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 1.1rem; align-items: start; }
+@media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.svgbox { width: 100%; overflow-x: auto; }
+.svgbox svg { display: block; width: 100%; height: auto; min-width: 0; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+button.btn {
+  font: inherit; font-size: 0.88rem; font-weight: 500; cursor: pointer;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 0.4rem 0.8rem;
+}
+button.btn:hover { border-color: var(--accent); }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 0.85rem; background: var(--surface); color: var(--muted); border: 0; padding: 0.38rem 0.75rem; cursor: pointer; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+label.slider { display: flex; align-items: center; gap: 0.6rem; font-size: 0.9rem; flex-wrap: wrap; }
+input[type="range"] { accent-color: var(--accent); width: min(260px, 60vw); }
+label.check { display: inline-flex; gap: 0.4rem; align-items: center; font-size: 0.9rem; cursor: pointer; }
+input[type="checkbox"] { accent-color: var(--vis); }
+
+/* Readout tiles */
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+@media (max-width: 520px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
+.tile { background: var(--sunken); border-radius: 8px; padding: 0.7rem 0.8rem; display: grid; gap: 0.15rem; min-width: 0; }
+.tile .k { font-size: 0.78rem; color: var(--muted); }
+.tile .v { font-family: var(--font-mono); font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.tile .f { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); }
+.tile.bad .v { color: var(--bad); }
+.tile.vis .v { color: var(--vis); }
+
+.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; font-size: 0.86rem; }
+.log li { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr); gap: 0.4rem; padding: 0.35rem 0.5rem; border-radius: 6px; background: var(--sunken); }
+.log li .n { font-family: var(--font-mono); color: var(--muted); }
+.log li.ok { background: var(--good-soft); }
+.log li.no { background: var(--bad-soft); }
+.log li.skip { opacity: 0.6; }
+.log li.pending { opacity: 0.45; }
+.log li.now { outline: 2px solid var(--accent); }
+
+/* Glossary */
+.gloss { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.7rem; }
+.gloss div { border-left: 3px solid var(--line); padding: 0.2rem 0 0.2rem 0.8rem; display: grid; gap: 0.2rem; }
+.gloss dt { font-family: var(--font-display); font-weight: 650; font-stretch: 105%; }
+.gloss dd { margin: 0; font-size: 0.92rem; color: var(--muted); }
+.gloss .hl { border-left-color: var(--accent); }
+
+/* Measured callouts */
+.measured { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.measured > summary { cursor: pointer; padding: 0.85rem 1.1rem; font-family: var(--font-display); font-weight: 650; font-stretch: 105%; list-style: none; display: flex; gap: 0.6rem; align-items: center; }
+.measured > summary::-webkit-details-marker { display: none; }
+.measured > summary::before { content: "▸"; color: var(--accent); transition: transform 0.15s; }
+.measured[open] > summary::before { transform: rotate(90deg); }
+.measured .body { padding: 0 1.1rem 1.1rem; display: grid; gap: 0.8rem; }
+.facts { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.55rem; }
+.facts li { display: grid; grid-template-columns: 4.6rem minmax(0, 1fr); gap: 0.7rem; font-size: 0.93rem; }
+.facts li .src { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); padding-top: 0.2rem; }
+
+.cards3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; }
+@media (max-width: 760px) { .cards3 { grid-template-columns: minmax(0, 1fr); } }
+.dcard { border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; display: grid; gap: 0.4rem; align-content: start; background: var(--surface); }
+.dcard .role { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; }
+.dcard h3 { font-size: 1.05rem; }
+.dcard p { font-size: 0.9rem; color: var(--muted); }
+.dcard.teach .role { color: var(--accent); }
+.dcard.judge .role { color: var(--vis); }
+.dcard.adapt .role { color: var(--muted); }
+
+.chip { display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; padding: 0.05rem 0.45rem; border-radius: 999px; font-weight: 500; }
+.chip.pass { background: var(--good-soft); color: var(--good); }
+.chip.fail { background: var(--bad-soft); color: var(--bad); }
+
+.tablebox { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.86rem; min-width: 560px; }
+th, td { text-align: left; padding: 0.4rem 0.55rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+td.num, th.num { text-align: right; }
+
+.seeds { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.seeds button { font-family: var(--font-mono); font-size: 0.85rem; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 0.35rem 0.6rem; cursor: pointer; font-variant-numeric: tabular-nums; }
+.seeds button.pos { border-color: var(--good); color: var(--good); }
+.seeds button.neg { border-color: var(--bad); color: var(--bad); }
+.seeds button[hidden] { display: none; }
+
+.stagebar { display: grid; gap: 0.45rem; }
+.stagerow { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr) 3.6rem; gap: 0.6rem; align-items: center; font-size: 0.85rem; }
+.stagerow .track { height: 14px; background: var(--sunken); border-radius: 4px; overflow: hidden; }
+.stagerow .fill { height: 100%; background: var(--accent); width: 0; transition: width 0.35s ease; }
+.stagerow.dim { opacity: 0.45; }
+
+.routes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+@media (max-width: 680px) { .routes { grid-template-columns: minmax(0, 1fr); } }
+.route { border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; display: grid; gap: 0.45rem; background: var(--surface); align-content: start; }
+.route ol { margin: 0; padding-left: 1.2rem; font-size: 0.92rem; display: grid; gap: 0.25rem; }
+.route .verdict { font-size: 0.88rem; border-top: 1px dashed var(--line); padding-top: 0.45rem; color: var(--muted); }
+
+.entry { display: grid; gap: 0.4rem; }
+.entry ol.enter { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.6rem; counter-reset: e; }
+.entry ol.enter li { counter-increment: e; display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 0.6rem; }
+.entry ol.enter li::before { content: counter(e); font-family: var(--font-display); font-weight: 800; font-stretch: 120%; color: var(--accent); font-size: 1.2rem; line-height: 1.3; }
+
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 0.7rem 0.9rem; border-radius: 0 8px 8px 0; font-size: 0.95rem; }
+
+svg text { font-family: var(--font-body); }
+svg .lbl { font-size: 13px; fill: var(--ink); }
+svg .lbl-s { font-size: 11px; fill: var(--muted); }
+svg .mono { font-family: var(--font-mono); }
+
+footer .wrap { padding-block: 2rem 3rem; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="bar">
+  <div class="wrap">
+    <div class="brand">t2o <span>field guide</span></div>
+    <nav aria-label="Sections">
+      <a href="#measure"><b>1</b>Measuring</a>
+      <a href="#loop"><b>2</b>The loop</a>
+      <a href="#registration"><b>3</b>Registration</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Thermal → visible translation, detection in the loop</div>
+    <h1>What we count, how we train, and where alignment bites</h1>
+    <p class="lede">The pipeline is one line long. A thermal frame goes through a translator, and the result is read by a detector that was only ever trained on visible photos. Everything below is about checking that this line is honest.</p>
+    <div class="panel">
+      <div class="svgbox">
+        <svg viewBox="0 0 900 150" role="img" aria-label="Pipeline: thermal image, translator, translated RGB image, visible-trained detector, boxes">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+            <linearGradient id="thg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--th-bg2)"/><stop offset="0.6" stop-color="var(--th-mid)"/><stop offset="1" stop-color="var(--th-hot)"/></linearGradient>
+            <linearGradient id="rgbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--img-sky1)"/><stop offset="0.75" stop-color="var(--img-sky2)"/><stop offset="0.75" stop-color="var(--img-ground)"/></linearGradient>
+          </defs>
+          <rect x="10" y="30" width="130" height="90" rx="6" fill="url(#thg)"/>
+          <text x="75" y="142" text-anchor="middle" class="lbl">thermal frame</text>
+          <line x1="146" y1="75" x2="214" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr)"/>
+          <rect x="220" y="40" width="150" height="70" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+          <text x="295" y="72" text-anchor="middle" class="lbl" font-weight="600">Translator</text>
+          <text x="295" y="92" text-anchor="middle" class="lbl-s">pix2pix · pix2pix-turbo</text>
+          <line x1="376" y1="75" x2="444" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr)"/>
+          <rect x="450" y="30" width="130" height="90" rx="6" fill="url(#rgbg)"/>
+          <rect x="500" y="40" width="7" height="72" fill="var(--img-wood)"/>
+          <rect x="470" y="52" width="90" height="5" fill="var(--img-wood)"/>
+          <text x="515" y="142" text-anchor="middle" class="lbl">translated RGB</text>
+          <line x1="586" y1="75" x2="654" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr)"/>
+          <rect x="660" y="40" width="130" height="70" rx="10" fill="var(--vis-soft)" stroke="var(--vis)" stroke-width="2"/>
+          <text x="725" y="72" text-anchor="middle" class="lbl" font-weight="600">Visible detector</text>
+          <text x="725" y="92" text-anchor="middle" class="lbl-s">never saw thermal</text>
+          <line x1="796" y1="75" x2="840" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr)"/>
+          <rect x="846" y="50" width="44" height="50" rx="3" fill="none" stroke="var(--good)" stroke-width="2.5"/>
+          <text x="868" y="142" text-anchor="middle" class="lbl">boxes</text>
+        </svg>
+      </div>
+      <p class="muted" style="font-size:0.92rem">Why bother: the same visible detector scores <span class="num">0.9213</span> mAP@50 on the real visible photos of the 153 validation pairs, and <span class="num">0.1887</span> when you show it the raw thermal frames. The translator's job is to close that gap without making things up.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Five words that get tangled</h3>
+      <dl class="gloss">
+        <div class="hl"><dt>Hallucination</dt><dd>The umbrella word. The translator paints in an object that is not there, or paints out one that is. We measure it with the two rates below.</dd></div>
+        <div><dt>Invented object</dt><dd>A box the judge finds on the translation that matches nothing in the ground truth. Its share is the <b>false-object rate</b> (insertion).</dd></div>
+        <div><dt>Erased object</dt><dd>A ground-truth box the judge cannot find on the translation. Its share is the <b>missed-object rate</b> (deletion).</dd></div>
+        <div class="hl"><dt>Faithfulness</dt><dd>The success criterion built from those rates: the loop may not invent or erase more than the no-loop translator, within a margin fixed in advance.</dd></div>
+        <div class="hl"><dt>Stability</dt><dd>The result repeats across random seeds: at least 3 seeds, a sign-flip significance test, and no seed that collapses.</dd></div>
+      </dl>
+    </div>
+  </div>
+</header>
+
+<!-- ====================================================== 1 -->
+<section class="part" id="measure">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 1</div>
+      <h2>Counting invented and erased objects</h2>
+    </div>
+    <div class="prose">
+      <p>Every faithfulness number starts the same way. A <b>judge</b> detector looks at the translated image and returns boxes. We then pair those boxes with the hand-drawn ground-truth boxes, one by one. Anything left unpaired is a failure: an unpaired <i>prediction</i> is an invented object, an unpaired <i>ground-truth box</i> is an erased one.</p>
+      <p>The judge is never the detector used during training. If the detector that pushed the translator also graded it, a good score would only show that the translator learned to please that one detector. That is reward hacking, and a separate judge is how we rule it out. The first judge was a <code>yolo11s</code>. The final verdicts use <code>RT-DETR-l</code>, a different family of detector entirely.</p>
+    </div>
+
+    <div class="panel" id="matcher">
+      <div class="panel-title"><span class="tag">Try it</span><h3>The matcher, one prediction at a time</h3></div>
+      <p class="muted" style="font-size:0.92rem">This is <code>_greedy_match</code> in <code>metrics/faithfulness.py</code>. Predictions are visited from most to least confident. Each one claims the best-overlapping, still-unclaimed ground-truth box <b>of the same class</b>, if the overlap (IoU) reaches the threshold. Predictions under confidence 0.25 are dropped before matching. The scene is a made-up example.</p>
+      <div class="split">
+        <div class="svgbox"><svg id="m-svg" viewBox="0 0 640 400" role="img" aria-label="Example translated image with ground-truth and predicted boxes"></svg></div>
+        <div style="display:grid;gap:0.8rem;min-width:0">
+          <div class="controls">
+            <button class="btn primary" id="m-step" type="button">Step</button>
+            <button class="btn" id="m-reset" type="button">Start over</button>
+            <button class="btn" id="m-all" type="button">Run all</button>
+          </div>
+          <label class="slider" for="m-iou">IoU threshold <input id="m-iou" type="range" min="0.30" max="0.80" step="0.05" value="0.50"> <span class="num" id="m-iou-v">0.50</span></label>
+          <label class="check" for="m-vis"><input id="m-vis" type="checkbox"> Show the judge's boxes on the real visible photo</label>
+          <ol class="log" id="m-log"></ol>
+        </div>
+      </div>
+      <div class="tiles">
+        <div class="tile bad"><span class="k">Invented · false-object rate</span><span class="v" id="t-false">–</span><span class="f" id="t-false-f"></span></div>
+        <div class="tile bad"><span class="k">Erased · missed-object rate</span><span class="v" id="t-miss">–</span><span class="f" id="t-miss-f"></span></div>
+        <div class="tile vis"><span class="k">Detection consistency</span><span class="v" id="t-cons">–</span><span class="f" id="t-cons-f"></span></div>
+      </div>
+      <div class="callout">Drag the threshold from 0.50 to 0.45 and watch the switch. Its box is only shifted, not wrong, yet at 0.50 it counts <b>twice</b>: once as an invented switch and once as an erased switch. A box in the wrong place costs both rates. Part 3 comes back to this.</div>
+    </div>
+
+    <div class="prose">
+      <h3>The three rates, in words</h3>
+      <p><b>False-object rate</b> = unmatched predictions ÷ all predictions on the translation. Of everything the judge saw, how much was not really there.</p>
+      <p><b>Missed-object rate</b> = unmatched ground-truth boxes ÷ all ground-truth boxes. Of everything really there, how much the judge could not find.</p>
+      <p><b>Detection consistency</b> uses no labels at all. The judge looks at the <i>real visible photo</i>, then at the translation, and we ask what share of its visible-photo boxes it finds again on the translation. Tick the checkbox above to see those blue boxes. This is useful because labels can be wrong. Consistency only asks whether the translation makes the judge behave like the real photo does.</p>
+      <p>All three go through the same matcher at the same IoU, so they are comparable to each other and across translators. Counts are summed over the whole validation split first, then divided. The per-class versions (Fuse, Switch, Pole, Transformer) come from the same matches split by class. They add up exactly to the pooled counts.</p>
+    </div>
+
+    <div class="routes">
+      <div class="route">
+        <h3>Completion rate: a trap for invention</h3>
+        <p style="font-size:0.92rem">The rates above can only catch an invented object where nothing was expected. To test invention head-on, the cascade gate <b>erases</b> fuses and switches from the thermal input by inpainting, translates the erased frame, and asks the judge whether it finds them anyway, same class, IoU ≥ 0.5. Any it finds were put back with no evidence in the input.</p>
+        <p class="muted" style="font-size:0.88rem">Measured: 0 of 234 erased objects came back, on all nine runs.</p>
+      </div>
+      <div class="route">
+        <h3>The Hallucination Index is parked</h3>
+        <p style="font-size:0.92rem">The plan names an adapted Hallucination Index (from a MICCAI 2024 paper). It compares the <i>spread</i> of many random samples per input against a hallucination-free reference. Our translators are deterministic: one input, one output. With nothing to sample, the metric does not apply yet, so it is deferred rather than faked.</p>
+      </div>
+    </div>
+
+    <div class="prose">
+      <h3>Stability: does it repeat across seeds?</h3>
+      <p>A single training run is one draw of luck: the random initial weights, the batch order, the augmentation. So every arm runs with several seeds, and the loop and its control share each seed. Seed 3 of the loop is compared with seed 3 of the control. That gives one paired difference per seed.</p>
+      <p>The test is the <b>exact sign-flip test</b>. If the loop did nothing, each paired difference would be as likely to be negative as positive. So we flip every combination of signs, recompute the mean each time, and ask how often a mean at least as extreme as ours appears by chance. With 6 seeds there are 2⁶ = 64 sign patterns. Even when all six differences are positive, two of the 64 patterns (all +, all −) are as extreme, so the smallest possible p is 2/64 = 0.031. With 3 seeds the smallest p is 2/8 = 0.25. This is why 6 seeds is the minimum for p &lt; 0.05.</p>
+    </div>
+
+    <div class="panel" id="signflip">
+      <div class="panel-title"><span class="tag">Try it</span><h3>The sign-flip test</h3></div>
+      <p class="muted" style="font-size:0.92rem">Example paired differences (loop − control, mAP@50), not real runs. Click a seed to flip its sign. Each dot is one of the possible sign patterns. Orange dots are at least as extreme as the real data.</p>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Number of seeds">
+          <button type="button" data-n="3" aria-pressed="false">3 seeds</button>
+          <button type="button" data-n="6" aria-pressed="true">6 seeds</button>
+        </div>
+        <div class="seeds" id="sf-seeds"></div>
+      </div>
+      <div class="svgbox"><svg id="sf-svg" viewBox="0 0 640 170" role="img" aria-label="Dot plot of sign-flipped means"></svg></div>
+      <div class="tiles">
+        <div class="tile"><span class="k">Mean paired difference</span><span class="v" id="sf-mean">–</span></div>
+        <div class="tile"><span class="k">Patterns as extreme</span><span class="v" id="sf-count">–</span></div>
+        <div class="tile"><span class="k">Exact p (two-sided)</span><span class="v" id="sf-p">–</span><span class="f" id="sf-pf"></span></div>
+      </div>
+    </div>
+
+    <div class="prose">
+      <p><b>Collapse</b> is the other half of stability. Sometimes a seed's translator falls apart and the judge finds almost nothing, under 0.02 mAP@50. A method that only works on lucky seeds is not stable, so collapsed seeds are counted and reported, never dropped.</p>
+      <h3>Faithfulness: the pass rule</h3>
+      <p>The criterion does not ask for zero hallucination. It asks that the loop be <b>no worse than the no-loop translator</b>, within a margin. The margin for each dataset and each rate was fixed before the verdict was read: the control arm's own seed-to-seed spread under the RT-DETR judge. The rule is then a picture. Take the 95% interval of the paired loop − control difference. For the false- and missed-object rates, the whole interval must sit below +margin. For consistency, which you want high, it must sit above −margin.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title"><h3>The rule applied to the custom set</h3><span class="muted" style="font-size:0.85rem">RT-DETR judge, stage 3, record 033</span></div>
+      <div class="svgbox"><svg id="ci-svg" viewBox="0 0 640 230" role="img" aria-label="Confidence intervals against margins for the custom-set cells"></svg></div>
+      <p class="muted" style="font-size:0.9rem">Turbo's point estimate is tiny (+0.0040), but with only 3 seeds its interval reaches +0.0538, past its margin of 0.0315. Under the rule that is a fail, and it is reported as one. Intervals this small are, if anything, too narrow, so a fail is robust while a pass is the weaker statement.</p>
+    </div>
+
+    <details class="measured">
+      <summary>What we measured</summary>
+      <div class="body">
+        <ul class="facts">
+          <li><span class="src">rec 008</span><span>pix2pix, judged by <code>yolo11s</code>: stage-3 false-object rate fell <span class="num">−0.0289</span> (p = .156) while mAP@50 rose <span class="num">+0.0512</span>. Detection got better without inventing more. No sign of reward hacking.</span></li>
+          <li><span class="src">rec 016</span><span>FLIR: the control arm collapsed (&lt; 0.02 mAP@50) on 7 of 24 stage results, the loop on none. The worst loop seed beat the best control seed.</span></li>
+          <li><span class="src">rec 033</span><span>Faithfulness verdict: 11 of 12 rate tests pass. The one fail is turbo's false-object rate on the custom set.</span></li>
+          <li><span class="src">rec 026</span><span>Absolute rates depend on the judge: on the same FLIR exports, RT-DETR's false-object rate is 3.3× yolo11s's. Compare arms under one judge, never across judges.</span></li>
+        </ul>
+        <div class="tablebox">
+          <table>
+            <thead><tr><th>Cell</th><th>Rate</th><th class="num">Loop − control</th><th class="num">95% CI</th><th class="num">Margin</th><th class="num">p</th><th>Verdict</th></tr></thead>
+            <tbody id="verdict-rows"></tbody>
+          </table>
+        </div>
+        <p class="muted" style="font-size:0.85rem">e3b = pix2pix on the custom set (6 seeds), e3t = turbo on the custom set (3 seeds), e3f = pix2pix on FLIR, e3md = pix2pix on msrs-day.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ====================================================== 2 -->
+<section class="part" id="loop">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 2</div>
+      <h2>How the loop trains the translator</h2>
+    </div>
+    <div class="prose">
+      <p>The translator learns from two teachers at once. The first is the real visible photo: <b>look like this</b>. That is the usual image-translation loss, a mix of pixel difference (L2), perceptual difference (LPIPS) and a GAN critic. The second is a frozen visible detector: <b>be readable by me</b>. We run it on the translated image, compute its normal detection loss against the boxes, and push that loss back through the detector into the translator's weights.</p>
+      <p class="mono" style="background:var(--sunken);padding:0.6rem 0.8rem;border-radius:8px;overflow-x:auto;white-space:nowrap">loss = L2 + LPIPS + GAN + grad_scale × w<sub>stage</sub> × detection_loss</p>
+      <p>The detector is <i>frozen</i>: its weights never change. Only the gradient passes through it. So the translator has to move toward images this fixed detector can already read.</p>
+    </div>
+
+    <div class="panel" id="loopviz">
+      <div class="panel-title"><span class="tag">Try it</span><h3>Step through the four stages</h3></div>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Arm">
+          <button type="button" data-arm="loop" aria-pressed="true">Loop arm</button>
+          <button type="button" data-arm="control" aria-pressed="false">Control arm</button>
+        </div>
+        <div class="seg" role="group" aria-label="Stage">
+          <button type="button" data-stage="0" aria-pressed="true">Stage 0</button>
+          <button type="button" data-stage="1" aria-pressed="false">1</button>
+          <button type="button" data-stage="2" aria-pressed="false">2</button>
+          <button type="button" data-stage="3" aria-pressed="false">3</button>
+        </div>
+        <button class="btn" id="l-next" type="button">Next stage</button>
+      </div>
+      <div class="svgbox">
+        <svg id="l-svg" viewBox="0 0 800 300" role="img" aria-label="Loop training diagram">
+          <defs>
+            <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+            <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+            <marker id="arrV" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--vis)"/></marker>
+          </defs>
+          <!-- forward path -->
+          <rect x="10" y="120" width="110" height="60" rx="6" fill="url(#thg)"/>
+          <text x="65" y="198" text-anchor="middle" class="lbl-s">thermal frame</text>
+          <line x1="124" y1="150" x2="176" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr2)"/>
+          <rect x="180" y="115" width="140" height="70" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+          <text x="250" y="146" text-anchor="middle" class="lbl" font-weight="600">Translator</text>
+          <text x="250" y="166" text-anchor="middle" class="lbl-s">weights carried over</text>
+          <line x1="324" y1="150" x2="376" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr2)"/>
+          <rect x="380" y="120" width="110" height="60" rx="6" fill="url(#rgbg)"/>
+          <rect x="420" y="126" width="6" height="50" fill="var(--img-wood)"/>
+          <rect x="396" y="136" width="70" height="4" fill="var(--img-wood)"/>
+          <text x="435" y="198" text-anchor="middle" class="lbl-s">translated RGB</text>
+          <!-- detector branch -->
+          <g id="l-det">
+            <line x1="494" y1="135" x2="566" y2="70" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr2)"/>
+            <rect x="570" y="35" width="210" height="64" rx="10" fill="var(--surface)" stroke="var(--ink)" stroke-width="2" stroke-dasharray="0"/>
+            <text x="675" y="62" text-anchor="middle" class="lbl" font-weight="600">Frozen detector (yolo11n)</text>
+            <text x="675" y="82" text-anchor="middle" class="lbl-s" id="l-det-sub">detection loss vs. the boxes</text>
+            <path id="l-det-back" d="M 640 32 C 560 -8, 300 0, 260 110" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrA)"/>
+            <text x="420" y="22" text-anchor="middle" class="lbl" fill="var(--accent)" id="l-det-lbl" style="fill:var(--accent)">gradient × 0.15 × w</text>
+          </g>
+          <!-- fidelity branch -->
+          <line x1="494" y1="165" x2="566" y2="228" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr2)"/>
+          <rect x="570" y="200" width="210" height="64" rx="10" fill="var(--vis-soft)" stroke="var(--vis)" stroke-width="2"/>
+          <text x="675" y="227" text-anchor="middle" class="lbl" font-weight="600">Compare with real photo</text>
+          <text x="675" y="247" text-anchor="middle" class="lbl-s">L2 + LPIPS + GAN</text>
+          <path d="M 640 268 C 560 305, 300 300, 260 190" fill="none" stroke="var(--vis)" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrV)"/>
+          <text x="420" y="292" text-anchor="middle" class="lbl" style="fill:var(--vis)">gradient, every stage</text>
+        </svg>
+      </div>
+      <div class="split">
+        <div style="display:grid;gap:0.6rem;min-width:0">
+          <h3 id="l-title">Stage 0</h3>
+          <p id="l-text" style="font-size:0.95rem"></p>
+          <p class="muted" style="font-size:0.88rem">Each stage is 100 epochs. When a stage ends: export the validation translations, score them with the <b>judge</b> (zero-shot mAP, the number that counts), and fine-tune a separate <b>evaluation</b> detector on them. Then the next stage starts from the translator's current weights, reseeded with <code>seed + stage</code>.</p>
+        </div>
+        <div style="display:grid;gap:0.6rem;min-width:0">
+          <div class="controls" style="justify-content:space-between">
+            <span style="font-size:0.88rem;font-weight:600">Detection term's share of the loss</span>
+            <div class="seg" role="group" aria-label="grad_scale">
+              <button type="button" data-dose="0.01" aria-pressed="false">grad_scale 0.01</button>
+              <button type="button" data-dose="0.15" aria-pressed="true">0.15</button>
+            </div>
+          </div>
+          <div class="stagebar" id="l-bars"></div>
+          <p class="muted" style="font-size:0.85rem" id="l-dose-note"></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="prose">
+      <h3>Why a control arm makes the result mean something</h3>
+      <p>The control is the same config file with <code>task_weights: [0, 0, 0, 0]</code>. It runs the same four stages, 400 epochs in total, with the same exports and fine-tunes. The only difference is that the detection term never switches on. At weight 0 the frozen detector is not even built, so nothing about it can leak into the control.</p>
+      <p>Stage 0 is weight 0 in <i>both</i> arms, so the two arms are identical there. Any loop − control gap at stage 0 is pure seed noise. That gives a free null check inside every experiment: a stage-3 gap is only convincing if it is clearly bigger than the stage-0 gap.</p>
+    </div>
+
+    <div class="prose"><h3>Three detectors, never mixed up</h3></div>
+    <div class="cards3">
+      <div class="dcard teach"><span class="role">In the loop · teacher</span><h3>Frozen visible detector</h3><p><code>yolo11n</code>, trained on visible photos. Supplies the detection gradient during stages 1–3. Never updated, never re-pointed at a fine-tuned checkpoint.</p></div>
+      <div class="dcard judge"><span class="role">Reference · judge</span><h3>Independent judge</h3><p><code>yolo11s</code>, then out-of-family <code>RT-DETR-l</code>. Trained separately on visible photos, never on anything this project made. Scores zero-shot mAP and every faithfulness rate.</p></div>
+      <div class="dcard adapt"><span class="role">Evaluation · adapted</span><h3>Fine-tuned detector</h3><p>Fine-tuned on each stage's translations, then measured. It lands near 0.9 for every arm, even on raw thermal, so it cannot tell methods apart. Recorded, but no decision rests on it.</p></div>
+    </div>
+
+    <details class="measured">
+      <summary>What we measured</summary>
+      <div class="body">
+        <ul class="facts">
+          <li><span class="src">rec 005–006</span><span>First pix2pix run at <code>grad_scale 0.01</code>: stage-3 gain <span class="num">+0.0070</span> (p = .656), a null. The cause turned out to be dose: the detection term was only 0.9 / 1.7 / 2.3% of the loss.</span></li>
+          <li><span class="src">rec 007</span><span>Same experiment at <code>grad_scale 0.15</code> (share 10.0 / 16.1 / 19.8%): stage-3 zero-shot mAP@50 <span class="num">+0.0512</span>, p = .031, the best p six seeds allow. The gain rose with λ, stage by stage.</span></li>
+          <li><span class="src">rec 010</span><span>pix2pix-turbo at the same dose: <span class="num">+0.0306</span>, 3 of 3 seeds, p = .25, the best p three seeds allow.</span></li>
+          <li><span class="src">rec 026</span><span>Re-judged by RT-DETR-l, which never touched training, the loop keeps 85–99% of its gain on all four cells.</span></li>
+        </ul>
+        <p class="muted" style="font-size:0.88rem">The project rule that came from record 006: every new backbone gets the 25-epoch <code>scripts/loss_share.py</code> probe first, and the detection term must sit at 20–30% of the loss before its campaign starts.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ====================================================== 3 -->
+<section class="part" id="registration">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 3</div>
+      <h2>Registration: where alignment enters, and what it costs</h2>
+    </div>
+    <div class="prose">
+      <p><b>Registration</b> lines up the thermal and visible images of the same scene, so that a pixel in one is the same point in the world as the pixel in the other. The two cameras sit side by side and are never perfectly aligned. Registering them is the sister project's problem. Here it is an input, and its error is one of the axes the paper maps.</p>
+    </div>
+
+    <div class="panel entry">
+      <h3>Four places it enters this project</h3>
+      <ol class="enter">
+        <li><div><b>The thermal labels themselves.</b> On the custom set, boxes were drawn on the visible photo and moved onto the thermal frame by the sister project's registration. Every thermal box carries that registration error, including the validation boxes everything is scored against.</div></li>
+        <li><div><b>Training the translator.</b> The pixel losses compare the output with the visible target pixel by pixel. If the target is shifted, the translator is taught to paint things in the wrong place, or to blur them to hedge. The training boxes come from the same misaligned frame.</div></li>
+        <li><div><b>The competing route.</b> Label transfer, which moves boxes from visible to thermal and trains a thermal detector on them, <i>is</i> the registration route. Its quality is the registration's quality.</div></li>
+        <li><div><b>Not at use time.</b> A trained translator needs only a thermal frame. No visible photo, no registration. This is the whole pitch for thermal-only surveys.</div></li>
+      </ol>
+    </div>
+
+    <div class="routes">
+      <div class="route">
+        <h3>Label-transfer route</h3>
+        <ol><li>Take registered thermal–visible pairs.</li><li>Draw boxes on visible, warp them onto thermal.</li><li>Train a detector on thermal with those boxes.</li></ol>
+        <p class="verdict">Needs registration for <b>every image you want labelled</b>. The error goes straight into the labels.</p>
+      </div>
+      <div class="route">
+        <h3>Translation route</h3>
+        <ol><li>Train the translator once on registered pairs.</li><li>Translate any thermal frame to RGB.</li><li>Run any visible-trained detector on it.</li></ol>
+        <p class="verdict">Needs registration <b>only for the training pairs</b>. The error goes into the training target. It is an open question how much of it survives into the output.</p>
+      </div>
+    </div>
+
+    <div class="panel" id="regviz">
+      <div class="panel-title"><span class="tag">Try it</span><h3>Misalign the pair and watch the boxes drift</h3></div>
+      <p class="muted" style="font-size:0.92rem">A roll-shaped warp, the same shape as FLIR's real −1.18° roll, scaled so the image corners move by the chosen number of pixels on a 640 × 480 frame. Dashed white boxes are the true positions. Solid boxes are where a misaligned rig would put each label: yellow while IoU stays at or above 0.5, red once it drops below. The faint white outline is the visible photo the translator would be trained to copy. The scene is a made-up example.</p>
+      <div class="controls">
+        <label class="slider" for="r-px">Corner misalignment <input id="r-px" type="range" min="0" max="24" step="0.5" value="6"> <span class="num" id="r-px-v">6 px</span></label>
+        <div class="seg" role="group" aria-label="Levels used in the experiment">
+          <button type="button" data-px="0">0</button><button type="button" data-px="3">3</button><button type="button" data-px="6">6</button><button type="button" data-px="12">12</button><button type="button" data-px="24">24</button>
+        </div>
+        <label class="check" for="r-ghost"><input id="r-ghost" type="checkbox" checked> Show the visible target</label>
+      </div>
+      <div class="split">
+        <div class="svgbox"><svg id="r-svg" viewBox="0 0 640 480" role="img" aria-label="Thermal scene with true and misaligned label boxes"></svg></div>
+        <div style="display:grid;gap:0.7rem;min-width:0">
+          <div class="tablebox">
+            <table style="min-width:0">
+              <thead><tr><th>Object</th><th class="num">Moved</th><th class="num">IoU</th><th>At IoU 0.5</th></tr></thead>
+              <tbody id="r-rows"></tbody>
+            </table>
+          </div>
+          <p style="font-size:0.9rem" id="r-note"></p>
+        </div>
+      </div>
+      <div class="callout">A box that drops under IoU 0.5 is scored exactly like the shifted switch in Part 1: one erased object and one invented object, though nothing was hallucinated. Small parts lose overlap first, and fastest far from the image centre (the outer fuse). Long thin parts (the pole) come next. These are exactly the fuses and switches the paper cares most about.</div>
+    </div>
+
+    <div class="prose">
+      <h3>The registration-error axis experiment</h3>
+      <p>Goal C2 asks <i>when</i> translation pays, and one axis is registration error: how fast each route degrades as alignment gets worse. The experiment injects a known misalignment into the <b>training</b> pairs at 0, 3, 6, 12 and 24 px, on the custom set and on FLIR. Validation images and labels are never touched, so every level is scored on the same frozen boxes.</p>
+      <p>Label transfer gets 3 seeds per level, since each is a ten-minute detector fine-tune. Translation gets one pix2pix loop run per level, about 10.5 GPU-hours each. The aligned 3-seed runs already on the server serve as the custom set's zero point. The result is two curves per dataset: mAP@50 against misalignment, one for each route.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title"><h3>What the axis will look like</h3><span class="chip fail" style="background:var(--sunken);color:var(--muted)">runs pending</span></div>
+      <div class="svgbox"><svg viewBox="0 0 640 230" role="img" aria-label="Empty axes for the pending registration-error curves">
+        <line x1="70" y1="190" x2="610" y2="190" stroke="var(--line)" stroke-width="1.5"/>
+        <line x1="70" y1="20" x2="70" y2="190" stroke="var(--line)" stroke-width="1.5"/>
+        <g id="ax-ticks"></g>
+        <text x="340" y="224" text-anchor="middle" class="lbl-s">injected corner misalignment on training pairs (px)</text>
+        <text x="22" y="105" text-anchor="middle" class="lbl-s" transform="rotate(-90 22 105)">mAP@50 on untouched val</text>
+        <g transform="translate(400,40)">
+          <line x1="0" y1="0" x2="26" y2="0" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="5 4"/><text x="34" y="4" class="lbl-s">translation (1 seed, CI over images)</text>
+          <line x1="0" y1="22" x2="26" y2="22" stroke="var(--vis)" stroke-width="2.5" stroke-dasharray="5 4"/><text x="34" y="26" class="lbl-s">label transfer (3 seeds)</text>
+        </g>
+        <text x="340" y="120" text-anchor="middle" class="lbl" style="fill:var(--muted)">No points yet: the degradation report is the last open task</text>
+      </svg></div>
+      <p class="muted" style="font-size:0.9rem">Neither 0 px is truly zero. Custom-set validation boxes already carry the sister project's registration error. FLIR is de-rolled first, by its measured −1.18° roll, but about 5.9 px of per-pixel residual remains.</p>
+    </div>
+
+    <details class="measured">
+      <summary>What we measured</summary>
+      <div class="body">
+        <ul class="facts">
+          <li><span class="src">rec 014</span><span>FLIR's mirrored labels were 1.18° off. De-rolling them raised the raw-thermal floor by only 0.57 of a point, 2.7% of the headroom. At that recall the judge was missing objects, not box positions.</span></li>
+          <li><span class="src">rec 011</span><span>Label transfer at full budget: a thermal detector trained on 600 transferred labels scores <span class="num">0.9300</span>. The translation route with zero thermal labels scores <span class="num">0.7975</span>. Direct thermal catches up at about 150 labelled images.</span></li>
+          <li><span class="src">rec 012</span><span>FLIR's calibration: 5.90 px per-pixel residual after de-roll (9.32 px on the mean-corner measure the axis uses), with about 2.25 px of per-pair scatter that cannot be removed.</span></li>
+        </ul>
+      </div>
+    </details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">Built from <code>metrics/faithfulness.py</code>, <code>engine/loop.py</code>, <code>coupling/</code>, <code>data/misalignment.py</code>, <code>docs/design.md</code> §8 and §12, <code>docs/goal.md</code>, the registration-axis plan, and experiment records 005–035. Toy scenes are illustrations. Every number in a "What we measured" panel comes from a record.</div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent, text) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function iou(a, b) {
+    var ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+    var iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+    var inter = ix * iy;
+    var ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
+    return ua > 0 ? inter / ua : 0;
+  }
+  function fmt(x, d) { return x.toFixed(d == null ? 2 : d); }
+  function signed(x, d) { return (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(d == null ? 4 : d); }
+
+  /* ---------------- Part 1: matcher ---------------- */
+  var GT = [
+    { id: "Pole", cls: "Pole", box: [138, 26, 170, 392] },
+    { id: "Transformer", cls: "Transformer", box: [166, 216, 234, 304] },
+    { id: "Fuse A", cls: "Fuse", box: [296, 98, 326, 164] },
+    { id: "Fuse B", cls: "Fuse", box: [376, 98, 406, 164] },
+    { id: "Switch", cls: "Switch", box: [436, 52, 524, 92] }
+  ];
+  var VIS = [
+    { cls: "Pole", box: [139, 28, 171, 390] },
+    { cls: "Transformer", box: [167, 218, 233, 303] },
+    { cls: "Fuse", box: [297, 99, 325, 163] },
+    { cls: "Fuse", box: [377, 99, 405, 163] },
+    { cls: "Switch", box: [437, 53, 523, 91] }
+  ];
+  var PRED = [
+    { cls: "Pole", conf: 0.92, box: [136, 32, 172, 386] },
+    { cls: "Transformer", conf: 0.88, box: [170, 222, 238, 308] },
+    { cls: "Fuse", conf: 0.81, box: [298, 104, 326, 168] },
+    { cls: "Switch", conf: 0.66, box: [452, 62, 540, 100] },
+    { cls: "Fuse", conf: 0.52, box: [244, 236, 266, 296] },
+    { cls: "Fuse", conf: 0.38, box: [300, 100, 330, 158] },
+    { cls: "Switch", conf: 0.17, box: [566, 300, 606, 332] }
+  ];
+  var CONF = 0.25;
+
+  function greedy(preds, refs, thr) {
+    var claimed = refs.map(function () { return false; });
+    var order = preds.slice().sort(function (a, b) { return b.conf - a.conf; });
+    return {
+      steps: order.map(function (p) {
+        var best = -1, bestIou = -1, anyBest = 0, anyClaimed = false;
+        refs.forEach(function (r, j) {
+          if (r.cls !== p.cls) return;
+          var v = iou(p.box, r.box);
+          if (v > anyBest) { anyBest = v; anyClaimed = claimed[j]; }
+          if (!claimed[j] && v >= thr - 1e-9 && v > bestIou) { best = j; bestIou = v; }
+        });
+        if (best >= 0) claimed[best] = true;
+        return { pred: p, ref: best, iou: bestIou, anyBest: anyBest, anyClaimed: anyClaimed };
+      }),
+      claimed: claimed
+    };
+  }
+
+  var mState = { thr: 0.5, k: 99, showVis: false };
+  var mSvg = document.getElementById("m-svg");
+
+  function drawTranslatedScene(svg) {
+    var defs = el("defs", {}, svg);
+    var g = el("linearGradient", { id: "sky", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    el("stop", { offset: 0, "stop-color": "var(--img-sky1)" }, g);
+    el("stop", { offset: 1, "stop-color": "var(--img-sky2)" }, g);
+    el("rect", { x: 0, y: 0, width: 640, height: 400, fill: "url(#sky)" }, svg);
+    el("rect", { x: 0, y: 340, width: 640, height: 60, fill: "var(--img-ground)" }, svg);
+    el("path", { d: "M 0 120 Q 320 150 640 118", stroke: "var(--img-metal-dark)", "stroke-width": 1.2, fill: "none" }, svg);
+    el("rect", { x: 146, y: 30, width: 16, height: 360, fill: "var(--img-wood)" }, svg);
+    el("rect", { x: 100, y: 86, width: 440, height: 10, fill: "var(--img-wood)" }, svg);
+    [[302, 100], [382, 100]].forEach(function (f) {
+      el("rect", { x: f[0], y: f[1], width: 18, height: 60, rx: 3, fill: "var(--img-metal)" }, svg);
+      el("rect", { x: f[0] - 2, y: f[1], width: 22, height: 8, fill: "var(--img-metal-dark)" }, svg);
+      el("rect", { x: f[0] - 2, y: f[1] + 52, width: 22, height: 8, fill: "var(--img-metal-dark)" }, svg);
+      el("line", { x1: f[0] + 9, y1: f[1] + 60, x2: 200, y2: 222, stroke: "var(--img-metal-dark)", "stroke-width": 1 }, svg);
+    });
+    el("rect", { x: 444, y: 76, width: 76, height: 10, fill: "var(--img-metal-dark)" }, svg);
+    el("line", { x1: 452, y1: 76, x2: 488, y2: 58, stroke: "var(--img-metal)", "stroke-width": 5 }, svg);
+    el("line", { x1: 492, y1: 76, x2: 516, y2: 60, stroke: "var(--img-metal)", "stroke-width": 5 }, svg);
+    el("rect", { x: 170, y: 220, width: 60, height: 80, rx: 6, fill: "var(--img-tx)" }, svg);
+    el("rect", { x: 176, y: 212, width: 10, height: 10, fill: "var(--img-metal-dark)" }, svg);
+    el("rect", { x: 214, y: 212, width: 10, height: 10, fill: "var(--img-metal-dark)" }, svg);
+  }
+
+  function boxLabel(svg, b, text, color, below) {
+    var y = below ? b[3] + 14 : b[1] - 5;
+    var t = el("text", { x: b[0], y: y, "font-size": 12, "font-family": "var(--font-mono)", fill: color, "paint-order": "stroke", stroke: "var(--img-sky2)", "stroke-width": 3 }, svg, text);
+    return t;
+  }
+
+  function renderMatcher() {
+    var thr = mState.thr;
+    var kept = PRED.filter(function (p) { return p.conf >= CONF; });
+    var dropped = PRED.filter(function (p) { return p.conf < CONF; });
+    var res = greedy(kept, GT, thr);
+    var visRes = greedy(kept, VIS, thr);
+    var k = Math.min(mState.k, res.steps.length);
+    var done = k >= res.steps.length;
+
+    while (mSvg.firstChild) mSvg.removeChild(mSvg.firstChild);
+    drawTranslatedScene(mSvg);
+
+    // ground truth: dashed
+    var claimedSoFar = GT.map(function () { return false; });
+    res.steps.slice(0, k).forEach(function (s) { if (s.ref >= 0) claimedSoFar[s.ref] = true; });
+    GT.forEach(function (g, j) {
+      var b = g.box;
+      var col = done && !claimedSoFar[j] ? "var(--bad)" : "var(--img-ink)";
+      el("rect", { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], fill: "none", stroke: col, "stroke-width": done && !claimedSoFar[j] ? 2.5 : 1.6, "stroke-dasharray": "5 4" }, mSvg);
+      if (done && !claimedSoFar[j]) boxLabel(mSvg, b, "erased " + g.cls, "var(--bad)", true);
+    });
+
+    if (mState.showVis) {
+      VIS.forEach(function (v) {
+        var b = v.box;
+        el("rect", { x: b[0] - 3, y: b[1] - 3, width: b[2] - b[0] + 6, height: b[3] - b[1] + 6, fill: "none", stroke: "var(--vis)", "stroke-width": 1.5, "stroke-dasharray": "2 3" }, mSvg);
+      });
+    }
+
+    dropped.forEach(function (p) {
+      var b = p.box;
+      el("rect", { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], fill: "none", stroke: "var(--img-metal-dark)", "stroke-width": 1.5, opacity: 0.6 }, mSvg);
+      boxLabel(mSvg, b, p.cls + " " + fmt(p.conf) + " (dropped)", "var(--img-metal-dark)");
+    });
+
+    res.steps.forEach(function (s, i) {
+      var b = s.pred.box;
+      var state = i < k ? (s.ref >= 0 ? "ok" : "no") : "pending";
+      var col = state === "ok" ? "var(--good)" : state === "no" ? "var(--bad)" : "var(--img-metal-dark)";
+      var isNow = i === k - 1 && !done;
+      el("rect", { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], fill: state === "no" ? "var(--bad)" : "none", "fill-opacity": 0.12, stroke: isNow ? "var(--accent)" : col, "stroke-width": isNow ? 3.5 : 2.2, opacity: state === "pending" ? 0.55 : 1 }, mSvg);
+      var lab = s.pred.cls + " " + fmt(s.pred.conf);
+      var below = (s.pred.cls === "Fuse" && s.pred.conf < 0.5 && s.pred.box[1] < 120);
+      boxLabel(mSvg, b, lab, col, below);
+    });
+
+    // log
+    var log = document.getElementById("m-log");
+    log.innerHTML = "";
+    res.steps.forEach(function (s, i) {
+      var li = document.createElement("li");
+      var msg;
+      if (i >= k) { li.className = "pending"; msg = s.pred.cls + " " + fmt(s.pred.conf) + ": not visited yet"; }
+      else if (s.ref >= 0) { li.className = "ok"; msg = s.pred.cls + " " + fmt(s.pred.conf) + " → matches " + GT[s.ref].id + " at IoU " + fmt(s.iou) + ". Correct."; }
+      else {
+        li.className = "no";
+        if (s.anyBest === 0) msg = s.pred.cls + " " + fmt(s.pred.conf) + " → no " + s.pred.cls.toLowerCase() + " anywhere near it. Invented.";
+        else if (s.anyClaimed && s.anyBest >= thr) msg = s.pred.cls + " " + fmt(s.pred.conf) + " → its best box (IoU " + fmt(s.anyBest) + ") was already claimed by a more confident prediction. A duplicate counts as invented.";
+        else msg = s.pred.cls + " " + fmt(s.pred.conf) + " → best overlap IoU " + fmt(s.anyBest) + " is under " + fmt(thr) + ". Invented.";
+      }
+      if (i === k - 1 && !done) li.className += " now";
+      li.innerHTML = '<span class="n">' + (i + 1) + "</span><span></span>";
+      li.lastChild.textContent = msg;
+      log.appendChild(li);
+    });
+    dropped.forEach(function (p) {
+      var li = document.createElement("li");
+      li.className = "skip";
+      li.innerHTML = '<span class="n">–</span><span></span>';
+      li.lastChild.textContent = p.cls + " " + fmt(p.conf) + ": below confidence 0.25, dropped before matching.";
+      log.appendChild(li);
+    });
+
+    // tiles
+    var visited = res.steps.slice(0, k);
+    var falseN = visited.filter(function (s) { return s.ref < 0; }).length;
+    var total = res.steps.length;
+    document.getElementById("t-false").textContent = done ? fmt(falseN / total) : falseN + " so far";
+    document.getElementById("t-false-f").textContent = done ? falseN + " unmatched of " + total + " predictions" : "after " + k + " of " + total + " predictions";
+    if (done) {
+      var missed = res.claimed.filter(function (c) { return !c; }).length;
+      var consN = visRes.claimed.filter(function (c) { return c; }).length;
+      document.getElementById("t-miss").textContent = fmt(missed / GT.length);
+      document.getElementById("t-miss-f").textContent = missed + " unmatched of " + GT.length + " ground-truth boxes";
+      document.getElementById("t-cons").textContent = fmt(consN / VIS.length);
+      document.getElementById("t-cons-f").textContent = consN + " of " + VIS.length + " visible-photo boxes found again";
+    } else {
+      document.getElementById("t-miss").textContent = "–";
+      document.getElementById("t-miss-f").textContent = "counted once every prediction is visited";
+      document.getElementById("t-cons").textContent = "–";
+      document.getElementById("t-cons-f").textContent = "counted at the end";
+    }
+    document.getElementById("m-step").disabled = done;
+  }
+
+  document.getElementById("m-step").addEventListener("click", function () { mState.k += 1; renderMatcher(); });
+  document.getElementById("m-reset").addEventListener("click", function () { mState.k = 0; renderMatcher(); });
+  document.getElementById("m-all").addEventListener("click", function () { mState.k = 99; renderMatcher(); });
+  document.getElementById("m-iou").addEventListener("input", function (e) {
+    mState.thr = parseFloat(e.target.value);
+    document.getElementById("m-iou-v").textContent = fmt(mState.thr);
+    renderMatcher();
+  });
+  document.getElementById("m-vis").addEventListener("change", function (e) { mState.showVis = e.target.checked; renderMatcher(); });
+  renderMatcher();
+
+  /* ---------------- Part 1: sign-flip ---------------- */
+  var SEEDS = [0.041, 0.063, 0.028, 0.072, 0.055, 0.048];
+  var sfSign = [1, 1, 1, 1, 1, 1];
+  var sfN = 6;
+  var seedBox = document.getElementById("sf-seeds");
+  SEEDS.forEach(function (d, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.addEventListener("click", function () { sfSign[i] *= -1; renderSF(); });
+    seedBox.appendChild(b);
+  });
+  document.querySelectorAll("#signflip .seg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      sfN = parseInt(b.dataset.n, 10);
+      document.querySelectorAll("#signflip .seg button").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      renderSF();
+    });
+  });
+
+  function renderSF() {
+    var d = SEEDS.slice(0, sfN).map(function (v, i) { return v * sfSign[i]; });
+    var btns = seedBox.querySelectorAll("button");
+    btns.forEach(function (b, i) {
+      b.hidden = i >= sfN;
+      var v = SEEDS[i] * sfSign[i];
+      b.className = v >= 0 ? "pos" : "neg";
+      b.textContent = "s" + i + "  " + (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3);
+      b.setAttribute("aria-label", "Seed " + i + ", difference " + v.toFixed(3) + ". Click to flip its sign.");
+    });
+    var mean = d.reduce(function (a, b) { return a + b; }, 0) / sfN;
+    var abs = d.map(Math.abs);
+    var total = 1 << sfN, extreme = 0, means = [];
+    for (var m = 0; m < total; m++) {
+      var s = 0;
+      for (var i = 0; i < sfN; i++) s += (m >> i & 1) ? -abs[i] : abs[i];
+      s /= sfN;
+      var ex = Math.abs(s) >= Math.abs(mean) - 1e-12;
+      if (ex) extreme++;
+      means.push({ v: s, ex: ex });
+    }
+    var p = extreme / total;
+    document.getElementById("sf-mean").textContent = signed(mean, 4);
+    document.getElementById("sf-count").textContent = extreme + " of " + total;
+    document.getElementById("sf-p").textContent = p.toFixed(3);
+    document.getElementById("sf-pf").textContent = p < 0.05 ? "below 0.05" : (extreme === 2 ? "the smallest p " + sfN + " seeds allow" : "not below 0.05");
+
+    var svg = document.getElementById("sf-svg");
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var maxAbs = abs.reduce(function (a, b) { return a + b; }, 0) / sfN;
+    var x0 = 40, x1 = 600, base = 135;
+    function X(v) { return x0 + (v + maxAbs) / (2 * maxAbs) * (x1 - x0); }
+    el("line", { x1: x0, y1: base + 6, x2: x1, y2: base + 6, stroke: "var(--line)", "stroke-width": 1.5 }, svg);
+    el("line", { x1: X(0), y1: 14, x2: X(0), y2: base + 12, stroke: "var(--line)", "stroke-dasharray": "3 3" }, svg);
+    el("text", { x: X(0), y: base + 26, "text-anchor": "middle", class: "lbl-s" }, svg, "0");
+    el("text", { x: x0, y: base + 26, "text-anchor": "start", class: "lbl-s mono" }, svg, signed(-maxAbs, 3));
+    el("text", { x: x1, y: base + 26, "text-anchor": "end", class: "lbl-s mono" }, svg, signed(maxAbs, 3));
+    var bins = {};
+    var r = sfN === 6 ? 4.2 : 7;
+    var binW = r * 2.2;
+    means.sort(function (a, b) { return a.v - b.v; });
+    means.forEach(function (o) {
+      var key = Math.round((X(o.v) - x0) / binW);
+      bins[key] = (bins[key] || 0) + 1;
+      var cx = x0 + key * binW, cy = base - (bins[key] - 1) * (r * 2.1) - r;
+      el("circle", { cx: cx, cy: cy, r: r, fill: o.ex ? "var(--accent)" : "var(--line)" }, svg);
+    });
+    el("line", { x1: X(mean), y1: 8, x2: X(mean), y2: base + 6, stroke: "var(--ink)", "stroke-width": 1.5 }, svg);
+    el("text", { x: Math.min(Math.max(X(mean), 70), 570), y: 10, "text-anchor": "middle", class: "lbl-s" }, svg, "observed mean");
+  }
+  renderSF();
+
+  /* ---------------- Part 1: CI vs margin ---------------- */
+  var VERDICT = [
+    ["e3b", "false-object", -0.0177, -0.0324, 0.0014, 0.0179, ".156", true, "lo"],
+    ["e3b", "missed-object", -0.0299, -0.0394, -0.0173, 0.0094, ".031", true, "lo"],
+    ["e3b", "consistency", 0.0309, 0.0200, 0.0418, 0.0075, ".031", true, "hi"],
+    ["e3t", "false-object", 0.0040, -0.0461, 0.0538, 0.0315, ".750", false, "lo"],
+    ["e3t", "missed-object", -0.0173, -0.0284, -0.0024, 0.0112, ".250", true, "lo"],
+    ["e3t", "consistency", 0.0269, 0.0240, 0.0305, 0.0038, ".250", true, "hi"],
+    ["e3f", "false-object", -0.1487, -0.1647, -0.1356, 0.0169, ".031", true, "lo"],
+    ["e3f", "missed-object", -0.3359, -0.4504, -0.2234, 0.1708, ".031", true, "lo"],
+    ["e3f", "consistency", 0.1997, 0.1153, 0.2820, 0.1222, ".031", true, "hi"],
+    ["e3md", "false-object", -0.0989, -0.1103, -0.0842, 0.0171, ".031", true, "lo"],
+    ["e3md", "missed-object", -0.1306, -0.1397, -0.1223, 0.0143, ".031", true, "lo"],
+    ["e3md", "consistency", 0.1001, 0.0925, 0.1070, 0.0107, ".031", true, "hi"]
+  ];
+  var tb = document.getElementById("verdict-rows");
+  VERDICT.forEach(function (r) {
+    var tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + r[0] + "</td><td>" + r[1] + '</td><td class="num">' + signed(r[2]) + '</td><td class="num">[' + signed(r[3]) + ", " + signed(r[4]) + ']</td><td class="num">' + r[5].toFixed(4) + '</td><td class="num">' + r[6] + '</td><td><span class="chip ' + (r[7] ? "pass" : "fail") + '">' + (r[7] ? "pass" : "FAIL") + "</span></td>";
+    tb.appendChild(tr);
+  });
+
+  (function drawCI() {
+    var svg = document.getElementById("ci-svg");
+    var rows = VERDICT.filter(function (r) { return (r[0] === "e3b" || r[0] === "e3t") && r[1] !== "consistency"; });
+    var lo = -0.05, hi = 0.06, x0 = 170, x1 = 620;
+    function X(v) { return x0 + (v - lo) / (hi - lo) * (x1 - x0); }
+    [-0.04, -0.02, 0, 0.02, 0.04, 0.06].forEach(function (t) {
+      el("line", { x1: X(t), y1: 18, x2: X(t), y2: 196, stroke: "var(--line)", "stroke-width": t === 0 ? 1.5 : 1, "stroke-dasharray": t === 0 ? "" : "2 4" }, svg);
+      el("text", { x: X(t), y: 214, "text-anchor": "middle", class: "lbl-s mono" }, svg, (t > 0 ? "+" : t < 0 ? "−" : "") + Math.abs(t).toFixed(2));
+    });
+    el("text", { x: X(-0.045), y: 12, class: "lbl-s" }, svg, "← loop better");
+    el("text", { x: X(0.055), y: 12, "text-anchor": "end", class: "lbl-s" }, svg, "loop worse →");
+    rows.forEach(function (r, i) {
+      var y = 44 + i * 44;
+      var ok = r[7];
+      var col = ok ? "var(--good)" : "var(--bad)";
+      el("text", { x: 10, y: y + 4, class: "lbl" }, svg, (r[0] === "e3b" ? "pix2pix" : "turbo") + " · " + r[1].replace("-object", ""));
+      el("rect", { x: X(-0.05), y: y - 12, width: X(r[5]) - X(-0.05), height: 24, fill: "var(--good-soft)" }, svg);
+      el("line", { x1: X(r[5]), y1: y - 15, x2: X(r[5]), y2: y + 15, stroke: "var(--ink)", "stroke-width": 2 }, svg);
+      el("text", { x: X(r[5]) + 4, y: y - 16, class: "lbl-s mono" }, svg, "margin " + r[5].toFixed(4));
+      el("line", { x1: X(r[3]), y1: y, x2: X(r[4]), y2: y, stroke: col, "stroke-width": 3 }, svg);
+      el("line", { x1: X(r[3]), y1: y - 6, x2: X(r[3]), y2: y + 6, stroke: col, "stroke-width": 2 }, svg);
+      el("line", { x1: X(r[4]), y1: y - 6, x2: X(r[4]), y2: y + 6, stroke: col, "stroke-width": 2 }, svg);
+      el("circle", { cx: X(r[2]), cy: y, r: 5, fill: col }, svg);
+    });
+  })();
+
+  /* ---------------- Part 2: loop ---------------- */
+  var L = { arm: "loop", stage: 0, dose: "0.15" };
+  var SHARE = { "0.15": [0, 10.0, 16.1, 19.8], "0.01": [0, 0.9, 1.7, 2.3] };
+  var W = [0, 1, 2, 3];
+  var STAGE_TEXT = [
+    "Weight 0. The translator learns only to look like the visible photo. The detector is not built. Both arms are identical here, so any loop − control gap at this stage is seed noise: the experiment's built-in null check.",
+    "Weight 1. The detection term switches on. Each image's gradient now also says 'make what the detector needs easier to see'.",
+    "Weight 2. Same translator, still learning, with twice the detection push.",
+    "Weight 3, the strongest push. The stage-3 export is the one every headline number is read from."
+  ];
+  function renderLoop() {
+    var g = L.dose === "0.15" ? 0.15 : 0.01;
+    var w = L.arm === "control" ? 0 : W[L.stage];
+    var on = w > 0;
+    var det = document.getElementById("l-det");
+    det.style.opacity = on ? 1 : 0.28;
+    document.getElementById("l-det-back").style.display = on ? "" : "none";
+    document.getElementById("l-det-lbl").textContent = on ? "gradient × " + g + " × " + w + " = " + (g * w).toFixed(2) : "";
+    document.getElementById("l-det-sub").textContent = on ? "detection loss vs. the boxes" : "weight 0: never constructed";
+    document.getElementById("l-title").textContent = "Stage " + L.stage + (L.arm === "control" ? " · control arm" : " · loop arm");
+    document.getElementById("l-text").textContent = L.arm === "control"
+      ? (L.stage === 0 ? STAGE_TEXT[0] : "Weight 0 again. The control trains the same 100 epochs through the same machinery, without the detection term. λ is the only thing that differs from the loop arm.")
+      : STAGE_TEXT[L.stage];
+    document.querySelectorAll("#loopviz [data-stage]").forEach(function (b) { b.setAttribute("aria-pressed", String(parseInt(b.dataset.stage, 10) === L.stage)); });
+    document.querySelectorAll("#loopviz [data-arm]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.arm === L.arm)); });
+    document.querySelectorAll("#loopviz [data-dose]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.dose === L.dose)); });
+    var bars = document.getElementById("l-bars");
+    bars.innerHTML = "";
+    SHARE[L.dose].forEach(function (s, i) {
+      var v = L.arm === "control" ? 0 : s;
+      var row = document.createElement("div");
+      row.className = "stagerow" + (i === L.stage ? "" : " dim");
+      row.innerHTML = '<span class="mono">stage ' + i + '</span><div class="track"><div class="fill"></div></div><span class="num" style="text-align:right">' + v.toFixed(1) + "%</span>";
+      bars.appendChild(row);
+      requestAnimationFrame(function () { row.querySelector(".fill").style.width = Math.min(100, v / 30 * 100) + "%"; });
+    });
+    document.getElementById("l-dose-note").textContent = L.dose === "0.15"
+      ? "Bar length is out of 30%, the top of the target band. At 0.15 the pix2pix loop beat its control by +0.0512 mAP@50 at stage 3 (p = .031)."
+      : "Bar length is out of 30%. At 0.01 the detection term was too weak to matter: +0.0070 at stage 3 (p = .656), a null caused by dose, not by the idea.";
+  }
+  document.querySelectorAll("#loopviz [data-stage]").forEach(function (b) { b.addEventListener("click", function () { L.stage = parseInt(b.dataset.stage, 10); renderLoop(); }); });
+  document.querySelectorAll("#loopviz [data-arm]").forEach(function (b) { b.addEventListener("click", function () { L.arm = b.dataset.arm; renderLoop(); }); });
+  document.querySelectorAll("#loopviz [data-dose]").forEach(function (b) { b.addEventListener("click", function () { L.dose = b.dataset.dose; renderLoop(); }); });
+  document.getElementById("l-next").addEventListener("click", function () { L.stage = (L.stage + 1) % 4; renderLoop(); });
+  renderLoop();
+
+  /* ---------------- Part 3: registration ---------------- */
+  var CX = 320, CY = 240, CORNER_R = Math.sqrt(320 * 320 + 240 * 240);
+  var OBJ = [
+    { id: "Pole", box: [146, 16, 182, 474] },
+    { id: "Transformer", box: [176, 246, 254, 344] },
+    { id: "Switch", box: [246, 64, 334, 100] },
+    { id: "Inner fuse", box: [417, 110, 437, 158] },
+    { id: "Outer fuse", box: [557, 110, 577, 158] }
+  ];
+  function rot(x, y, th) {
+    var dx = x - CX, dy = y - CY, c = Math.cos(th), s = Math.sin(th);
+    return [CX + dx * c - dy * s, CY + dx * s + dy * c];
+  }
+  function rotBox(b, th) {
+    var pts = [rot(b[0], b[1], th), rot(b[2], b[1], th), rot(b[0], b[3], th), rot(b[2], b[3], th)];
+    var xs = pts.map(function (p) { return p[0]; }), ys = pts.map(function (p) { return p[1]; });
+    return [Math.min.apply(null, xs), Math.min.apply(null, ys), Math.max.apply(null, xs), Math.max.apply(null, ys)];
+  }
+  var rState = { px: 6, ghost: true };
+  function drawThermal(svg) {
+    var defs = el("defs", {}, svg);
+    var rg = el("radialGradient", { id: "thbg", cx: "40%", cy: "70%", r: "80%" }, defs);
+    el("stop", { offset: 0, "stop-color": "var(--th-bg2)" }, rg);
+    el("stop", { offset: 1, "stop-color": "var(--th-bg1)" }, rg);
+    var hot = el("linearGradient", { id: "hot", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    el("stop", { offset: 0, "stop-color": "var(--th-hot)" }, hot);
+    el("stop", { offset: 1, "stop-color": "var(--th-warm)" }, hot);
+    el("rect", { x: 0, y: 0, width: 640, height: 480, fill: "url(#thbg)" }, svg);
+    el("rect", { x: 150, y: 20, width: 28, height: 450, fill: "var(--th-cool)" }, svg);
+    el("rect", { x: 110, y: 100, width: 490, height: 10, fill: "var(--th-cool)" }, svg);
+    el("rect", { x: 180, y: 250, width: 70, height: 90, rx: 6, fill: "var(--th-mid)" }, svg);
+    el("rect", { x: 192, y: 262, width: 46, height: 30, rx: 4, fill: "var(--th-warm)", opacity: 0.8 }, svg);
+    el("rect", { x: 250, y: 70, width: 80, height: 26, fill: "var(--th-mid)" }, svg);
+    [[420, 113], [560, 113]].forEach(function (f) { el("rect", { x: f[0], y: f[1], width: 14, height: 42, rx: 3, fill: "url(#hot)" }, svg); });
+  }
+  function drawGhost(svg, th) {
+    var deg = th * 180 / Math.PI;
+    var g = el("g", { transform: "rotate(" + deg + " " + CX + " " + CY + ")", fill: "none", stroke: "var(--img-ink)", "stroke-width": 1.2, opacity: 0.55 }, svg);
+    el("rect", { x: 150, y: 20, width: 28, height: 450 }, g);
+    el("rect", { x: 110, y: 100, width: 490, height: 10 }, g);
+    el("rect", { x: 180, y: 250, width: 70, height: 90, rx: 6 }, g);
+    el("rect", { x: 250, y: 70, width: 80, height: 26 }, g);
+    el("rect", { x: 420, y: 113, width: 14, height: 42, rx: 3 }, g);
+    el("rect", { x: 560, y: 113, width: 14, height: 42, rx: 3 }, g);
+    el("rect", { x: 1, y: 1, width: 638, height: 478, "stroke-dasharray": "6 6" }, g);
+  }
+  function renderReg() {
+    var px = rState.px, th = px / CORNER_R;
+    document.getElementById("r-px-v").textContent = (px % 1 ? px.toFixed(1) : px) + " px";
+    document.getElementById("r-px").value = px;
+    document.querySelectorAll("#regviz [data-px]").forEach(function (b) { b.setAttribute("aria-pressed", String(parseFloat(b.dataset.px) === px)); });
+    var svg = document.getElementById("r-svg");
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    drawThermal(svg);
+    if (rState.ghost) drawGhost(svg, th);
+    var rows = document.getElementById("r-rows");
+    rows.innerHTML = "";
+    var failing = [];
+    OBJ.forEach(function (o) {
+      var b = o.box, m = rotBox(b, th);
+      var v = iou(b, m);
+      var c0 = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2], c1 = rot(c0[0], c0[1], th);
+      var moved = Math.hypot(c1[0] - c0[0], c1[1] - c0[1]);
+      el("rect", { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], fill: "none", stroke: "var(--img-ink)", "stroke-width": 1.4, "stroke-dasharray": "4 4" }, svg);
+      var ok = v >= 0.5;
+      el("rect", { x: m[0], y: m[1], width: m[2] - m[0], height: m[3] - m[1], fill: "none", stroke: ok ? "var(--th-hot)" : "var(--bad)", "stroke-width": 2.4 }, svg);
+      if (!ok) failing.push(o.id);
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + o.id + '</td><td class="num">' + moved.toFixed(1) + ' px</td><td class="num">' + v.toFixed(2) + '</td><td><span class="chip ' + (ok ? "pass" : "fail") + '">' + (ok ? "still matches" : "missed + invented") + "</span></td>";
+      rows.appendChild(tr);
+    });
+    var note;
+    if (px === 0) note = "0 px: every transferred box lands exactly on its object.";
+    else if (!failing.length) note = "At " + px + " px every box still clears IoU 0.5, but overlap is already falling, fastest for the thin pole.";
+    else note = "At " + px + " px, " + failing.join(", ") + " fall under IoU 0.5. A detector trained on these labels learns that offset, and scoring against these labels would charge a perfect detector for it.";
+    document.getElementById("r-note").textContent = note;
+  }
+  document.getElementById("r-px").addEventListener("input", function (e) { rState.px = parseFloat(e.target.value); renderReg(); });
+  document.querySelectorAll("#regviz [data-px]").forEach(function (b) { b.addEventListener("click", function () { rState.px = parseFloat(b.dataset.px); renderReg(); }); });
+  document.getElementById("r-ghost").addEventListener("change", function (e) { rState.ghost = e.target.checked; renderReg(); });
+  renderReg();
+
+  (function axisTicks() {
+    var g = document.getElementById("ax-ticks");
+    [0, 3, 6, 12, 24].forEach(function (t) {
+      var x = 70 + t / 24 * 520 + (t === 0 ? 12 : 0);
+      el("line", { x1: x, y1: 190, x2: x, y2: 196, stroke: "var(--muted)" }, g);
+      el("text", { x: x, y: 208, "text-anchor": "middle", class: "lbl-s mono" }, g, String(t));
+    });
+  })();
+})();
+</script>
