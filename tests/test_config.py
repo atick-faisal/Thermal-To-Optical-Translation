@@ -320,6 +320,28 @@ def test_an_unset_calibration_stays_in_the_snapshot(tmp_path: Path) -> None:
     assert yaml.safe_load(snapshot.read_text())["data"]["calibration"] is None
 
 
+@pytest.mark.parametrize(("name", "expected"), sorted(PINNED_HASHES.items()))
+def test_paired_visible_leaves_existing_hashes_alone(name: str, expected: str) -> None:
+    config = Config.load(EXPERIMENTS / name)
+    assert config.data.unpaired_visible is False
+    assert config.config_hash() == expected
+
+
+def test_paired_visible_leaves_the_default_hash_alone() -> None:
+    explicit_off = Config.load(overrides={"data": {"unpaired_visible": False}})
+    assert explicit_off.config_hash() == "4de85d4050b99bb7"
+
+
+def test_unpaired_visible_is_its_own_experiment() -> None:
+    unpaired = Config.load(overrides={"data": {"unpaired_visible": True}})
+    assert unpaired.config_hash() != Config.load().config_hash()
+
+
+def test_paired_visible_stays_in_the_snapshot(tmp_path: Path) -> None:
+    snapshot = Config.load().snapshot(tmp_path)
+    assert yaml.safe_load(snapshot.read_text())["data"]["unpaired_visible"] is False
+
+
 @pytest.mark.parametrize("level", [-3.0, float("nan"), float("inf")])
 def test_a_misalignment_that_is_not_a_pixel_count_is_rejected(level: float) -> None:
     with pytest.raises(ConfigError, match="non-negative pixel count"):

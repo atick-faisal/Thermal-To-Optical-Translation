@@ -86,6 +86,29 @@ def test_misalignment_reaches_the_train_pairs_and_never_val(
         assert torch.equal(trainer.val_dataset[index].bboxes, aligned.val_dataset[index].bboxes)
 
 
+def test_unpaired_visible_reaches_the_train_pairs_and_never_val(
+    data_yaml: Path, tmp_path: Path
+) -> None:
+    # cyclegan-cascade Q6: val stays the paired reference LPIPS and faithfulness score against.
+    manifest = DatasetManifest.load(data_yaml)
+    unpaired = Config.load(
+        overrides={"data": {"unpaired_visible": True}, "runtime": {"workers": 0}}
+    )
+    trainer = Trainer(unpaired, manifest, StubTranslator(hidden_channels=4), tmp_path / "a")
+    paired = Trainer(_config(), manifest, StubTranslator(hidden_channels=4), tmp_path / "b")
+
+    train, reference = trainer.train_dataset, paired.train_dataset
+    moved = [
+        i for i in range(len(train)) if not torch.equal(train[i].visible, reference[i].visible)
+    ]
+    assert moved
+    for index in moved:
+        assert torch.equal(train[index].infrared, reference[index].infrared)
+    for index in range(len(trainer.val_dataset)):
+        assert torch.equal(trainer.val_dataset[index].visible, paired.val_dataset[index].visible)
+        assert torch.equal(trainer.val_dataset[index].bboxes, paired.val_dataset[index].bboxes)
+
+
 def test_a_calibration_reaches_the_train_pairs_and_never_val(
     derolled_tree: tuple[Path, Path], tmp_path: Path
 ) -> None:

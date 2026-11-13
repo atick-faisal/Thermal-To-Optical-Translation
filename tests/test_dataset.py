@@ -486,3 +486,72 @@ def test_a_calibration_de_rolls_the_target_and_reads_thermal_boxes(
     assert torch.equal(after.cls, parsed[:, :1])
     assert torch.equal(after.bboxes, parsed[:, 1:])
     assert not torch.equal(after.bboxes, before.bboxes)
+
+
+# --------------------------------------------------------------------------- unpaired (Q6)
+
+
+def _target_indices(unpaired: TranslationPairDataset, paired: TranslationPairDataset) -> list[int]:
+    """For each unpaired item, the index of the paired item whose visible frame it loaded."""
+    targets = [paired[j].visible for j in range(len(paired))]
+    return [
+        next(j for j, target in enumerate(targets) if torch.equal(unpaired[i].visible, target))
+        for i in range(len(unpaired))
+    ]
+
+
+def test_unpaired_targets_are_other_frames_and_the_input_keeps_its_own(
+    dataset_root: Path,
+) -> None:
+    paired = TranslationPairDataset(_images(dataset_root))
+    unpaired = TranslationPairDataset(_images(dataset_root), unpaired_visible=True)
+
+    order = _target_indices(unpaired, paired)
+    # A permutation: every visible frame is still a target exactly once per epoch.
+    assert sorted(order) == list(range(len(paired)))
+    assert order != list(range(len(paired)))
+    for index in range(len(paired)):
+        before, after = paired[index], unpaired[index]
+        # The input, its boxes and its name never follow the target.
+        assert torch.equal(after.infrared, before.infrared)
+        assert torch.equal(after.cls, before.cls)
+        assert torch.equal(after.bboxes, before.bboxes)
+        assert after.name == before.name
+
+
+def test_unpaired_targets_are_reproducible_for_one_seed(dataset_root: Path) -> None:
+    paired = TranslationPairDataset(_images(dataset_root))
+
+    def order(seed: int) -> list[int]:
+        dataset = TranslationPairDataset(
+            _images(dataset_root), unpaired_visible=True, augment_seed=seed
+        )
+        return _target_indices(dataset, paired)
+
+    assert order(0) == order(0)
+    assert order(0) != order(1)
+
+
+def test_unpaired_keeps_the_annotation_subset_on_the_input(dataset_root: Path) -> None:
+    paired = TranslationPairDataset(_images(dataset_root), annotation_fraction=0.4)
+    unpaired = TranslationPairDataset(
+        _images(dataset_root), annotation_fraction=0.4, unpaired_visible=True
+    )
+    assert unpaired._annotated == paired._annotated
+    for index in range(len(paired)):
+        assert torch.equal(unpaired[index].bboxes, paired[index].bboxes)
+
+
+def test_unpaired_refuses_a_misalignment_level(dataset_root: Path) -> None:
+    with pytest.raises(ValueError, match="unpaired_visible cannot be combined"):
+        TranslationPairDataset(_images(dataset_root), unpaired_visible=True, misalignment_px=12.0)
+
+
+def test_unpaired_refuses_a_calibration(derolled_tree: tuple[Path, Path]) -> None:
+    data, calibration_path = derolled_tree
+    with pytest.raises(ValueError, match="unpaired_visible cannot be combined"):
+        TranslationPairDataset(
+            _images(data.parent),
+            unpaired_visible=True,
+            calibration=load_calibration(calibration_path),
+        )
