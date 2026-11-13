@@ -14,6 +14,7 @@ arithmetic slip in the pooling would misdirect a ~72 GPU-hour decision.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -178,3 +179,32 @@ def test_terms_only_accepts_a_mixed_glob_without_dropping_the_control_runs(
     _write_run(tmp_path, "control-s1", 1, [0.0, 0.0], [[], []])
 
     assert main(["--runs", str(tmp_path / "control-s*"), "--terms-only"]) == 0
+
+
+def test_report_shows_cyclegan_cycle_and_identity_terms(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """CycleGAN's `fit` returns `loss_cycle`/`loss_idt` and no paired terms (cyclegan-cascade).
+
+    The -05 calibration reads the detection share against them, so they need their own
+    columns rather than vanishing from the table.
+    """
+    run_dir = tmp_path / "cascade-loop-s0"
+    run_dir.mkdir()
+    losses = {"loss_gan": 0.6, "loss_cycle": 2.0, "loss_idt": 0.9, "loss_det": 0.5}
+    epochs = [{"epoch": 0, "train_losses": {**losses, "loss_total": 4.0}, "val_loss": 1.0}]
+    (run_dir / "metrics.json").write_text(
+        json.dumps([{"stage": 0, "task_weight": 1.0, "epochs": epochs}])
+    )
+    (run_dir / "config.yaml").write_text(
+        "train:\n  seed: 0\ncoupling:\n  task_weights: [1.0]\n  grad_scale: 0.01\n"
+        "runtime:\n  name: cascade-loop-s0\n"
+    )
+
+    with caplog.at_level(logging.INFO, logger="scripts.loss_share"):
+        assert main(["--runs", str(run_dir)]) == 0
+
+    header, row = (r.getMessage() for r in caplog.records[:2])
+    assert "loss_cycle" in header and "loss_idt" in header
+    assert "2.0000" in row and "0.9000" in row
+    assert "12.5%" in row  # 1.0 * 0.5 of 4.0
