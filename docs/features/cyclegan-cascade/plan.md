@@ -100,12 +100,6 @@ passes a faithfulness gate fixed before its first score.
 
 ## Open Questions
 
-### Q11: What batch size do both arms train at?
-
-- [x] Batch 1, upstream CycleGAN's (recommended) — keeps Q9/Q10's upstream schedule at upstream's 120k updates over 200 epochs, and removes the risk of running out of memory with four fp32 networks plus the detector. Estimated at about twice the wall clock of batch 8. *Human's answer, 2026-11-14.*
-- [ ] Batch 8, E3's — faster and the same as the pix2pix campaigns, but only ~15k updates, with the decay starting at 7.5k, so the GAN may stop before it settles.
-- [ ] Batch 4 — ~30k updates, but it matches neither upstream nor E3 and needs its own justification in the record.
-
 ## Resolved
 
 ### Q1: How is this side quest framed?
@@ -163,6 +157,12 @@ passes a faithfulness gate fixed before its first score.
 
 - [x] Upstream's: constant for the first half of the run, then linear decay to zero over the second (recommended) — this is what Q9's "CycleGAN's usual length" means upstream (`n_epochs` 100 + `n_epochs_decay` 100). Built as ModTr does (`translators/modtr.py:65-114`): the step count from `_count_training_batches`, the schedule stepped per batch, and both optimizers and schedules saved through `get_extra_state`, so a resume continues the decay instead of restarting it.
 - [ ] Constant rate throughout, like this repo's pix2pix — less code, but the exported final checkpoint comes from a GAN still at full LR, a resume resets Adam's moments, and the deviation must be cited in the module docstring.
+
+### Q11: What batch size do both arms train at?
+
+- [x] Batch 1, upstream CycleGAN's (recommended) — keeps Q9/Q10's upstream schedule at upstream's 120k updates over 200 epochs, and removes the risk of running out of memory with four fp32 networks plus the detector. Estimated at about twice the wall clock of batch 8. *Human's answer, 2026-11-14.*
+- [ ] Batch 8, E3's — faster and the same as the pix2pix campaigns, but only ~15k updates, with the decay starting at 7.5k, so the GAN may stop before it settles.
+- [ ] Batch 4 — ~30k updates, but it matches neither upstream nor E3 and needs its own justification in the record.
 
 ## Out of Scope
 
