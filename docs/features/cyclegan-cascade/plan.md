@@ -75,6 +75,16 @@ passes a faithfulness gate fixed before its first score.
   checkpoints (Q5).
 - **Testing:** every piece runs on `tmp_path_factory` synthetic pairs on CPU in seconds. Any
   end-to-end loop run gets the `slow` marker.
+- **CycleGAN's losses and layers** (CYCLEGAN-CASCADE-03). Adversarial weight is the shared
+  `loss.gan`, both directions summed and logged as `loss_gan`; cycle (10) and identity (0.5)
+  weights are `CycleGANTranslatorConfig` fields at upstream's defaults. Paired `loss.l2`/
+  `loss.lpips` mean nothing once -02 decouples the train target, so `build_translator` refuses
+  `cyclegan` with either above 0 or with `loss.gan` at 0, as it does for ModTr. Upstream
+  CycleGAN's `instance` norm and `lsgan`, and unconditional discriminators (D_B on visible, D_A
+  on the stage-1 domain). `ImagePool` is vendored from upstream's `util/image_pool.py` at the
+  same pinned `2a7afba`, beside `networks.py`, pool size 50. `fit` also returns `loss_cycle` and
+  `loss_idt`, and `loss_share.py`'s display keys gain both. The identity term needs equal
+  channel counts, so ADR-01's loader change (-06) lands first.
 
 ## Open Questions
 
