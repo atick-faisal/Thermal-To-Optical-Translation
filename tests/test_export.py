@@ -9,6 +9,7 @@ shadows the local one on the pyright module search path, so a `from tests.confte
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +25,7 @@ from t2o.data.dataset import TranslationPairDataset
 from t2o.data.manifest import DatasetManifest
 from t2o.data.mirror import mirror_labels_onto_infrared
 from t2o.data.misalignment import Misalignment, misalign_label_lines
-from t2o.engine.export import export_split, export_translated
+from t2o.engine.export import ExportError, export_split, export_translated
 from t2o.imaging import Normalize
 from t2o.translators import StubTranslator
 
@@ -298,3 +299,100 @@ def test_generated_data_yaml_is_loadable_by_ultralytics(
     checked = check_det_dataset(str(data_yaml_path))
     assert checked["nc"] == 4
     assert Path(checked["train"]).exists()
+
+
+# --- paired export: the cyclegan-cascade's stage-1 input tree (plan Q8) ---------------------
+
+
+def _paired_export(translator: StubTranslator, source: Path, out: Path) -> Path:
+    return export_translated(translator, _config(source), out, paired=True).parent
+
+
+@pytest.mark.parametrize("split", ["train", "val"])
+def test_a_paired_export_loads_as_pairs_with_the_translation_as_infrared(
+    translator: StubTranslator, dataset_root: Path, tmp_path: Path, split: str
+) -> None:
+    tree = _paired_export(translator, dataset_root, tmp_path / "paired")
+    source = TranslationPairDataset(dataset_root / split / "visible" / "images")
+    export_split(translator, source, tmp_path / "plain", workers=0)
+
+    manifest = DatasetManifest.load(tree / "data.yaml")
+    images = manifest.train_images if split == "train" else manifest.val_images
+    pairs = TranslationPairDataset(images, pairing=manifest.pairing, num_classes=manifest.nc)
+
+    assert [Path(p).stem for p in pairs.visible_paths] == [
+        Path(p).stem for p in source.visible_paths
+    ]
+    for visible in pairs.visible_paths:
+        infrared = manifest.pairing.infrared_path(visible)
+        translated = tmp_path / "plain" / "images" / visible.name
+        assert np.array_equal(np.asarray(Image.open(infrared)), np.asarray(Image.open(translated)))
+
+
+def test_a_paired_export_keeps_the_visible_pixels_and_the_label_bytes(
+    translator: StubTranslator, dataset_root: Path, tmp_path: Path
+) -> None:
+    tree = _paired_export(translator, dataset_root, tmp_path / "paired")
+
+    compared = 0
+    for split in ("train", "val"):
+        for source in sorted((dataset_root / split / "visible" / "images").glob("*.jpg")):
+            copied = tree / split / "visible" / "images" / f"{source.stem}.png"
+            assert np.array_equal(
+                np.asarray(Image.open(copied)), np.asarray(Image.open(source).convert("RGB"))
+            )
+            label = f"{source.stem}.txt"
+            assert (tree / split / "visible" / "labels" / label).read_bytes() == (
+                dataset_root / split / "visible" / "labels" / label
+            ).read_bytes()
+            compared += 1
+    assert compared == len(list(dataset_root.rglob("visible/images/*.jpg")))
+
+
+def test_a_paired_tree_still_loads_after_a_move(
+    translator: StubTranslator, dataset_root: Path, tmp_path: Path
+) -> None:
+    """Both readers, not only t2o's: ultralytics honours `path:` literally (CLAUDE.md)."""
+    from ultralytics.data.utils import check_det_dataset
+
+    tree = _paired_export(translator, dataset_root, tmp_path / "built")
+    moved = Path(shutil.move(tree, tmp_path / "moved"))
+
+    assert "path" not in yaml.safe_load((moved / "data.yaml").read_text())
+    manifest = DatasetManifest.load(moved / "data.yaml")
+    assert manifest.root == moved.resolve()
+    TranslationPairDataset(manifest.train_images, pairing=manifest.pairing)
+    checked = check_det_dataset(str(moved / "data.yaml"))
+    assert Path(checked["train"]) == (moved / "train" / "visible" / "images").resolve()
+
+
+def test_a_paired_export_carries_no_labels_cache(
+    translator: StubTranslator, dataset_root: Path, tmp_path: Path
+) -> None:
+    """ultralytics keys `labels.cache` on sizes and paths, so a stale one would be trusted."""
+    source = tmp_path / "source"
+    shutil.copytree(dataset_root, source)
+    (source / "data.yaml").write_text(
+        (dataset_root / "data.yaml").read_text().replace(str(dataset_root), str(source))
+    )
+    for split in ("train", "val"):
+        (source / split / "visible" / "labels.cache").write_bytes(b"stale")
+
+    tree = _paired_export(translator, source, tmp_path / "paired")
+
+    assert not list(tree.rglob("*.cache"))
+
+
+def test_a_paired_export_refuses_moved_labels(
+    translator: StubTranslator, dataset_root: Path, tmp_path: Path
+) -> None:
+    config = Config.load(
+        overrides={
+            "data": {"manifest": str(dataset_root / "data.yaml"), "misalignment_px": 12.0},
+            "runtime": {"workers": 0},
+        }
+    )
+
+    with pytest.raises(ExportError, match="misalignment_px"):
+        export_translated(translator, config, tmp_path / "out", paired=True)
+    assert not (tmp_path / "out").exists()
