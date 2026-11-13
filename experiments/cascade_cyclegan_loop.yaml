@@ -1,0 +1,118 @@
+# The paired->unpaired cascade's loop arm: frozen pix2pix (e3b-loop-s0) -> CycleGAN -> frozen
+# detector, whose loss trains the CycleGAN (cyclegan-cascade, CYCLEGAN-CASCADE-04).
+#
+# Identical to the sibling experiments/cascade_cyclegan_control.yaml except
+# `coupling.task_weights`, `runtime.name` and `data.manifest`. See that file's header for how
+# stage 1 was exported and why the manifests differ. The invariant is pinned by
+# tests/test_cascade_cyclegan_experiments.py.
+
+data:
+  # A concrete path, not a placeholder, and the runbook passes no --data. With a placeholder, a
+  # forgotten flag would train both arms on the same tree and nothing would notice. The tree is
+  # the runbook's export step's output; a missing file fails at startup.
+  manifest: runs/e3b-loop-s0/stage3/paired/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+  # Plan Q6. Off, CycleGAN trains against each input's own visible frame, so "unpaired" is in
+  # name only, and nothing refuses it.
+  unpaired_visible: true
+  # ADR-01. At 1 the loader reads pix2pix's RGB output as grey, so stage 2 sees only its
+  # luminance, and the identity term is refused at startup.
+  infrared_channels: 3
+
+train:
+  # Plan Q9: one stage, CycleGAN's usual length. The schedule (plan Q10) holds the rate for the
+  # first half and decays to zero over the second, so changing this moves the decay too.
+  epochs_per_stage: 200
+  # Plan Q11: upstream's batch size, 120k updates over 200 epochs. At 8 the same epochs are
+  # only ~15k updates, and the GAN may stop before it settles.
+  batch_size: 1
+  # Upstream CycleGAN's rate. Doubling it destabilises the adversarial game. Halving it leaves
+  # the GAN undertrained, since the decay still ends at epoch 200.
+  lr: 2.0e-4
+  # Not read by `cyclegan`, whose schedule is fixed in translators/cyclegan.py (plan Q10). Kept
+  # at E3's value because it is still inside config_hash().
+  lr_gamma: 0.95
+  # Neither is read by `cyclegan`, which trains in float32. Kept at E3's values for the same
+  # reason as lr_gamma.
+  amp: true
+  amp_dtype: bfloat16
+  # Upstream CycleGAN flips too. Applied to input and target together, so it never moves a
+  # box off its object.
+  hflip: 0.5
+  # Full 640x480 frames. A crop must stay stride-32, or the in-loop detector rejects it.
+  crop: null
+  # Also seeds the unpaired draw (plan Q6), so a changed seed is a different pairing too.
+  seed: 0
+
+loss:
+  # Paired terms. `unpaired_visible` makes them score against a random frame, so
+  # build_translator refuses `cyclegan` with either above 0.
+  l2: 0.0
+  lpips: 0.0
+  # Both adversarial directions. At 0 nothing pulls the output toward optical, and
+  # build_translator refuses it.
+  gan: 1.0
+
+coupling:
+  # The loop arm: one stage with the detector on. lambda_det is fixed at 1.0, so grad_scale
+  # below sets the whole dose (the effective weight is task_weights[stage] * grad_scale).
+  task_weights: [1.0]
+  # PLACEHOLDER. Inherited from the pix2pix campaigns (e3b). CYCLEGAN-CASCADE-05 replaces it,
+  # in both files, from this file's loss_share.py probe, so the detection term is 20-30% of
+  # the objective. Too low and the loop arm is a second control; too high and the detector's
+  # gradient wins over the cycle term, producing adversarial texture.
+  grad_scale: 0.15
+  reward_target: null
+
+detector:
+  in_loop:
+    # This one trains stage 2. The runbook passes the server's optical yolo11n, the same
+    # checkpoint e3b-loop-s0 used. It must not be reference.weights below.
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    # E3's independently trained judge (yolo11s, seed 1, visible train split only). A concrete
+    # path so it cannot fall back to evaluation.init_weights, the same file as the in-loop
+    # detector on the server.
+    weights: runs/reference-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: cyclegan
+  # Upstream CycleGAN's defaults throughout (plan Q7). The unet variants fail on 640x480.
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  # Upstream's lambda_A = lambda_B. Lower lets stage 2 invent content; higher pins it to
+  # stage 1's output.
+  lambda_cycle: 10.0
+  # A multiplier on lambda_cycle, so an effective 5. At 0 CycleGAN is free to shift colours.
+  lambda_identity: 0.5
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  # 4, not E3's 16. Each loader worker is its own Windows process, about 2 GB of commit, and
+  # the 2026-11-10 crash (error 1455) was the commit limit. Outside config_hash().
+  workers: 4
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: cascade-cyclegan
+  run_dir: runs
+  name: cascade-cyclegan-loop

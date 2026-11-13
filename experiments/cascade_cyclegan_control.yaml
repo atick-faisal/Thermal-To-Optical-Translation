@@ -1,0 +1,124 @@
+# The paired->unpaired cascade's control arm: frozen pix2pix (e3b-control-s0) -> CycleGAN, with
+# no detection term anywhere (cyclegan-cascade, CYCLEGAN-CASCADE-04).
+#
+# Stage 1 is not run here. It was exported once, from `runs/e3b-control-s0/stage3/
+# translator_last.pt`, with `t2o export --paired` (plan Q8). That export is the "thermal" this
+# file trains on: pix2pix's RGB output under the infrared token, the real visible frame beside
+# it. This file trains only stage 2, the CycleGAN.
+#
+# The two files are identical except `coupling.task_weights`, `runtime.name` and
+# `data.manifest`, pinned by tests/test_cascade_cyclegan_experiments.py. The manifest differs
+# because each arm reads its own stage-1 tree (plan Q5, matched), so the two arms differ in two
+# places, and stage 2's share of any gap cannot be separated out. The record states this.
+#
+# Paper-2 exploration (plan Q1): one seed per arm, no significance test, no TIM claim.
+
+data:
+  # A concrete path, not a placeholder, and the runbook passes no --data. With a placeholder, a
+  # forgotten flag would train both arms on the same tree and nothing would notice. The tree is
+  # the runbook's export step's output; a missing file fails at startup.
+  manifest: runs/e3b-control-s0/stage3/paired/data.yaml
+  annotation_fraction: 1.0
+  annotation_seed: 0
+  # Plan Q6. Off, CycleGAN trains against each input's own visible frame, so "unpaired" is in
+  # name only, and nothing refuses it.
+  unpaired_visible: true
+  # ADR-01. At 1 the loader reads pix2pix's RGB output as grey, so stage 2 sees only its
+  # luminance, and the identity term is refused at startup.
+  infrared_channels: 3
+
+train:
+  # Plan Q9: one stage, CycleGAN's usual length. The schedule (plan Q10) holds the rate for the
+  # first half and decays to zero over the second, so changing this moves the decay too.
+  epochs_per_stage: 200
+  # Plan Q11: upstream's batch size, 120k updates over 200 epochs. At 8 the same epochs are
+  # only ~15k updates, and the GAN may stop before it settles.
+  batch_size: 1
+  # Upstream CycleGAN's rate. Doubling it destabilises the adversarial game. Halving it leaves
+  # the GAN undertrained, since the decay still ends at epoch 200.
+  lr: 2.0e-4
+  # Not read by `cyclegan`, whose schedule is fixed in translators/cyclegan.py (plan Q10). Kept
+  # at E3's value because it is still inside config_hash().
+  lr_gamma: 0.95
+  # Neither is read by `cyclegan`, which trains in float32. Kept at E3's values for the same
+  # reason as lr_gamma.
+  amp: true
+  amp_dtype: bfloat16
+  # Upstream CycleGAN flips too. Applied to input and target together, so it never moves a
+  # box off its object.
+  hflip: 0.5
+  # Full 640x480 frames. A crop must stay stride-32, or the in-loop detector rejects it.
+  crop: null
+  # Also seeds the unpaired draw (plan Q6), so a changed seed is a different pairing too.
+  seed: 0
+
+loss:
+  # Paired terms. `unpaired_visible` makes them score against a random frame, so
+  # build_translator refuses `cyclegan` with either above 0.
+  l2: 0.0
+  lpips: 0.0
+  # Both adversarial directions. At 0 nothing pulls the output toward optical, and
+  # build_translator refuses it.
+  gan: 1.0
+
+coupling:
+  # The control arm: one stage at lambda_det = 0. No in-loop detector is ever built
+  # (coupling/schedule.py), so nothing here sees a detector.
+  task_weights: [0.0]
+  # PLACEHOLDER. Inherited from the pix2pix campaigns (e3b). CYCLEGAN-CASCADE-05 replaces it
+  # from the loop config's loss_share.py probe, in both files. It has no effect in this arm,
+  # but it must match the loop arm's value, or the differ-only test fails.
+  grad_scale: 0.15
+  reward_target: null
+
+detector:
+  in_loop:
+    # Never built in this arm (weight 0). It must still match the loop arm's value, or the
+    # differ-only test fails. The runbook passes the server's optical yolo11n, as for e3b.
+    weights: yolo11n.pt
+    imgsz: 640
+  evaluation:
+    init_weights: yolo11n.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    # E3's independently trained judge (yolo11s, seed 1, visible train split only). A concrete
+    # path so it cannot fall back to evaluation.init_weights, the same file as the in-loop
+    # detector on the server.
+    weights: runs/reference-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: cyclegan
+  # Upstream CycleGAN's defaults throughout (plan Q7). The unet variants fail on 640x480.
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  # Upstream's lambda_A = lambda_B. Lower lets stage 2 invent content; higher pins it to
+  # stage 1's output.
+  lambda_cycle: 10.0
+  # A multiplier on lambda_cycle, so an effective 5. At 0 CycleGAN is free to shift colours.
+  lambda_identity: 0.5
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  # 4, not E3's 16. Each loader worker is its own Windows process, about 2 GB of commit, and
+  # the 2026-11-10 crash (error 1455) was the commit limit. Outside config_hash().
+  workers: 4
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: cascade-cyclegan
+  run_dir: runs
+  name: cascade-cyclegan-control
