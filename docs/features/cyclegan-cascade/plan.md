@@ -84,7 +84,12 @@ passes a faithfulness gate fixed before its first score.
   on the stage-1 domain). `ImagePool` is vendored from upstream's `util/image_pool.py` at the
   same pinned `2a7afba`, beside `networks.py`, pool size 50. `fit` also returns `loss_cycle` and
   `loss_idt`, and `loss_share.py`'s display keys gain both. The identity term needs equal
-  channel counts, so ADR-01's loader change (-06) lands first.
+  channel counts, so ADR-01's loader change (-06) lands first. Upstream's identity weight
+  multiplies the cycle weight (`models/cycle_gan_model.py:162,165`), so 0.5 is an effective 5,
+  and `build_translator` refuses identity above 0 at `infrared_channels: 1` (upstream's assert,
+  `:87-88`). The D names here follow the paper (D_X judges domain X), the reverse of upstream's
+  `netD_A`; `fit` keeps upstream's order, one Adam over both generators and then one over both
+  discriminators fed detached from the pools, so the detection gradient never reaches a D.
 
 ## Open Questions
 
@@ -140,6 +145,11 @@ passes a faithfulness gate fixed before its first score.
 - [ ] E3's schedule: `task_weights` `[0,1,2,3]` × 100 epochs, with the evaluation-detector fine-tune each stage (recommended) — comparable to record 007, and stage 0 is a free null control inside each run.
 - [ ] Two stages, control `[0,0]` and loop `[0,λ]` × 100 epochs — about half the GPU time, but there is no λ ramp and it is not comparable to record 007.
 - [x] One stage of 200 epochs, CycleGAN's usual length — the quickest to read, but it drops the stage-0 null control entirely.
+
+### Q10: What learning-rate schedule does CycleGAN train with?
+
+- [x] Upstream's: constant for the first half of the run, then linear decay to zero over the second (recommended) — this is what Q9's "CycleGAN's usual length" means upstream (`n_epochs` 100 + `n_epochs_decay` 100). Built as ModTr does (`translators/modtr.py:65-114`): the step count from `_count_training_batches`, the schedule stepped per batch, and both optimizers and schedules saved through `get_extra_state`, so a resume continues the decay instead of restarting it.
+- [ ] Constant rate throughout, like this repo's pix2pix — less code, but the exported final checkpoint comes from a GAN still at full LR, a resume resets Adam's moments, and the deviation must be cited in the module docstring.
 
 ## Out of Scope
 
