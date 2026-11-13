@@ -109,6 +109,16 @@ def test_unpaired_visible_reaches_the_train_pairs_and_never_val(
         assert torch.equal(trainer.val_dataset[index].bboxes, paired.val_dataset[index].bboxes)
 
 
+def test_infrared_channels_reach_both_splits(data_yaml: Path, tmp_path: Path) -> None:
+    # ADR-01: the input format, unlike the target-side fields above, is the same on val.
+    manifest = DatasetManifest.load(data_yaml)
+    rgb = Config.load(overrides={"data": {"infrared_channels": 3}, "runtime": {"workers": 0}})
+    trainer = Trainer(rgb, manifest, StubTranslator(hidden_channels=4), tmp_path)
+
+    assert trainer.train_dataset[0].infrared.shape[0] == 3
+    assert trainer.val_dataset[0].infrared.shape[0] == 3
+
+
 def test_a_calibration_reaches_the_train_pairs_and_never_val(
     derolled_tree: tuple[Path, Path], tmp_path: Path
 ) -> None:

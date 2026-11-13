@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from t2o.config import Config
+from t2o.config import Backbone, Config
 from t2o.data.dataset import TranslationBatch
 from t2o.translators import Pix2PixTranslator, Translator, build_translator
 
@@ -57,6 +57,22 @@ def test_no_discriminator_or_lpips_built_at_zero_weight() -> None:
     translator = Pix2PixTranslator(loss_gan=0.0, loss_lpips=0.0)
     assert translator.net_d is None
     assert translator.lpips is None
+
+
+@pytest.mark.parametrize("backbone", [b.value for b in Backbone])
+def test_rgb_infrared_is_refused_at_startup(backbone: str) -> None:
+    """Every backbone here reads one infrared channel (cyclegan-cascade ADR-01).
+
+    Refused in `build_translator`, before pix2pix-turbo loads sd-turbo or ModTr counts its
+    corpus. A new backbone that does take 3 channels belongs off this list.
+    """
+    from t2o.config import ConfigError
+
+    config = Config.load(
+        overrides={"translator": {"backbone": backbone}, "data": {"infrared_channels": 3}}
+    )
+    with pytest.raises(ConfigError, match=r"data\.infrared_channels is 3"):
+        build_translator(config)
 
 
 def test_unknown_backbone_field_value_is_rejected_at_load() -> None:

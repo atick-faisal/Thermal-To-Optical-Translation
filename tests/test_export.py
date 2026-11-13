@@ -21,7 +21,7 @@ from torch import nn
 
 from t2o.config import Config
 from t2o.data.calibration import CalibrationError
-from t2o.data.dataset import TranslationPairDataset
+from t2o.data.dataset import TranslationPairDataset, collate_translation_batch
 from t2o.data.manifest import DatasetManifest
 from t2o.data.mirror import mirror_labels_onto_infrared
 from t2o.data.misalignment import Misalignment, misalign_label_lines
@@ -381,6 +381,29 @@ def test_a_paired_export_carries_no_labels_cache(
     tree = _paired_export(translator, source, tmp_path / "paired")
 
     assert not list(tree.rglob("*.cache"))
+
+
+def test_a_paired_tree_loads_its_translation_in_colour_at_three_channels(
+    translator: StubTranslator, dataset_root: Path, tmp_path: Path
+) -> None:
+    """ADR-01: stage 2 reads stage 1's RGB output, not only its luminance."""
+    tree = _paired_export(translator, dataset_root, tmp_path / "paired")
+    manifest = DatasetManifest.load(tree / "data.yaml")
+    pairs = TranslationPairDataset(
+        manifest.train_images, pairing=manifest.pairing, infrared_channels=3
+    )
+
+    sample = pairs[0]
+    assert sample.infrared.shape == sample.visible.shape
+    assert sample.infrared.shape[0] == 3
+    translated = Image.open(manifest.pairing.infrared_path(pairs.visible_paths[0]))
+    expected = torch.from_numpy(np.asarray(translated.convert("RGB"), dtype=np.float32) / 255.0)
+    assert torch.equal(sample.infrared, expected.permute(2, 0, 1))
+    # The stub's channels differ, so this is colour a grey decode would have thrown away.
+    assert not torch.equal(sample.infrared[0], sample.infrared[1])
+
+    batch = collate_translation_batch([pairs[i] for i in range(len(pairs))])
+    assert batch["infrared"].shape[:2] == (len(pairs), 3)
 
 
 def test_a_paired_export_refuses_moved_labels(

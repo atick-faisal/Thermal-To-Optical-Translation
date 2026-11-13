@@ -342,6 +342,37 @@ def test_paired_visible_stays_in_the_snapshot(tmp_path: Path) -> None:
     assert yaml.safe_load(snapshot.read_text())["data"]["unpaired_visible"] is False
 
 
+# --- infrared_channels: cyclegan-cascade ADR-01 ---------------------------------------------
+
+
+@pytest.mark.parametrize(("name", "expected"), sorted(PINNED_HASHES.items()))
+def test_grey_infrared_leaves_existing_hashes_alone(name: str, expected: str) -> None:
+    config = Config.load(EXPERIMENTS / name)
+    assert config.data.infrared_channels == 1
+    assert config.config_hash() == expected
+
+
+def test_grey_infrared_leaves_the_default_hash_alone() -> None:
+    explicit_grey = Config.load(overrides={"data": {"infrared_channels": 1}})
+    assert explicit_grey.config_hash() == "4de85d4050b99bb7"
+
+
+def test_rgb_infrared_is_its_own_experiment() -> None:
+    rgb = Config.load(overrides={"data": {"infrared_channels": 3}})
+    assert rgb.config_hash() != Config.load().config_hash()
+
+
+@pytest.mark.parametrize("channels", [0, 2, 4])
+def test_an_infrared_channel_count_other_than_1_or_3_is_refused(channels: int) -> None:
+    with pytest.raises(ConfigError, match="infrared_channels"):
+        Config.load(overrides={"data": {"infrared_channels": channels}})
+
+
+def test_grey_infrared_stays_in_the_snapshot(tmp_path: Path) -> None:
+    snapshot = Config.load().snapshot(tmp_path)
+    assert yaml.safe_load(snapshot.read_text())["data"]["infrared_channels"] == 1
+
+
 @pytest.mark.parametrize("level", [-3.0, float("nan"), float("inf")])
 def test_a_misalignment_that_is_not_a_pixel_count_is_rejected(level: float) -> None:
     with pytest.raises(ConfigError, match="non-negative pixel count"):
