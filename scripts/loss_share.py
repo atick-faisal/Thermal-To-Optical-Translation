@@ -61,7 +61,9 @@ logger = logging.getLogger(__name__)
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 
 CONFIG_FILENAME = "config.yaml"
-FIDELITY_KEYS = ("loss_l2", "loss_lpips", "loss_gan")
+# Every non-detection term any backbone's `fit` returns: pix2pix's paired terms, then CycleGAN's
+# cycle and identity (cyclegan-cascade). A backbone that lacks one shows `--` in its column.
+FIDELITY_KEYS = ("loss_l2", "loss_lpips", "loss_gan", "loss_cycle", "loss_idt")
 DETECTION_KEY = "loss_det"
 TOTAL_KEY = "loss_total"
 

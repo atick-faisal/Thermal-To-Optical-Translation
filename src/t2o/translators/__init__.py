@@ -11,6 +11,7 @@ from t2o.config import (
     AmpDtype,
     Config,
     ConfigError,
+    CycleGANTranslatorConfig,
     ModTrTranslatorConfig,
     Pix2PixTranslatorConfig,
     Pix2PixTurboTranslatorConfig,
@@ -19,6 +20,7 @@ from t2o.config import (
 from t2o.data.dataset import TranslationPairDataset
 from t2o.data.manifest import DatasetManifest
 from t2o.seeding import seed_everything
+from t2o.translators.cyclegan import CycleGANTranslator
 from t2o.translators.modtr import ModTrTranslator
 from t2o.translators.pix2pix import Pix2PixTranslator
 from t2o.translators.pix2pix_turbo import Pix2PixTurboTranslator, load_sd_turbo
@@ -26,6 +28,7 @@ from t2o.translators.protocol import Translator
 from t2o.translators.stub import StubTranslator
 
 __all__ = [
+    "CycleGANTranslator",
     "ModTrTranslator",
     "Pix2PixTranslator",
     "Pix2PixTurboTranslator",
@@ -59,6 +62,20 @@ def build_translator(config: Config) -> nn.Module:
     exists: `Trainer` never constructs a translator, it only trains one.
     """
     seed_everything(config.train.seed)
+    if isinstance(config.translator, CycleGANTranslatorConfig):
+        _require_unpaired_objective(config)
+        return CycleGANTranslator(
+            total_batches=_count_training_batches(config),
+            infrared_channels=config.data.infrared_channels,
+            net_g=config.translator.net_g,
+            net_d=config.translator.net_d,
+            ngf=config.translator.ngf,
+            ndf=config.translator.ndf,
+            lr=config.train.lr,
+            loss_gan=config.loss.gan,
+            lambda_cycle=config.translator.lambda_cycle,
+            lambda_identity=config.translator.lambda_identity,
+        )
     _require_single_channel_infrared(config)
     if isinstance(config.translator, StubTranslatorConfig):
         return StubTranslator(hidden_channels=config.translator.hidden_channels)
@@ -105,14 +122,38 @@ def _require_single_channel_infrared(config: Config) -> None:
 
     Each one fixes its input at one channel: pix2pix's `define_G(_INFRARED_CHANNELS, ...)`, the
     stub's first conv, ModTr repeating one channel to three, pix2pix-turbo expanding one. Fed
-    three, they crash on the first batch or, worse, run on a reinterpreted input. Only the
-    coming `cyclegan` backbone takes 3; its branch goes above this check.
+    three, they crash on the first batch or, worse, run on a reinterpreted input. Only
+    `cyclegan` takes 3; its branch goes above this check.
     """
     if config.data.infrared_channels != 1:
         raise ConfigError(
             f"backbone {config.translator.backbone!r} reads a 1-channel infrared input, but "
             f"data.infrared_channels is {config.data.infrared_channels}; only 'cyclegan' "
             "accepts 3 -- set data.infrared_channels to 1 or switch the backbone"
+        )
+
+
+def _require_unpaired_objective(config: Config) -> None:
+    """CycleGAN's objective is adversarial plus cycle; refuse a config that says otherwise.
+
+    `loss.l2`/`loss.lpips` compare the output to its own visible frame, which `data.
+    unpaired_visible` replaces with a random one, so they would train toward mush.
+    `LossConfig` defaults to `lpips: 5.0` and `gan: 0.0`, so a config that forgets the `loss`
+    section gets exactly that. The identity term feeds a visible image to G_AB, so it needs
+    three input channels (upstream's own assert, `models/cycle_gan_model.py:87-88`).
+    """
+    assert isinstance(config.translator, CycleGANTranslatorConfig)
+    if config.loss.l2 != 0.0 or config.loss.lpips != 0.0 or config.loss.gan <= 0.0:
+        raise ConfigError(
+            f"backbone 'cyclegan' trains on unpaired losses, but loss is "
+            f"{config.loss.model_dump()}; set loss.l2 and loss.lpips to 0 and loss.gan above 0"
+        )
+    if config.translator.lambda_identity > 0.0 and config.data.infrared_channels != 3:
+        raise ConfigError(
+            "backbone 'cyclegan' with translator.lambda_identity "
+            f"{config.translator.lambda_identity} feeds visible images to the infrared side, "
+            f"which needs data.infrared_channels 3, not {config.data.infrared_channels}; "
+            "set it to 3 or lambda_identity to 0"
         )
 
 

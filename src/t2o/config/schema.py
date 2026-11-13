@@ -37,13 +37,15 @@ class Backbone(StrEnum):
     """Translator backbone, and the discriminator for :data:`TranslatorConfig`.
 
     Members are added as each backbone lands: ``pix2pix`` at M1, ``pix2pix_turbo`` at M2a,
-    ``lbbdm`` at M2b (PLAN.md §4), ``modtr`` as Margin's prior-art baseline (modtr-baseline).
+    ``lbbdm`` at M2b (PLAN.md §4), ``modtr`` as Margin's prior-art baseline (modtr-baseline),
+    ``cyclegan`` as the paired->unpaired cascade's stage 2 (cyclegan-cascade).
     """
 
     STUB = "stub"
     PIX2PIX = "pix2pix"
     PIX2PIX_TURBO = "pix2pix_turbo"
     MODTR = "modtr"
+    CYCLEGAN = "cyclegan"
 
 
 class DataConfig(ConfigBase):
@@ -419,6 +421,63 @@ class ModTrTranslatorConfig(ConfigBase):
     pretrained: bool = True
 
 
+class CycleGANTranslatorConfig(ConfigBase):
+    """Stage 2 of the paired->unpaired cascade (cyclegan-cascade Q7) -- plain CycleGAN over the
+    same vendored `junyanz/pytorch-CycleGAN-and-pix2pix@2a7afba` networks pix2pix uses.
+
+    `norm="instance"`, `gan_mode="lsgan"`, the image-pool size (50), `beta1=0.5` and the
+    learning-rate schedule (constant, then linear to zero over the second half, plan Q10) are
+    upstream's CycleGAN defaults and are fixed in `translators/cyclegan.py`. The adversarial
+    weight is the shared `loss.gan`; `loss.l2`/`loss.lpips` are paired terms and
+    `build_translator` refuses them for this backbone.
+    """
+
+    backbone: Literal[Backbone.CYCLEGAN] = Backbone.CYCLEGAN
+    # (resnet_9blocks|resnet_6blocks|unet_128|unet_256) both generators' architecture.
+    # resnet_9blocks is upstream CycleGAN's own default; the unet variants need input divisible
+    # by 2**7 or 2**8, which 640x480 is not, so they fail on the first batch.
+    net_g: Literal["resnet_9blocks", "resnet_6blocks", "unet_128", "unet_256"] = "resnet_9blocks"
+    # (basic|n_layers|pixel) both discriminators' architecture. "basic" is upstream's 70x70
+    # PatchGAN; "pixel" judges single pixels and lets the generators drift in structure.
+    net_d: Literal["basic", "n_layers", "pixel"] = "basic"
+    # (int) generators' last-conv filter width. CycleGAN holds four networks, so raising it
+    # costs VRAM twice over next to the in-loop detector on one 40 GB card.
+    ngf: int = 64
+    # (int) discriminators' first-conv filter width. Too small and D_B cannot tell real
+    # visible frames from translations, so the adversarial term stops pushing toward optical.
+    ndf: int = 64
+    # (float) weight on both cycle-consistency L1 terms, upstream's lambda_A = lambda_B = 10.
+    # Too low and the generators are free to invent content, since nothing ties the output
+    # back to the input; too high and stage 2 barely moves stage 1's output.
+    lambda_cycle: float = 10.0
+    # (float) identity weight as a *multiplier on lambda_cycle*, upstream's lambda_identity
+    # (`models/cycle_gan_model.py:162,165`): 0.5 is an effective weight of 5, not 0.5. 0 turns
+    # it off. Above 0 it needs equal channel counts on both sides, so it is refused at
+    # `data.infrared_channels: 1`. Without it CycleGAN is free to shift colours.
+    lambda_identity: float = 0.5
+
+    @field_validator("ngf", "ndf")
+    @classmethod
+    def _at_least_one(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("must be >= 1")
+        return value
+
+    @field_validator("lambda_cycle")
+    @classmethod
+    def _positive(cls, value: float) -> float:
+        if value <= 0.0:
+            raise ValueError("must be > 0; without the cycle term this is not CycleGAN")
+        return value
+
+    @field_validator("lambda_identity")
+    @classmethod
+    def _non_negative(cls, value: float) -> float:
+        if value < 0.0:
+            raise ValueError("must be >= 0")
+        return value
+
+
 # A discriminated union: each new backbone adds a model with its own `backbone: Literal[...]`
 # tag plus one entry here; nothing else in the config layer changes, which is what makes
 # PLAN.md invariant 3 ("swapping backbones is a config change") true rather than aspirational.
@@ -426,7 +485,8 @@ TranslatorConfig = Annotated[
     StubTranslatorConfig
     | Pix2PixTranslatorConfig
     | Pix2PixTurboTranslatorConfig
-    | ModTrTranslatorConfig,
+    | ModTrTranslatorConfig
+    | CycleGANTranslatorConfig,
     Field(discriminator="backbone"),
 ]
 

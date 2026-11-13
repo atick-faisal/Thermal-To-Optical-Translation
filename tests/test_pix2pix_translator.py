@@ -59,7 +59,7 @@ def test_no_discriminator_or_lpips_built_at_zero_weight() -> None:
     assert translator.lpips is None
 
 
-@pytest.mark.parametrize("backbone", [b.value for b in Backbone])
+@pytest.mark.parametrize("backbone", [b.value for b in Backbone if b is not Backbone.CYCLEGAN])
 def test_rgb_infrared_is_refused_at_startup(backbone: str) -> None:
     """Every backbone here reads one infrared channel (cyclegan-cascade ADR-01).
 
