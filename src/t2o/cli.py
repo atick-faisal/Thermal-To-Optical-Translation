@@ -110,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
     export = subparsers.choices["export"]
     export.add_argument("--checkpoint", type=Path, required=True, help="translator checkpoint")
     export.add_argument("--out", type=Path, required=True, help="output dataset root")
+    export.add_argument(
+        "--paired",
+        action="store_true",
+        help="write a tree that loads as pairs (translation as infrared, real visible beside "
+        "it), the cyclegan-cascade's stage-1 input, instead of a YOLO tree",
+    )
 
     evaluate = subparsers.add_parser(
         "evaluate", help="score a detector checkpoint against a dataset split (E1/E2)"
@@ -567,7 +573,7 @@ def _run_export(args: argparse.Namespace, config: Config) -> int:
     device = resolve_device(config.runtime.device)
     translator.to(device)
 
-    data_yaml = export_translated(translator, config, args.out, device=device)
+    data_yaml = export_translated(translator, config, args.out, device=device, paired=args.paired)
     logger.info("wrote %s", data_yaml)
     return 0
 

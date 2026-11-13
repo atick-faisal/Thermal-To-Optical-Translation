@@ -4,6 +4,12 @@ Ported from ``../Clean-SeAFusion/src/seafusion/engine/export.py``. That version 
 a fused luma plane with the visible image's chroma (``ycbcr_to_rgb``) because its fusion
 network only predicts luma. t2o's ``Translator.translate() -> Tensor`` already returns RGB
 directly (``translators/protocol.py``), so export calls it as-is -- no color-space step.
+
+**A paired export** (``paired=True``, ``t2o export --paired``) writes a tree
+``TranslationPairDataset`` loads as pairs instead of a YOLO tree: the translation under the
+manifest's infrared token, the real visible frame under its visible token. It is the
+cyclegan-cascade's stage-1 input (plan Q8): a frozen stage 1's output becomes the "thermal"
+side a second translator trains on, with the real visible frame still its reference.
 """
 
 from __future__ import annotations
@@ -21,12 +27,13 @@ from torch.utils.data import DataLoader
 
 from t2o.config import Config
 from t2o.data.dataset import TranslationPairDataset, collate_translation_batch
-from t2o.data.manifest import DatasetManifest
+from t2o.data.manifest import RGBT_BLOCK, DatasetManifest
 from t2o.data.misalignment import (
     Misalignment,
     load_derolled_calibration,
     misalign_label_lines,
 )
+from t2o.data.pairing import IMAGES_SEGMENT, LABELS_SEGMENT, Pairing
 from t2o.imaging import Normalize, to_uint8
 from t2o.translators.protocol import Translator
 
@@ -34,6 +41,10 @@ logger = logging.getLogger(__name__)
 
 DATA_FILENAME = "data.yaml"
 EXPORT_SUFFIX = ".png"
+
+
+class ExportError(ValueError):
+    """The config asks for an export this module cannot write faithfully."""
 
 
 @torch.inference_mode()
@@ -47,8 +58,16 @@ def export_split(
     workers: int = 0,
     misalignment_px: float = 0.0,
     thermal_labels: bool = False,
+    pairing: Pairing | None = None,
 ) -> int:
     """Translate every pair in ``dataset`` into ``out_dir/{images,labels}``.
+
+    With ``pairing`` set, the split is written as pairs instead: the translation goes to
+    ``out_dir/<infrared_token>/images`` and the real visible frame plus its label to
+    ``out_dir/<visible_token>/{images,labels}``. Every frame is saved as ``<stem>.png``, so
+    both sides share the one filename ``Pairing`` derives a counterpart from. The visible frame
+    is re-saved losslessly rather than copied, which keeps its pixels and not its bytes: a
+    byte copy would keep a ``.jpg`` name and force the translation into lossy JPEG beside it.
 
     ``misalignment_px`` moves the exported *labels* by that registration level
     (``DataConfig.misalignment_px``): the evaluation detector then fine-tunes on the boxes a
@@ -72,8 +91,13 @@ def export_split(
     was_training = translator.training
     translator.eval()
 
-    images_dir = out_dir / "images"
-    labels_dir = out_dir / "labels"
+    if pairing is None:
+        images_dir, labels_dir, visible_dir = out_dir / "images", out_dir / "labels", None
+    else:
+        images_dir = out_dir / pairing.infrared_token / IMAGES_SEGMENT
+        labels_dir = out_dir / pairing.visible_token / LABELS_SEGMENT
+        visible_dir = out_dir / pairing.visible_token / IMAGES_SEGMENT
+        visible_dir.mkdir(parents=True, exist_ok=True)
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
 
@@ -94,6 +118,10 @@ def export_split(
             stem = Path(name).stem
             array = to_uint8(image, normalize).permute(1, 2, 0).numpy()
             Image.fromarray(array, mode="RGB").save(images_dir / f"{stem}{EXPORT_SUFFIX}")
+            if visible_dir is not None:
+                # `convert("RGB")` is how the loader decodes it (`load_image_tensor`).
+                visible = Image.open(dataset.images_dir / name).convert("RGB")
+                visible.save(visible_dir / f"{stem}{EXPORT_SUFFIX}")
             destination = labels_dir / f"{stem}.txt"
             source = _source_label(dataset, name, thermal_labels)
             if misalignment_px > 0:
@@ -140,13 +168,22 @@ def export_translated(
     out_root: Path,
     device: torch.device | None = None,
     manifest: DatasetManifest | None = None,
+    paired: bool = False,
 ) -> Path:
     """Export train and val splits plus a ``data.yaml`` ultralytics can consume.
 
-    Returns the path of the written ``data.yaml``.
+    ``paired`` writes the pairs tree instead (module docstring). Returns the path of the
+    written ``data.yaml``.
     """
     out_root = Path(out_root)
     manifest = manifest or DatasetManifest.load(config.data.manifest)
+    if paired and (config.data.misalignment_px > 0 or config.data.calibration is not None):
+        # Both move the labels and leave the visible frame where it is, so the tree would pair
+        # a frame with boxes drawn elsewhere -- and a run on it would move them a second time.
+        raise ExportError(
+            "a paired export mirrors the labels as they are; set data.misalignment_px to 0 "
+            "and data.calibration to null, and let the run on the tree apply its own"
+        )
     # Checked here too, not only in `Trainer`: `t2o export` reaches this without training, and
     # the val labels it writes are the ones every reported number is scored against.
     derolled = load_derolled_calibration(manifest, config.data.calibration) is not None
@@ -183,29 +220,49 @@ def export_translated(
             misalignment_px=config.data.misalignment_px if split == "train" else 0.0,
             # Both splits: a de-rolled run trains and is scored on the thermal-side boxes.
             thermal_labels=derolled,
+            pairing=manifest.pairing if paired else None,
         )
 
-    return write_data_yaml(out_root, manifest)
+    return write_data_yaml(out_root, manifest, pairing=manifest.pairing if paired else None)
 
 
-def write_data_yaml(out_root: Path, manifest: DatasetManifest) -> Path:
+def write_data_yaml(
+    out_root: Path, manifest: DatasetManifest, pairing: Pairing | None = None
+) -> Path:
     """Emit a data.yaml pointing at the translated images, in ultralytics' own layout.
 
     Classes are copied from the source manifest, so the exported dataset cannot disagree
     with the labels that were just mirrored into it.
+
+    With ``pairing`` set it describes a paired tree: splits under the visible token, the
+    ``rgbt`` tokens, and **no** ``path:``. ultralytics honours ``path:`` literally, so an
+    absolute one goes stale the moment the tree moves, while t2o's loader quietly falls
+    through it (CLAUDE.md). With the key absent both read the yaml's own directory instead:
+    ultralytics' ``check_det_dataset`` (``ultralytics/data/utils.py``, "Resolve paths") and
+    ``manifest._resolve_root``. The tree is built on the server and pointed at by a config, so
+    it has to survive a move.
     """
     destination = Path(out_root) / DATA_FILENAME
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        yaml.safe_dump(
-            {
-                "path": str(Path(out_root).resolve()),
-                "train": "train/images",
-                "val": "val/images",
-                "nc": manifest.nc,
-                "names": manifest.class_names,
+    if pairing is None:
+        declared: dict[str, object] = {
+            "path": str(Path(out_root).resolve()),
+            "train": "train/images",
+            "val": "val/images",
+            "nc": manifest.nc,
+            "names": manifest.class_names,
+        }
+    else:
+        visible_images = f"{pairing.visible_token}/{IMAGES_SEGMENT}"
+        declared = {
+            "train": f"train/{visible_images}",
+            "val": f"val/{visible_images}",
+            "nc": manifest.nc,
+            "names": manifest.class_names,
+            RGBT_BLOCK: {
+                "visible_token": pairing.visible_token,
+                "infrared_token": pairing.infrared_token,
             },
-            sort_keys=False,
-        )
-    )
+        }
+    destination.write_text(yaml.safe_dump(declared, sort_keys=False))
     return destination
