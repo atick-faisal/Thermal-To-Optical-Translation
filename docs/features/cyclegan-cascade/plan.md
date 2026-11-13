@@ -90,8 +90,21 @@ passes a faithfulness gate fixed before its first score.
   `:87-88`). The D names here follow the paper (D_X judges domain X), the reverse of upstream's
   `netD_A`; `fit` keeps upstream's order, one Adam over both generators and then one over both
   discriminators fed detached from the pools, so the detection gradient never reaches a D.
+- **Dose and probe** (CYCLEGAN-CASCADE-04). The loop arm's λ is fixed at 1.0, so `grad_scale`
+  alone sets the dose, and -05 changes it in both files (the differ-only test holds them
+  equal). CycleGAN's schedule starts decaying halfway through whatever epoch count it is given,
+  so the probe runs at `--epochs 50` and is read with `loss_share.py --first-epochs 25`, the
+  window that matches the campaign's own constant-rate start. The runbook stops after the probe
+  until -05 is pulled; both campaign runs start after that. The record also states that stage 2
+  trains on pix2pix's in-sample train outputs but is scored on its out-of-sample val outputs.
 
 ## Open Questions
+
+### Q11: What batch size do both arms train at?
+
+- [x] Batch 1, upstream CycleGAN's (recommended) — keeps Q9/Q10's upstream schedule at upstream's 120k updates over 200 epochs, and removes the risk of running out of memory with four fp32 networks plus the detector. Estimated at about twice the wall clock of batch 8. *Human's answer, 2026-11-14.*
+- [ ] Batch 8, E3's — faster and the same as the pix2pix campaigns, but only ~15k updates, with the decay starting at 7.5k, so the GAN may stop before it settles.
+- [ ] Batch 4 — ~30k updates, but it matches neither upstream nor E3 and needs its own justification in the record.
 
 ## Resolved
 
