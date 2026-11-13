@@ -99,6 +99,13 @@ class DataConfig(ConfigBase):
     # lose their reference. false is left out of config_hash() for the same reason
     # misalignment_px's 0 is.
     unpaired_visible: bool = False
+    # (1|3) channels the infrared side is decoded with (cyclegan-cascade ADR-01). 1 is thermal,
+    # read as grey. 3 is for a stage-1 tree, whose "infrared" is pix2pix's RGB output: read as
+    # grey, stage 2 would see only its luminance. Only `cyclegan` accepts 3 -- every other
+    # backbone hard-codes one input channel, so `build_translator` refuses them at startup
+    # rather than letting them crash on the first batch. 1 is left out of config_hash() for the
+    # same reason misalignment_px's 0 is.
+    infrared_channels: Literal[1, 3] = 1
 
     @field_validator("annotation_fraction")
     @classmethod
@@ -521,11 +528,12 @@ class Config(RunConfigBase):
     runtime: RuntimeConfig = RuntimeConfig()
 
     def _hash_exclude(self) -> dict[str, Any]:
-        """Drop `data.misalignment_px` at 0, `data.calibration` unset, `data.unpaired_visible` off.
+        """Drop each `data` field that arrived late while it is at its default.
 
-        All three fields arrived after every paired, aligned run was hashed. Hashing their
-        defaults would give each of those runs a new hash, and they would stop counting as the
-        registration axis's zero point.
+        That is `misalignment_px` at 0, `calibration` unset, `unpaired_visible` off and
+        `infrared_channels` at 1. All four arrived after every paired, aligned, grey-input run
+        was hashed. Hashing their defaults would give each of those runs a new hash, and they
+        would stop counting as the registration axis's zero point.
         """
         excluded = super()._hash_exclude()
         unset: dict[str, bool] = {}
@@ -535,6 +543,8 @@ class Config(RunConfigBase):
             unset["calibration"] = True
         if not self.data.unpaired_visible:
             unset["unpaired_visible"] = True
+        if self.data.infrared_channels == 1:
+            unset["infrared_channels"] = True
         if unset:
             excluded["data"] = unset
         return excluded

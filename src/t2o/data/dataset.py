@@ -46,13 +46,16 @@ _MIN_BOX_SIDE = 1e-3
 _INDEX_STRIDE = 1_000_003
 _EPOCH_STRIDE = 1_000_033
 
+# `DataConfig.infrared_channels` -> PIL decode mode. A KeyError on anything else is the refusal.
+_INFRARED_MODES = {1: "L", 3: "RGB"}
+
 
 @dataclass(frozen=True, slots=True)
 class TranslationSample:
     """One paired sample. ``cls``/``bboxes`` carry zero rows for unlabelled images."""
 
     visible: Tensor  # (3, H, W) float in [0, 1]
-    infrared: Tensor  # (1, H, W) float in [0, 1]
+    infrared: Tensor  # (C, H, W) float in [0, 1], C = 1 or 3 (`DataConfig.infrared_channels`)
     cls: Tensor  # (M, 1) float
     bboxes: Tensor  # (M, 4) normalised xywh
     name: str
@@ -62,7 +65,7 @@ class TranslationBatch(TypedDict):
     """Collated batch. The label keys are exactly what ``v8DetectionLoss`` consumes."""
 
     visible: Tensor  # (B, 3, H, W)
-    infrared: Tensor  # (B, 1, H, W)
+    infrared: Tensor  # (B, C, H, W), C = 1 or 3
     batch_idx: Tensor  # (M,)
     cls: Tensor  # (M, 1)
     bboxes: Tensor  # (M, 4)
@@ -209,8 +212,12 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         misalignment_px: float = 0.0,
         calibration: ResidualCalibration | None = None,
         unpaired_visible: bool = False,
+        infrared_channels: int = 1,
     ) -> None:
         self.pairing = pairing or Pairing()
+        # `DataConfig.infrared_channels` (cyclegan-cascade ADR-01): 3 keeps a stage-1 tree's
+        # RGB translation in colour instead of reducing it to its luminance.
+        self._infrared_mode = _INFRARED_MODES[infrared_channels]
         # Both warp the visible image *and* its boxes as one pair. Once the visible image is
         # another frame, the boxes belong to the input and the warp means nothing.
         if unpaired_visible and (misalignment_px > 0 or calibration is not None):
@@ -342,7 +349,7 @@ class TranslationPairDataset(Dataset[TranslationSample]):
     def __getitem__(self, index: int) -> TranslationSample:
         visible_path = self.visible_paths[index]
         visible = load_image_tensor(self.visible_paths[self._target_order[index]], "RGB")
-        infrared = load_image_tensor(self.pairing.infrared_path(visible_path), "L")
+        infrared = load_image_tensor(self.pairing.infrared_path(visible_path), self._infrared_mode)
 
         if visible.shape[1:] != infrared.shape[1:]:
             raise ValueError(

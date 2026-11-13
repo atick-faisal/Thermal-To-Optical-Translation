@@ -59,6 +59,7 @@ def build_translator(config: Config) -> nn.Module:
     exists: `Trainer` never constructs a translator, it only trains one.
     """
     seed_everything(config.train.seed)
+    _require_single_channel_infrared(config)
     if isinstance(config.translator, StubTranslatorConfig):
         return StubTranslator(hidden_channels=config.translator.hidden_channels)
     if isinstance(config.translator, Pix2PixTranslatorConfig):
@@ -97,6 +98,22 @@ def build_translator(config: Config) -> nn.Module:
             pretrained=config.translator.pretrained,
         )
     raise ConfigError(f"no translator wired up for backbone {config.translator.backbone!r}")
+
+
+def _require_single_channel_infrared(config: Config) -> None:
+    """Refuse RGB infrared for every backbone wired up here (cyclegan-cascade ADR-01).
+
+    Each one fixes its input at one channel: pix2pix's `define_G(_INFRARED_CHANNELS, ...)`, the
+    stub's first conv, ModTr repeating one channel to three, pix2pix-turbo expanding one. Fed
+    three, they crash on the first batch or, worse, run on a reinterpreted input. Only the
+    coming `cyclegan` backbone takes 3; its branch goes above this check.
+    """
+    if config.data.infrared_channels != 1:
+        raise ConfigError(
+            f"backbone {config.translator.backbone!r} reads a 1-channel infrared input, but "
+            f"data.infrared_channels is {config.data.infrared_channels}; only 'cyclegan' "
+            "accepts 3 -- set data.infrared_channels to 1 or switch the backbone"
+        )
 
 
 def _require_detection_only(config: Config) -> None:

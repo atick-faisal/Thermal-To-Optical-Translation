@@ -210,6 +210,7 @@ class Trainer:
             # Train only, for the same reason: val is the paired reference LPIPS and
             # faithfulness score against (cyclegan-cascade Q6).
             unpaired_visible=config.data.unpaired_visible,
+            infrared_channels=config.data.infrared_channels,
         )
         # No augmentation on val -- matches Clean-SeAFusion. Val loss never touches
         # cls/bboxes, so annotation_fraction is irrelevant here and left at its default.
@@ -225,6 +226,9 @@ class Trainer:
             num_classes=manifest.nc,
             max_images=config.data.val_loss_images,
             subset_seed=config.data.subset_seed,
+            # Both splits, unlike the fields above: it is the translator's input format, not a
+            # change to the training target.
+            infrared_channels=config.data.infrared_channels,
         )
 
         # Reseeded once per epoch in `train()`, so a given epoch index always shuffles the

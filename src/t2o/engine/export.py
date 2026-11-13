@@ -206,6 +206,8 @@ def export_translated(
             num_classes=manifest.nc,
             max_images=config.data.max_train_images if split == "train" else None,
             subset_seed=config.data.subset_seed,
+            # The input format the translator was trained on, on both splits (ADR-01).
+            infrared_channels=config.data.infrared_channels,
         )
         export_split(
             translator,
