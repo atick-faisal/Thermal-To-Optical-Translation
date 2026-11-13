@@ -91,6 +91,14 @@ class DataConfig(ConfigBase):
     # were de-rolled by this exact constant. null is the dataset as it is, and is left out of
     # config_hash() for the same reason misalignment_px's 0 is.
     calibration: Path | None = None
+    # (bool) cyclegan-cascade Q6: on the *train* split, load each item's visible target from a
+    # seeded permutation of the corpus's visible frames (seed: train.seed) instead of its own
+    # pair. The thermal input keeps its own labels, so the detection loss is unchanged. Only
+    # an unpaired backbone (CycleGAN) means anything with it on: a paired L2/LPIPS loss would
+    # learn to hit a random frame and produce mush. Val stays paired, or LPIPS and faithfulness
+    # lose their reference. false is left out of config_hash() for the same reason
+    # misalignment_px's 0 is.
+    unpaired_visible: bool = False
 
     @field_validator("annotation_fraction")
     @classmethod
@@ -513,11 +521,11 @@ class Config(RunConfigBase):
     runtime: RuntimeConfig = RuntimeConfig()
 
     def _hash_exclude(self) -> dict[str, Any]:
-        """Also drop `data.misalignment_px` while it is 0, and `data.calibration` while unset.
+        """Drop `data.misalignment_px` at 0, `data.calibration` unset, `data.unpaired_visible` off.
 
-        Both fields arrived after every aligned run was hashed. Hashing their defaults would
-        give each of those runs a new hash, and they would stop counting as the axis's zero
-        point.
+        All three fields arrived after every paired, aligned run was hashed. Hashing their
+        defaults would give each of those runs a new hash, and they would stop counting as the
+        registration axis's zero point.
         """
         excluded = super()._hash_exclude()
         unset: dict[str, bool] = {}
@@ -525,6 +533,8 @@ class Config(RunConfigBase):
             unset["misalignment_px"] = True
         if self.data.calibration is None:
             unset["calibration"] = True
+        if not self.data.unpaired_visible:
+            unset["unpaired_visible"] = True
         if unset:
             excluded["data"] = unset
         return excluded

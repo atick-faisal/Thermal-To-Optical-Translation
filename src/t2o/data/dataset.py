@@ -208,8 +208,17 @@ class TranslationPairDataset(Dataset[TranslationSample]):
         subset_seed: int = 0,
         misalignment_px: float = 0.0,
         calibration: ResidualCalibration | None = None,
+        unpaired_visible: bool = False,
     ) -> None:
         self.pairing = pairing or Pairing()
+        # Both warp the visible image *and* its boxes as one pair. Once the visible image is
+        # another frame, the boxes belong to the input and the warp means nothing.
+        if unpaired_visible and (misalignment_px > 0 or calibration is not None):
+            raise ValueError(
+                "unpaired_visible cannot be combined with misalignment_px or a calibration: "
+                "both move a visible frame together with its boxes, and an unpaired target "
+                "is not the frame its boxes came from"
+            )
         # C2's registration-error axis (`DataConfig.misalignment_px`). Moves the visible image
         # *and* its boxes -- they are drawn on the visible frame, so on a misaligned rig they sit
         # wherever it does. Only ever set on a training split: val is the frozen scoring split.
@@ -248,6 +257,15 @@ class TranslationPairDataset(Dataset[TranslationSample]):
             raise ValueError(f"annotation_fraction must be in (0, 1], got {annotation_fraction}")
         self._annotated = annotated_subset(self.visible_paths, annotation_fraction, annotation_seed)
 
+        # `DataConfig.unpaired_visible` (cyclegan-cascade Q6): item i loads its visible target
+        # from `visible_paths[_target_order[i]]`. One fixed permutation of the corpus, drawn
+        # with the augmentation seed, so the target set is still every frame once per epoch and
+        # the loader's per-epoch shuffle already varies which ones share a batch. Nothing else
+        # moves: the input, its labels, its annotation and its name stay with item i.
+        self._target_order = list(range(len(self.visible_paths)))
+        if unpaired_visible:
+            random.Random(augment_seed).shuffle(self._target_order)
+
         logger.info(
             "%s: %d paired samples%s, %d annotated%s",
             self.images_dir,
@@ -256,6 +274,12 @@ class TranslationPairDataset(Dataset[TranslationSample]):
             len(self._annotated),
             f", visible side misaligned by {misalignment_px:g} px" if misalignment_px else "",
         )
+        if unpaired_visible:
+            logger.info(
+                "%s: visible targets unpaired by a permutation seeded %d",
+                self.images_dir,
+                augment_seed,
+            )
         if calibration is not None:
             logger.info(
                 "%s: visible side de-rolled by calibration %s; boxes read from the thermal side",
@@ -317,7 +341,7 @@ class TranslationPairDataset(Dataset[TranslationSample]):
 
     def __getitem__(self, index: int) -> TranslationSample:
         visible_path = self.visible_paths[index]
-        visible = load_image_tensor(visible_path, "RGB")
+        visible = load_image_tensor(self.visible_paths[self._target_order[index]], "RGB")
         infrared = load_image_tensor(self.pairing.infrared_path(visible_path), "L")
 
         if visible.shape[1:] != infrared.shape[1:]:

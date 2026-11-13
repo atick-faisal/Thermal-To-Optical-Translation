@@ -207,6 +207,9 @@ class Trainer:
             # Train only. The val dataset below never takes it (design.md §5, invariant 2).
             misalignment_px=config.data.misalignment_px,
             calibration=self.calibration,
+            # Train only, for the same reason: val is the paired reference LPIPS and
+            # faithfulness score against (cyclegan-cascade Q6).
+            unpaired_visible=config.data.unpaired_visible,
         )
         # No augmentation on val -- matches Clean-SeAFusion. Val loss never touches
         # cls/bboxes, so annotation_fraction is irrelevant here and left at its default.
