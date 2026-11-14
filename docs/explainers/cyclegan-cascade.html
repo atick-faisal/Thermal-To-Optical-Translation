@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The CycleGAN Cascade</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: same system as t2o-field-guide.html (one reading column, full-width instrument panels,
+   sticky section bar). Orange = domain A (stage-1 output, thermal lineage), blue = domain B
+   (real visible), violet = the frozen detector and its gradient. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --sunken: #e9edf3;
+  --ink: #141a24;
+  --muted: #586374;
+  --line: #d5dce6;
+  --accent: #c9500c;
+  --accent-soft: #fbe6d9;
+  --vis: #1f63c4;
+  --vis-soft: #dde9fb;
+  --det: #7440c0;
+  --det-soft: #ece3fa;
+  --good: #1b7f48;
+  --good-soft: #dcf1e5;
+  --bad: #c0362b;
+  --bad-soft: #f8dfdc;
+  /* Image chips are pictures, not UI: same colours in both themes. */
+  --img-band: rgba(10, 14, 20, 0.62);
+  --img-ink: #ffffff;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --surface: #151b24; --sunken: #1c2430; --ink: #e5eaf1; --muted: #9aa6b6; --line: #2a3442;
+    --accent: #ff8340; --accent-soft: #3a2316; --vis: #62a4ff; --vis-soft: #16263d;
+    --det: #b48cff; --det-soft: #261a3d;
+    --good: #43c27e; --good-soft: #13301f; --bad: #ff6f62; --bad-soft: #3a1a17;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --surface: #151b24; --sunken: #1c2430; --ink: #e5eaf1; --muted: #9aa6b6; --line: #2a3442;
+  --accent: #ff8340; --accent-soft: #3a2316; --vis: #62a4ff; --vis-soft: #16263d;
+  --det: #b48cff; --det-soft: #261a3d;
+  --good: #43c27e; --good-soft: #13301f; --bad: #ff6f62; --bad-soft: #3a1a17;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+.wrap {
+  max-width: 1040px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2rem, 5vw, 3.1rem); font-weight: 750; font-stretch: 112%; letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.6rem, 3.6vw, 2.2rem); font-weight: 720; font-stretch: 108%; }
+h3 { font-size: 1.15rem; font-weight: 650; }
+p { margin: 0; }
+.prose { max-width: 68ch; display: grid; gap: 0.9rem; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--sunken); padding: 0.05em 0.35em; border-radius: 4px; }
+.muted { color: var(--muted); }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+a { color: var(--vis); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.bar .wrap { display: flex; align-items: center; gap: 1rem; padding-block: 0.6rem; flex-wrap: wrap; }
+.bar .brand { font-family: var(--font-display); font-weight: 700; font-stretch: 115%; font-size: 1rem; margin-right: auto; }
+.bar .brand span { color: var(--accent); }
+.bar nav { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.bar nav a { text-decoration: none; color: var(--muted); font-size: 0.88rem; padding: 0.25rem 0.6rem; border-radius: 999px; }
+.bar nav a:hover { background: var(--sunken); color: var(--ink); }
+.bar nav a b { font-family: var(--font-mono); color: var(--accent); font-weight: 500; margin-right: 0.3rem; }
+
+header.hero .wrap { padding-block: 2.6rem 2rem; display: grid; gap: 1.1rem; }
+header.hero .lede { font-size: 1.15rem; max-width: 64ch; color: var(--muted); }
+.status { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.pill { font-family: var(--font-mono); font-size: 0.78rem; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.pill b { font-weight: 500; color: var(--muted); margin-right: 0.35rem; }
+.pill.done { border-color: var(--good); color: var(--good); }
+
+section.part { border-top: 1px solid var(--line); }
+section.part > .wrap { padding-block: 2.8rem; display: grid; gap: 1.5rem; }
+.part-head { display: grid; gap: 0.5rem; }
+.part-head .idx { font-family: var(--font-display); font-stretch: 125%; font-weight: 800; font-size: 0.95rem; color: var(--accent); letter-spacing: 0.04em; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem; display: grid; gap: 1rem; min-width: 0; }
+.panel-title { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.panel-title .tag { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--surface); background: var(--accent); padding: 0.1rem 0.45rem; border-radius: 4px; }
+.split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1.1rem; align-items: start; }
+.halves { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+@media (max-width: 760px) { .split, .halves { grid-template-columns: minmax(0, 1fr); } }
+.svgbox { width: 100%; overflow-x: auto; }
+.svgbox svg { display: block; width: 100%; height: auto; }
+.svgbox svg.wide { min-width: 720px; }
+figure { margin: 0; display: grid; gap: 0.6rem; min-width: 0; }
+figcaption { font-size: 0.88rem; color: var(--muted); max-width: 72ch; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 0.85rem; background: var(--surface); color: var(--muted); border: 0; padding: 0.38rem 0.75rem; cursor: pointer; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+label.slider { display: flex; align-items: center; gap: 0.6rem; font-size: 0.9rem; flex-wrap: wrap; }
+input[type="range"] { accent-color: var(--det); width: min(260px, 60vw); }
+
+.cards2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+.cards3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; }
+@media (max-width: 760px) { .cards2, .cards3 { grid-template-columns: minmax(0, 1fr); } }
+.dcard { border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; display: grid; gap: 0.4rem; align-content: start; background: var(--surface); min-width: 0; }
+.dcard .role { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.dcard h3 { font-size: 1.05rem; }
+.dcard p { font-size: 0.92rem; color: var(--muted); }
+.dcard.warn .role { color: var(--bad); }
+
+.termbox { background: var(--sunken); border-radius: 10px; padding: 0.9rem 1rem; display: grid; gap: 0.45rem; min-height: 7.5rem; }
+.termbox h3 { font-size: 1.05rem; }
+.termbox p { font-size: 0.94rem; }
+.termbox .key { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
+
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+.tile { background: var(--sunken); border-radius: 8px; padding: 0.6rem 0.75rem; display: grid; gap: 0.1rem; min-width: 0; }
+.tile .k { font-size: 0.76rem; color: var(--muted); }
+.tile .v { font-family: var(--font-mono); font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.tile.in .v { color: var(--good); }
+.tile.out .v { color: var(--bad); }
+
+.formula { font-family: var(--font-mono); font-size: 0.86rem; background: var(--sunken); padding: 0.55rem 0.8rem; border-radius: 8px; overflow-x: auto; white-space: nowrap; }
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 0.7rem 0.9rem; border-radius: 0 8px 8px 0; font-size: 0.95rem; max-width: 72ch; }
+
+.tablebox { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 620px; }
+th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.06em; }
+td:first-child { color: var(--muted); }
+td code { white-space: nowrap; }
+.diff { font-family: var(--font-mono); font-size: 0.68rem; padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--det-soft); color: var(--det); margin-left: 0.4rem; white-space: nowrap; }
+
+.shared { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem 1rem; margin: 0; }
+.shared div { display: grid; gap: 0.05rem; border-left: 2px solid var(--line); padding-left: 0.6rem; }
+.shared dt { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); }
+.shared dd { margin: 0; font-size: 0.92rem; }
+
+ol.steps { margin: 0; padding-left: 1.3rem; display: grid; gap: 0.35rem; max-width: 72ch; }
+
+/* SVG text and shapes, all from tokens. */
+svg text { font-family: var(--font-body); }
+svg .lbl { font-size: 13px; fill: var(--ink); }
+svg .lbl-b { font-size: 14px; fill: var(--ink); font-weight: 600; }
+svg .lbl-s { font-size: 11px; fill: var(--muted); }
+svg .mono-s { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+svg .hdr { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; fill: var(--muted); }
+svg .band { fill: var(--img-band); }
+svg .chipl { font-family: var(--font-mono); font-size: 9.5px; fill: var(--img-ink); }
+svg .fake { fill: none; stroke: var(--ink); stroke-width: 1.4; stroke-dasharray: 4 3; }
+svg .gen rect { fill: var(--surface); stroke: var(--ink); stroke-width: 1.6; }
+svg .gen text { font-family: var(--font-mono); font-size: 13px; fill: var(--ink); font-weight: 500; }
+svg .dA rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+svg .dB rect { fill: var(--vis-soft); stroke: var(--vis); stroke-width: 1.6; }
+svg .dt rect { fill: var(--det-soft); stroke: var(--det); stroke-width: 1.6; }
+svg .flow { stroke: var(--muted); stroke-width: 1.8; fill: none; }
+svg .flow-det { stroke: var(--det); stroke-width: 2.2; fill: none; stroke-dasharray: 6 4; }
+svg .grid { stroke: var(--line); stroke-width: 1; }
+svg .axis { stroke: var(--muted); stroke-width: 1; }
+svg .tick { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+[data-t] { transition: opacity 0.2s ease; }
+#pipe-det { transition: opacity 0.25s ease; }
+
+footer .wrap { padding-block: 2rem 3rem; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); display: grid; gap: 0.5rem; }
+footer ul { margin: 0; padding-left: 1.1rem; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<!-- Shared SVG defs: image chips and arrowheads, used by every figure below. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="gT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#160a2e"/><stop offset="1" stop-color="#3a1257"/></linearGradient>
+    <linearGradient id="gA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a7b0b4"/><stop offset="1" stop-color="#d6cdbf"/></linearGradient>
+    <linearGradient id="gB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9fbbdc"/><stop offset="1" stop-color="#e6edf4"/></linearGradient>
+    <symbol id="imgT" viewBox="0 0 80 52">
+      <rect width="80" height="52" fill="url(#gT)"/>
+      <rect y="40" width="80" height="12" fill="#4a1a6b"/>
+      <rect x="38" y="8" width="4" height="34" fill="#a0287a"/>
+      <rect x="26" y="14" width="28" height="3" fill="#f0731e"/>
+      <circle cx="28" cy="13" r="2.2" fill="#ffd447"/><circle cx="52" cy="13" r="2.2" fill="#ffd447"/>
+    </symbol>
+    <symbol id="imgA" viewBox="0 0 80 52">
+      <rect width="80" height="52" fill="url(#gA)"/>
+      <rect y="40" width="80" height="12" fill="#8e8c76"/>
+      <rect x="38" y="8" width="4" height="34" fill="#6a5a4c" opacity="0.8"/>
+      <rect x="26" y="14" width="28" height="3" fill="#6a5a4c" opacity="0.8"/>
+      <circle cx="28" cy="13" r="1.8" fill="#8a8f96"/><circle cx="52" cy="13" r="1.8" fill="#8a8f96"/>
+    </symbol>
+    <symbol id="imgB" viewBox="0 0 80 52">
+      <rect width="80" height="52" fill="url(#gB)"/>
+      <rect y="40" width="80" height="12" fill="#7f9370"/>
+      <rect x="38" y="8" width="4" height="34" fill="#5d4b3b"/>
+      <rect x="26" y="14" width="28" height="3" fill="#4b515a"/>
+      <rect x="26.5" y="9" width="3" height="5" fill="#7c838e"/><rect x="50.5" y="9" width="3" height="5" fill="#7c838e"/>
+    </symbol>
+    <marker id="arM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+    <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+    <marker id="arV" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--vis)"/></marker>
+    <marker id="arD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--det)"/></marker>
+  </defs>
+</svg>
+
+<div class="bar">
+  <div class="wrap">
+    <div class="brand">t2o <span>cascade</span></div>
+    <nav aria-label="Sections">
+      <a href="#pipeline"><b>1</b>Pipeline</a>
+      <a href="#step"><b>2</b>One step</a>
+      <a href="#unpaired"><b>3</b>Unpaired</a>
+      <a href="#dose"><b>4</b>Dose &amp; schedule</a>
+      <a href="#arms"><b>5</b>Two arms</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Paired → unpaired cascade · feature <span class="mono">cyclegan-cascade</span></div>
+    <h1>pix2pix for the content, CycleGAN for the look</h1>
+    <p class="lede">The professor's multi-stage idea in two steps. Stage 1 is the pix2pix we already have, trained on aligned thermal/visible pairs. Stage 2 is a CycleGAN, trained with unpaired losses to move stage 1's output closer to real optical photos. In the loop arm, a frozen detector also trains stage 2.</p>
+    <div class="status">
+      <span class="pill done"><b>code</b>shipped, 6 of 6 tasks</span>
+      <span class="pill"><b>runs</b>from 2026-11-14, one arm per A100</span>
+      <span class="pill"><b>scope</b>paper 2, no TIM claim</span>
+    </div>
+    <p class="callout">The first cascade attempt put a frozen, zero-shot enhancer (PiSA-SR) in stage 2. It failed the faithfulness gate, passing 2 of 14 tests (record 035). That was not what the professor asked for. This attempt <b>trains</b> stage 2.</p>
+  </div>
+</header>
+
+<!-- ====================================================== 1 -->
+<section class="part" id="pipeline">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 1</div>
+      <h2>The pipeline, end to end</h2>
+    </div>
+
+    <div class="panel">
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Arm">
+          <button type="button" data-arm="loop" aria-pressed="true">Loop arm</button>
+          <button type="button" data-arm="control" aria-pressed="false">Control arm</button>
+        </div>
+      </div>
+      <figure>
+        <div class="svgbox">
+          <svg class="wide" viewBox="0 0 1000 300" role="img" aria-label="Thermal frame goes through frozen pix2pix, exported once to a stage-1 tree; CycleGAN's G_AB translates that to an optical image; in the loop arm a frozen detector reads the output and its gradient trains G_AB only.">
+            <rect x="8" y="30" width="452" height="252" rx="12" fill="var(--sunken)"/>
+            <text x="24" y="54" class="hdr">STAGE 1 · RAN ONCE, OFFLINE</text>
+            <text x="492" y="54" class="hdr">STAGE 2 · TRAINED</text>
+
+            <use href="#imgT" x="24" y="110" width="100" height="65"/>
+            <text x="74" y="195" text-anchor="middle" class="lbl">thermal frame</text>
+            <line x1="128" y1="142" x2="146" y2="142" class="flow" marker-end="url(#arM)"/>
+
+            <g class="dA">
+              <rect x="150" y="104" width="120" height="77" rx="10"/>
+              <text x="210" y="134" text-anchor="middle" class="lbl-b">pix2pix</text>
+              <text x="210" y="153" text-anchor="middle" class="lbl-s">frozen</text>
+              <text x="210" y="170" text-anchor="middle" class="mono-s">e3b-*-s0, stage 3</text>
+            </g>
+            <path d="M265 99 v-4 a5 5 0 0 1 10 0 v4" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+            <rect x="262" y="98" width="16" height="12" rx="2" fill="var(--accent)"/>
+
+            <line x1="274" y1="142" x2="340" y2="142" class="flow" marker-end="url(#arM)"/>
+            <text x="307" y="134" text-anchor="middle" class="mono-s">export</text>
+            <text x="307" y="158" text-anchor="middle" class="lbl-s">once</text>
+
+            <rect x="356" y="104" width="100" height="65" rx="2" fill="var(--line)"/>
+            <rect x="352" y="108" width="100" height="65" rx="2" fill="var(--muted)" opacity="0.5"/>
+            <use href="#imgA" x="346" y="112" width="100" height="65"/>
+            <text x="398" y="199" text-anchor="middle" class="lbl">stage-1 tree</text>
+            <text x="398" y="215" text-anchor="middle" class="lbl-s">RGB, in the thermal slot</text>
+            <text x="398" y="231" text-anchor="middle" class="mono-s">infrared_channels: 3</text>
+
+            <line x1="452" y1="142" x2="504" y2="142" class="flow" marker-end="url(#arM)"/>
+
+            <rect x="508" y="99" width="150" height="86" rx="10" fill="var(--surface)" stroke="var(--ink)" stroke-width="2.5"/>
+            <text x="583" y="130" text-anchor="middle" class="lbl-b">CycleGAN</text>
+            <text x="583" y="150" text-anchor="middle" class="mono-s" style="fill:var(--ink)">G_AB</text>
+            <text x="583" y="169" text-anchor="middle" class="lbl-s">the weights that train</text>
+
+            <rect x="551" y="222" width="80" height="52" rx="2" fill="var(--line)"/>
+            <use href="#imgB" x="545" y="226" width="80" height="52"/>
+            <line x1="585" y1="222" x2="585" y2="191" stroke="var(--vis)" stroke-width="1.8" marker-end="url(#arV)"/>
+            <text x="638" y="245" class="lbl-s">real visible photos</text>
+            <text x="638" y="261" class="lbl-s">shuffled: an unpaired target</text>
+
+            <line x1="662" y1="142" x2="712" y2="142" class="flow" marker-end="url(#arM)"/>
+            <use href="#imgB" x="716" y="110" width="100" height="65"/>
+            <rect x="716" y="110" width="100" height="65" class="fake"/>
+            <text x="766" y="195" text-anchor="middle" class="lbl">optical output</text>
+            <text x="766" y="211" text-anchor="middle" class="lbl-s">what gets scored</text>
+
+            <g id="pipe-det">
+              <line x1="820" y1="142" x2="858" y2="142" stroke="var(--det)" stroke-width="1.8" marker-end="url(#arD)"/>
+              <g class="dt">
+                <rect x="862" y="104" width="126" height="77" rx="10"/>
+                <text x="925" y="134" text-anchor="middle" class="lbl-b">yolo11n</text>
+                <text x="925" y="153" text-anchor="middle" class="lbl-s">frozen detector</text>
+                <text x="925" y="170" text-anchor="middle" class="lbl-s">loss vs. the boxes</text>
+              </g>
+              <path d="M 925 102 C 905 40, 640 40, 600 96" class="flow-det" marker-end="url(#arD)"/>
+              <text x="780" y="42" text-anchor="middle" class="lbl" style="fill:var(--det)">∇ detection × 0.6, into G_AB only</text>
+            </g>
+          </svg>
+        </div>
+        <figcaption>Everything left of the grey edge happened before training, once per arm. The detection gradient (violet, loop arm only) stops at CycleGAN: pix2pix's output is files on disk, so nothing can flow back into it.</figcaption>
+      </figure>
+      <p id="pipe-text" style="max-width:72ch"></p>
+    </div>
+
+    <div class="cards2">
+      <div class="dcard">
+        <span class="role">Plan Q4 · Q8</span>
+        <h3>Stage 1 is a dataset, not a network</h3>
+        <p>Stage 1 stays frozen, so its output never changes. We run <code>t2o export --paired</code> once per arm on that arm's pix2pix checkpoint. It writes every train and val translation, copies the real visible frame beside it, mirrors the labels and writes a fresh <code>data.yaml</code>. To stage 2, that tree is just another dataset. No composite model, no second checkpoint to load.</p>
+      </div>
+      <div class="dcard">
+        <span class="role">ADR-01</span>
+        <h3>Three channels, not one</h3>
+        <p>The loader always read the thermal side as one grey channel. Left as is, CycleGAN would see only the brightness of pix2pix's colour output and could not build on it. <code>infrared_channels: 3</code> reads it as RGB. Only <code>cyclegan</code> accepts 3; every other backbone is refused at startup, and the default of 1 leaves every existing config's hash unchanged.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 2 -->
+<section class="part" id="step">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 2</div>
+      <h2>Inside one CycleGAN training step</h2>
+    </div>
+    <div class="prose">
+      <p>CycleGAN learns two translators at once. <b>G_AB</b> turns stage-1 output (domain A) into optical (domain B); it is the one that ships, since <code>translate()</code> is G_AB. <b>G_BA</b> goes back the other way and exists only to check G_AB. Two critics judge realism: <b>D_B</b> asks "is this a real photo?", <b>D_A</b> asks the same about stage-1 output.</p>
+      <p>Pick a loss term to see which path it trains.</p>
+    </div>
+
+    <div class="panel">
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Loss term" id="term-seg">
+          <button type="button" data-term="all" aria-pressed="true">All</button>
+          <button type="button" data-term="gan" aria-pressed="false">GAN</button>
+          <button type="button" data-term="cycle" aria-pressed="false">Cycle</button>
+          <button type="button" data-term="idt" aria-pressed="false">Identity</button>
+          <button type="button" data-term="det" aria-pressed="false">Detection</button>
+          <button type="button" data-term="dstep" aria-pressed="false">Critic step</button>
+        </div>
+      </div>
+      <figure>
+        <div class="svgbox">
+          <svg id="step-svg" class="wide" viewBox="0 0 960 430" role="img" aria-label="CycleGAN step: real A to G_AB to fake B to G_BA to reconstructed A, and the mirror from real B; D_B and the detector read fake B, D_A reads fake A; identity and the critic step are drawn on the right.">
+            <!-- top row: A → B → A -->
+            <path d="M 472 78 C 472 26, 60 26, 60 78" class="flow" stroke-dasharray="3 3" data-t="cycle"/>
+            <text x="266" y="62" text-anchor="middle" class="lbl-s" data-t="cycle">cycle: L1(rec A, real A) × 10</text>
+
+            <g data-t="gan cycle det dstep"><use href="#imgA" x="20" y="80" width="80" height="52"/><rect x="20" y="120" width="80" height="12" class="band"/><text x="25" y="129.5" class="chipl">real A</text></g>
+            <line x1="102" y1="106" x2="126" y2="106" class="flow" marker-end="url(#arM)" data-t="gan cycle det"/>
+            <g class="gen" data-t="gan cycle det"><rect x="130" y="84" width="64" height="44" rx="8" style="stroke-width:2.4"/><text x="162" y="111" text-anchor="middle">G_AB</text></g>
+            <line x1="196" y1="106" x2="222" y2="106" class="flow" marker-end="url(#arM)" data-t="gan cycle det"/>
+            <g data-t="gan cycle det dstep"><use href="#imgB" x="226" y="80" width="80" height="52"/><rect x="226" y="80" width="80" height="52" class="fake"/><rect x="226" y="120" width="80" height="12" class="band"/><text x="231" y="129.5" class="chipl">fake B</text></g>
+            <line x1="308" y1="106" x2="332" y2="106" class="flow" marker-end="url(#arM)" data-t="cycle"/>
+            <g class="gen" data-t="cycle"><rect x="336" y="84" width="64" height="44" rx="8"/><text x="368" y="111" text-anchor="middle">G_BA</text></g>
+            <line x1="402" y1="106" x2="428" y2="106" class="flow" marker-end="url(#arM)" data-t="cycle"/>
+            <g data-t="cycle"><use href="#imgA" x="432" y="80" width="80" height="52"/><rect x="432" y="80" width="80" height="52" class="fake"/><rect x="432" y="120" width="80" height="12" class="band"/><text x="437" y="129.5" class="chipl">rec A</text></g>
+
+            <!-- fake B is read by D_B and (loop) by the detector -->
+            <line x1="276" y1="134" x2="286" y2="172" class="flow" marker-end="url(#arM)" data-t="gan"/>
+            <g class="dB" data-t="gan"><rect x="246" y="176" width="90" height="42" rx="8"/><text x="291" y="194" text-anchor="middle" class="lbl-b" style="font-family:var(--font-mono);font-size:13px">D_B</text><text x="291" y="210" text-anchor="middle" class="lbl-s">real photo?</text></g>
+            <line x1="252" y1="134" x2="216" y2="172" stroke="var(--det)" stroke-width="1.8" marker-end="url(#arD)" data-t="det"/>
+            <g class="dt" data-t="det"><rect x="110" y="176" width="116" height="42" rx="8"/><text x="168" y="194" text-anchor="middle" class="lbl-b" style="font-size:13px">yolo11n, frozen</text><text x="168" y="210" text-anchor="middle" class="lbl-s">loop arm only</text></g>
+            <line x1="148" y1="174" x2="148" y2="134" class="flow-det" marker-end="url(#arD)" data-t="det"/>
+            <text x="138" y="158" text-anchor="end" class="lbl" style="fill:var(--det)" data-t="det">∇</text>
+
+            <!-- bottom row: B → A → B -->
+            <g class="dA" data-t="gan"><rect x="246" y="256" width="90" height="42" rx="8"/><text x="291" y="274" text-anchor="middle" class="lbl-b" style="font-family:var(--font-mono);font-size:13px">D_A</text><text x="291" y="290" text-anchor="middle" class="lbl-s">stage-1 look?</text></g>
+            <line x1="276" y1="320" x2="286" y2="302" class="flow" marker-end="url(#arM)" data-t="gan"/>
+
+            <g data-t="gan cycle dstep"><use href="#imgB" x="20" y="322" width="80" height="52"/><rect x="20" y="362" width="80" height="12" class="band"/><text x="25" y="371.5" class="chipl">real B</text></g>
+            <line x1="102" y1="348" x2="126" y2="348" class="flow" marker-end="url(#arM)" data-t="gan cycle"/>
+            <g class="gen" data-t="gan cycle"><rect x="130" y="326" width="64" height="44" rx="8"/><text x="162" y="353" text-anchor="middle">G_BA</text></g>
+            <line x1="196" y1="348" x2="222" y2="348" class="flow" marker-end="url(#arM)" data-t="gan cycle"/>
+            <g data-t="gan cycle dstep"><use href="#imgA" x="226" y="322" width="80" height="52"/><rect x="226" y="322" width="80" height="52" class="fake"/><rect x="226" y="362" width="80" height="12" class="band"/><text x="231" y="371.5" class="chipl">fake A</text></g>
+            <line x1="308" y1="348" x2="332" y2="348" class="flow" marker-end="url(#arM)" data-t="cycle"/>
+            <g class="gen" data-t="cycle"><rect x="336" y="326" width="64" height="44" rx="8" style="stroke-width:2.4"/><text x="368" y="353" text-anchor="middle">G_AB</text></g>
+            <line x1="402" y1="348" x2="428" y2="348" class="flow" marker-end="url(#arM)" data-t="cycle"/>
+            <g data-t="cycle"><use href="#imgB" x="432" y="322" width="80" height="52"/><rect x="432" y="322" width="80" height="52" class="fake"/><rect x="432" y="362" width="80" height="12" class="band"/><text x="437" y="371.5" class="chipl">rec B</text></g>
+            <path d="M 472 376 C 472 426, 60 426, 60 376" class="flow" stroke-dasharray="3 3" data-t="cycle"/>
+            <text x="266" y="398" text-anchor="middle" class="lbl-s" data-t="cycle">cycle: L1(rec B, real B) × 10</text>
+
+            <line x1="545" y1="20" x2="545" y2="410" class="grid" stroke-dasharray="4 4"/>
+
+            <!-- identity -->
+            <g data-t="idt">
+              <text x="570" y="40" class="hdr">IDENTITY · L1 × 5</text>
+              <use href="#imgB" x="570" y="56" width="80" height="52"/><rect x="570" y="96" width="80" height="12" class="band"/><text x="575" y="105.5" class="chipl">real B</text>
+              <line x1="652" y1="82" x2="672" y2="82" class="flow" marker-end="url(#arM)"/>
+              <g class="gen"><rect x="676" y="60" width="64" height="44" rx="8" style="stroke-width:2.4"/><text x="708" y="87" text-anchor="middle">G_AB</text></g>
+              <line x1="742" y1="82" x2="762" y2="82" class="flow" marker-end="url(#arM)"/>
+              <use href="#imgB" x="766" y="56" width="80" height="52"/><rect x="766" y="56" width="80" height="52" class="fake"/><rect x="766" y="96" width="80" height="12" class="band"/><text x="771" y="105.5" class="chipl">≈ real B</text>
+              <text x="856" y="80" class="lbl-s">should come</text><text x="856" y="94" class="lbl-s">out unchanged</text>
+
+              <use href="#imgA" x="570" y="124" width="80" height="52"/><rect x="570" y="164" width="80" height="12" class="band"/><text x="575" y="173.5" class="chipl">real A</text>
+              <line x1="652" y1="150" x2="672" y2="150" class="flow" marker-end="url(#arM)"/>
+              <g class="gen"><rect x="676" y="128" width="64" height="44" rx="8"/><text x="708" y="155" text-anchor="middle">G_BA</text></g>
+              <line x1="742" y1="150" x2="762" y2="150" class="flow" marker-end="url(#arM)"/>
+              <use href="#imgA" x="766" y="124" width="80" height="52"/><rect x="766" y="124" width="80" height="52" class="fake"/><rect x="766" y="164" width="80" height="12" class="band"/><text x="771" y="173.5" class="chipl">≈ real A</text>
+            </g>
+
+            <!-- critic step -->
+            <g data-t="dstep">
+              <text x="570" y="234" class="hdr">CRITIC STEP · AFTER THE G STEP</text>
+              <rect x="578" y="256" width="80" height="52" rx="2" fill="var(--line)"/>
+              <rect x="574" y="260" width="80" height="52" rx="2" fill="var(--muted)" opacity="0.5"/>
+              <use href="#imgB" x="570" y="264" width="80" height="52"/><rect x="570" y="304" width="80" height="12" class="band"/><text x="575" y="313.5" class="chipl">pool: fake B</text>
+              <line x1="662" y1="290" x2="760" y2="290" class="flow" marker-end="url(#arM)"/>
+              <text x="711" y="282" text-anchor="middle" class="mono-s">detached</text>
+              <g class="dB"><rect x="764" y="270" width="80" height="40" rx="8"/><text x="804" y="295" text-anchor="middle" class="lbl-b" style="font-family:var(--font-mono);font-size:13px">D_B</text></g>
+
+              <rect x="578" y="334" width="80" height="52" rx="2" fill="var(--line)"/>
+              <rect x="574" y="338" width="80" height="52" rx="2" fill="var(--muted)" opacity="0.5"/>
+              <use href="#imgA" x="570" y="342" width="80" height="52"/><rect x="570" y="382" width="80" height="12" class="band"/><text x="575" y="391.5" class="chipl">pool: fake A</text>
+              <line x1="662" y1="368" x2="760" y2="368" class="flow" marker-end="url(#arM)"/>
+              <text x="711" y="360" text-anchor="middle" class="mono-s">detached</text>
+              <g class="dA"><rect x="764" y="348" width="80" height="40" rx="8"/><text x="804" y="373" text-anchor="middle" class="lbl-b" style="font-family:var(--font-mono);font-size:13px">D_A</text></g>
+              <text x="856" y="326" class="lbl-s">50 past fakes,</text><text x="856" y="340" class="lbl-s">plus real images</text>
+            </g>
+          </svg>
+        </div>
+        <figcaption>Dashed outlines are generated images. G_AB appears in several places because it is the same network each time; the thick outline marks it.</figcaption>
+      </figure>
+      <div class="termbox" aria-live="polite">
+        <h3 id="term-title"></h3>
+        <p id="term-text"></p>
+        <span class="key" id="term-key"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 3 -->
+<section class="part" id="unpaired">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 3</div>
+      <h2>Unpaired on train, paired on val</h2>
+    </div>
+    <div class="prose">
+      <p>The custom set does have aligned pairs. Stage 2 just never learns which photo belongs to which input. On the <b>train</b> split, item <i>i</i> loads its visible target from one fixed, seeded shuffle of the split's own photos. The input, its labels and its name stay together, so the loop arm's detection loss still scores the right boxes.</p>
+      <p>The <b>val</b> split stays paired. LPIPS and the faithfulness counts need each output's true photo as a reference.</p>
+    </div>
+    <div class="panel">
+      <figure>
+        <div class="svgbox"><svg id="pair-svg" class="wide" viewBox="0 0 960 300" role="img" aria-label="Train split: five inputs each point to a shuffled photo. Val split: each input points straight across to its own photo. The orange label boxes stay on the inputs in both."></svg></div>
+        <figcaption>Five frames stand in for 600. The real draw is one permutation of the whole train split, seeded by <code>train.seed</code> (0), so every photo is still used once per epoch. Changing the seed changes the pairing too.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 4 -->
+<section class="part" id="dose">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 4</div>
+      <h2>How strong the detector's push is, and for how long</h2>
+    </div>
+    <div class="prose">
+      <p>House rule since record 006: a new backbone gets a short <code>loss_share.py</code> probe before its campaign, and the detection term must be <b>20–30%</b> of the objective. Too low and the loop arm is a second control. Too high and the detector's gradient beats the cycle term and paints adversarial texture.</p>
+    </div>
+
+    <div class="halves">
+      <div class="panel">
+        <div class="panel-title"><span class="tag">Try it</span><h3>Detection share vs. <code>grad_scale</code></h3></div>
+        <div class="svgbox"><svg id="dose-svg" viewBox="0 0 480 270" role="img" aria-label="Projected detection share rises with grad_scale; the probe at 0.15 gave 8.2 percent; 0.6 projects to 26 percent, inside the 20 to 30 percent band."></svg></div>
+        <label class="slider" for="dose-range">grad_scale <input id="dose-range" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <div class="tiles">
+          <div class="tile"><span class="k">grad_scale</span><span class="v" id="d-g">0.60</span></div>
+          <div class="tile" id="d-share-tile"><span class="k">projected share</span><span class="v" id="d-share">26.4%</span></div>
+          <div class="tile"><span class="k">in 20–30% band</span><span class="v" id="d-band">yes</span></div>
+        </div>
+        <div class="formula">share = 2.28·g / (2.28·g + 3.81)</div>
+        <p class="muted" style="font-size:0.88rem">From the probe at 0.15: raw <code>loss_det</code> ≈ 2.28, and GAN + cycle + identity = 3.81. This is a straight-line projection. A stronger dose drives the raw detection loss down, so the share a run reaches tends to land below it (record 006, F29). That is why 0.6 sits in the upper half of the band. A <code>loss_share.py</code> read after the run reports what it actually reached.</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><span class="tag">Schedule</span><h3>Learning rate over 200 epochs</h3></div>
+        <div class="svgbox"><svg id="lr-svg" viewBox="0 0 480 270" role="img" aria-label="Campaign learning rate is constant at 2e-4 for 100 epochs, then falls linearly to zero at epoch 200. The 50-epoch probe falls from epoch 25, so it was read over its first 25 epochs only."></svg></div>
+        <ul class="muted" style="font-size:0.9rem;margin:0;padding-left:1.1rem;display:grid;gap:0.3rem">
+          <li>Upstream CycleGAN's schedule: hold, then decay to zero. Stepped per batch, and saved in the checkpoint, so a resume continues the decay.</li>
+          <li>Batch 1, as upstream: 600 frames × 200 epochs ≈ <span class="num">120k</span> updates. At E3's batch of 8 it would be only ~15k.</li>
+          <li>The schedule always starts decaying halfway. So the 50-epoch probe was read over its first 25 epochs, the stretch that matches the campaign's constant-rate start.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 5 -->
+<section class="part" id="arms">
+  <div class="wrap">
+    <div class="part-head">
+      <div class="idx">PART 5</div>
+      <h2>Two arms, and what their result can say</h2>
+    </div>
+
+    <div class="panel">
+      <div class="tablebox">
+        <table>
+          <thead><tr><th></th><th>Control</th><th>Loop</th></tr></thead>
+          <tbody>
+            <tr><td>GPU</td><td><code>cuda:0</code></td><td><code>cuda:1</code></td></tr>
+            <tr><td>Stage 1 (pix2pix)</td><td><code>e3b-control-s0</code>, stage 3: trained without a detector</td><td><code>e3b-loop-s0</code>, stage 3: trained with one (record 007)</td></tr>
+            <tr><td><code>data.manifest</code><span class="diff">config diff</span></td><td><code>runs/e3b-control-s0/stage3/paired/data.yaml</code></td><td><code>runs/e3b-loop-s0/stage3/paired/data.yaml</code></td></tr>
+            <tr><td><code>coupling.task_weights</code><span class="diff">config diff</span></td><td><code>[0.0]</code>: no detector is ever built</td><td><code>[1.0]</code> × <code>grad_scale 0.6</code></td></tr>
+            <tr><td><code>runtime.name</code><span class="diff">config diff</span></td><td><code>cascade-cyclegan-control</code></td><td><code>cascade-cyclegan-loop</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="font-size:0.88rem">A test pins that the two experiment files differ in exactly these three keys. Everything else is shared:</p>
+      <dl class="shared">
+        <div><dt>train.epochs_per_stage</dt><dd>200, one stage</dd></div>
+        <div><dt>train.batch_size · lr</dt><dd>1 · 2e-4, decay from epoch 100</dd></div>
+        <div><dt>translator</dt><dd>resnet_9blocks G, PatchGAN D, 64 filters</dd></div>
+        <div><dt>lambda_cycle · lambda_identity</dt><dd>10 · 0.5 (an effective 5)</dd></div>
+        <div><dt>loss.gan · l2 · lpips</dt><dd>1 · 0 · 0 (paired terms refused)</dd></div>
+        <div><dt>data.unpaired_visible</dt><dd>true, train split only</dd></div>
+        <div><dt>data.infrared_channels</dt><dd>3 (ADR-01)</dd></div>
+        <div><dt>train.seed · hflip · crop</dt><dd>0 · 0.5 · none (full 640×480)</dd></div>
+        <div><dt>grad_scale</dt><dd>0.6 in both; inert in control</dd></div>
+      </dl>
+    </div>
+
+    <div class="cards3">
+      <div class="dcard warn">
+        <span class="role">Caveat · plan Q5</span>
+        <h3>The arms differ in two places</h3>
+        <p>Each arm reads its own stage 1, so control is detector-free end to end and loop has a detector in both stages. That tells the cleanest "detector everywhere vs. nowhere" story, but stage 2's share of any gap cannot be separated out.</p>
+      </div>
+      <div class="dcard warn">
+        <span class="role">Caveat · plan Q1, Q3</span>
+        <h3>One seed per arm</h3>
+        <p>A reading, not a measurement: no significance test. One arm per card breaks record 007's split-by-seed rule, but with one seed there is no paired test for a GPU difference to bias. The record states it.</p>
+      </div>
+      <div class="dcard warn">
+        <span class="role">Caveat · stage-1 export</span>
+        <h3>Trained in-sample, scored out-of-sample</h3>
+        <p>Stage 2 trains on pix2pix's outputs for train frames, which pix2pix itself was trained on. It is scored on val outputs, which pix2pix never saw and which may be rougher than anything stage 2 learned from.</p>
+      </div>
+    </div>
+
+    <div class="prose">
+      <h3>When both runs finish</h3>
+      <ol class="steps">
+        <li><code>t2o aggregate</code> on zero-shot mAP@50 (read by the independent yolo11s judge) and LPIPS against the real val photos.</li>
+        <li><code>t2o faithfulness</code> for invented and erased objects, the test PiSA-SR failed.</li>
+        <li><code>loss_share.py</code> on the loop run, over all 200 epochs and over the first 25, to report the dose it really ran at.</li>
+        <li>One <code>/log-experiment</code> record that states all three caveats above.</li>
+      </ol>
+      <p class="muted" style="font-size:0.92rem">Whatever it shows stays in paper 2. Entering the TIM paper would need a separate gate feature with faithfulness margins fixed before the first score, by 2027-01-10.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Sources: <code>docs/features/cyclegan-cascade/</code> (plan Q1–Q11, ADR-01), <code>experiments/cascade_cyclegan_{control,loop}.yaml</code>, <code>src/t2o/translators/cyclegan.py</code>, <code>src/t2o/data/dataset.py</code>. Written 2026-11-14, before either run finished; it shows the design, not a result.</p>
+    <p>For the loop, the three detectors and how faithfulness is counted, see the <a href="t2o-field-guide.html">t2o field guide</a>.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  const NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent, text) {
+    const node = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    if (text !== undefined) node.textContent = text;
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+  function press(group, btn) {
+    group.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === btn)));
+  }
+
+  /* ---------- Part 1: arm toggle ---------- */
+  const ARM_TEXT = {
+    loop: "<b>Loop arm, on cuda:1.</b> Stage 1 is <code>e3b-loop-s0</code>, the pix2pix that already trained with the detector in its loop (record 007). Stage 2 adds a frozen yolo11n that reads every output. Its detection loss, scaled by 1.0 × 0.6, trains CycleGAN's forward generator G_AB and nothing else.",
+    control: "<b>Control arm, on cuda:0.</b> Stage 1 is <code>e3b-control-s0</code>, the pix2pix trained without a detector. Stage 2 trains CycleGAN on its GAN, cycle and identity losses alone. With <code>task_weights: [0.0]</code> no in-loop detector is ever built, so this arm is detector-free end to end."
+  };
+  const armSeg = document.querySelector('[aria-label="Arm"]');
+  function setArm(arm) {
+    document.getElementById("pipe-det").style.opacity = arm === "loop" ? "1" : "0.12";
+    document.getElementById("pipe-text").innerHTML = ARM_TEXT[arm];
+  }
+  armSeg.addEventListener("click", e => {
+    const b = e.target.closest("button[data-arm]"); if (!b) return;
+    press(armSeg, b); setArm(b.dataset.arm);
+  });
+  setArm("loop");
+
+  /* ---------- Part 2: loss terms ---------- */
+  const TERMS = {
+    all: ["Generator step, then critic step",
+      "Each batch runs two updates, as upstream CycleGAN does. First one Adam step over both generators, with both critics frozen, on GAN + cycle + identity (+ detection in the loop arm). Then one Adam step over both critics. Stage 2 is the only thing that trains: pix2pix and yolo11n never change.",
+      "fit() returns loss_gan, loss_cycle, loss_idt, loss_det, loss_total, loss_d"],
+    gan: ["Adversarial (GAN), weight 1",
+      "D_B judges whether G_AB's output looks like a real visible photo; D_A does the same for G_BA's output against stage-1 images. Both directions are summed. This is the only term that pulls stage 2 toward optical, so a config with loss.gan at 0 is refused at startup.",
+      "loss.gan: 1.0 · logged as loss_gan · LSGAN, as upstream"],
+    cycle: ["Cycle consistency, λ = 10 each way",
+      "A → B → A must come back as the same image (L1), and so must B → A → B. With no paired target, this is what stops stage 2 from inventing or dropping content. Lower lets it invent; higher pins the output to stage 1.",
+      "translator.lambda_cycle: 10.0 · logged as loss_cycle"],
+    idt: ["Identity, 0.5 × 10 = an effective 5",
+      "A real photo fed to G_AB should come out unchanged, and so should stage-1 output fed to G_BA. Without it CycleGAN is free to shift colours. It needs the same channel count on both sides, which is one more reason the stage-1 tree is read as 3-channel RGB.",
+      "translator.lambda_identity: 0.5 (multiplies lambda_cycle, as upstream) · logged as loss_idt"],
+    det: ["Detection, loop arm only",
+      "The frozen yolo11n reads G_AB's output and computes its normal detection loss against the input frame's boxes. That loss, times task_weight × grad_scale = 1.0 × 0.6, joins the generator step. It reaches G_AB only: G_BA's outputs never go to the detector. In the control arm the detector is never built.",
+      "coupling.task_weights: [1.0] · grad_scale: 0.6 · logged as loss_det"],
+    dstep: ["Critic step, after the generator step",
+      "D_A and D_B train on real images and on fakes drawn from a 50-image history pool, which steadies the game. The fakes are detached, and the critics are frozen during the generator step. So no generator term, the detection term included, ever updates a critic.",
+      "ImagePool(50), vendored from upstream at 2a7afba · logged as loss_d"]
+  };
+  const termSeg = document.getElementById("term-seg");
+  const stepSvg = document.getElementById("step-svg");
+  function setTerm(term) {
+    stepSvg.querySelectorAll("[data-t]").forEach(n => {
+      const on = term === "all" || n.dataset.t.split(" ").includes(term);
+      n.style.opacity = on ? "1" : "0.12";
+    });
+    const [title, text, key] = TERMS[term];
+    document.getElementById("term-title").textContent = title;
+    document.getElementById("term-text").textContent = text;
+    document.getElementById("term-key").textContent = key;
+  }
+  termSeg.addEventListener("click", e => {
+    const b = e.target.closest("button[data-term]"); if (!b) return;
+    press(termSeg, b); setTerm(b.dataset.term);
+  });
+  setTerm("all");
+
+  /* ---------- Part 3: pairing figure ---------- */
+  (function drawPairs() {
+    const svg = document.getElementById("pair-svg");
+    const PERM = [2, 4, 0, 1, 3]; // illustrative, not the real seed-0 draw
+    const panels = [
+      { x: 0, title: "TRAIN · UNPAIRED TARGET", order: PERM, color: "var(--vis)" },
+      { x: 500, title: "VAL · STILL PAIRED", order: [0, 1, 2, 3, 4], color: "var(--muted)" }
+    ];
+    const cw = 72, ch = 46, top = 44, pitch = 51;
+    for (const p of panels) {
+      el("text", { x: p.x + 20, y: 24, class: "hdr" }, svg, p.title);
+      el("text", { x: p.x + 56, y: top - 6, "text-anchor": "middle", class: "lbl-s" }, svg, "input");
+      el("text", { x: p.x + 376, y: top - 6, "text-anchor": "middle", class: "lbl-s" }, svg, "visible target");
+      for (let i = 0; i < 5; i++) {
+        const y = top + i * pitch, cy = y + ch / 2;
+        el("use", { href: "#imgA", x: p.x + 20, y, width: cw, height: ch }, svg);
+        el("rect", { x: p.x + 41, y: y + 10, width: 38, height: 26, fill: "none", stroke: "var(--accent)", "stroke-width": 2 }, svg);
+        el("rect", { x: p.x + 20, y: y + ch - 11, width: cw, height: 11, class: "band" }, svg);
+        el("text", { x: p.x + 24, y: y + ch - 2.5, class: "chipl" }, svg, "frame " + (i + 1));
+        const j = p.order[i], ty = top + j * pitch + ch / 2;
+        el("use", { href: "#imgB", x: p.x + 340, y: top + i * pitch, width: cw, height: ch }, svg);
+        el("rect", { x: p.x + 340, y: top + i * pitch + ch - 11, width: cw, height: 11, class: "band" }, svg);
+        el("text", { x: p.x + 344, y: top + i * pitch + ch - 2.5, class: "chipl" }, svg, "photo " + (i + 1));
+        el("line", { x1: p.x + 96, y1: cy, x2: p.x + 334, y2: ty, stroke: p.color, "stroke-width": 1.8, "marker-end": p.color === "var(--vis)" ? "url(#arV)" : "url(#arM)" }, svg);
+      }
+    }
+    el("line", { x1: 480, y1: 10, x2: 480, y2: 296, class: "grid", "stroke-dasharray": "4 4" }, svg);
+  })();
+
+  /* ---------- Part 4a: dose chart ---------- */
+  const DET = 2.28, REST = 3.81;
+  const share = g => 100 * DET * g / (DET * g + REST);
+  const dose = (function () {
+    const svg = document.getElementById("dose-svg");
+    const L = 46, R = 16, T = 14, B = 40, W = 480, H = 270;
+    const x = g => L + g * (W - L - R);
+    const y = s => T + (1 - s / 40) * (H - T - B);
+    el("rect", { x: L, y: y(30), width: W - L - R, height: y(20) - y(30), fill: "var(--good-soft)" }, svg);
+    el("text", { x: W - R - 6, y: y(30) + 14, "text-anchor": "end", class: "tick", style: "fill:var(--good)" }, svg, "target 20–30%");
+    for (const s of [0, 10, 20, 30, 40]) {
+      el("line", { x1: L, x2: W - R, y1: y(s), y2: y(s), class: "grid" }, svg);
+      el("text", { x: L - 6, y: y(s) + 3.5, "text-anchor": "end", class: "tick" }, svg, s + "%");
+    }
+    for (const g of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+      el("text", { x: x(g), y: H - B + 16, "text-anchor": "middle", class: "tick" }, svg, g.toFixed(1));
+    }
+    el("text", { x: (L + W - R) / 2, y: H - 6, "text-anchor": "middle", class: "lbl-s" }, svg, "grad_scale");
+    el("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), class: "axis" }, svg);
+    const pts = [];
+    for (let g = 0; g <= 1.0001; g += 0.01) pts.push(x(g).toFixed(1) + "," + y(share(g)).toFixed(1));
+    el("polyline", { points: pts.join(" "), fill: "none", stroke: "var(--det)", "stroke-width": 2.2 }, svg);
+    // the measured probe and the chosen dose
+    el("circle", { cx: x(0.15), cy: y(8.2), r: 5, fill: "var(--ink)" }, svg);
+    el("text", { x: x(0.15) + 9, y: y(8.2) + 16, class: "tick", style: "fill:var(--ink)" }, svg, "probe 0.15 → 8.2% (measured)");
+    el("circle", { cx: x(0.6), cy: y(share(0.6)), r: 6, fill: "var(--surface)", stroke: "var(--det)", "stroke-width": 2.4 }, svg);
+    el("text", { x: x(0.6) - 10, y: y(share(0.6)) - 12, "text-anchor": "end", class: "tick", style: "fill:var(--det)" }, svg, "chosen 0.6 → 26%");
+    const vline = el("line", { y1: T, y2: y(0), stroke: "var(--muted)", "stroke-dasharray": "3 3" }, svg);
+    const dot = el("circle", { r: 4, fill: "var(--det)" }, svg);
+    return function update(g) {
+      vline.setAttribute("x1", x(g)); vline.setAttribute("x2", x(g));
+      dot.setAttribute("cx", x(g)); dot.setAttribute("cy", y(share(g)));
+    };
+  })();
+  const range = document.getElementById("dose-range");
+  function onDose() {
+    const g = Number(range.value), s = share(g), inBand = s >= 20 && s <= 30;
+    document.getElementById("d-g").textContent = g.toFixed(2);
+    document.getElementById("d-share").textContent = s.toFixed(1) + "%";
+    document.getElementById("d-band").textContent = inBand ? "yes" : (s < 20 ? "too low" : "too high");
+    document.getElementById("d-share-tile").className = "tile " + (inBand ? "in" : "out");
+    dose(g);
+  }
+  range.addEventListener("input", onDose);
+  onDose();
+
+  /* ---------- Part 4b: learning-rate schedule ---------- */
+  (function drawLr() {
+    const svg = document.getElementById("lr-svg");
+    const L = 50, R = 16, T = 14, B = 40, W = 480, H = 270;
+    const x = e => L + (e / 200) * (W - L - R);
+    const y = v => T + (1 - v / 2.4) * (H - T - B); // v in units of 1e-4
+    el("rect", { x: x(0), y: T, width: x(25) - x(0), height: y(0) - T, fill: "var(--det-soft)" }, svg);
+    el("text", { x: x(12.5), y: y(0) - 8, "text-anchor": "middle", class: "tick", style: "fill:var(--det)" }, svg, "read");
+    for (const [v, lab] of [[0, "0"], [1, "1e-4"], [2, "2e-4"]]) {
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: "grid" }, svg);
+      el("text", { x: L - 6, y: y(v) + 3.5, "text-anchor": "end", class: "tick" }, svg, lab);
+    }
+    for (const e of [0, 25, 50, 100, 150, 200]) {
+      el("text", { x: x(e), y: H - B + 16, "text-anchor": "middle", class: "tick" }, svg, String(e));
+    }
+    el("text", { x: (L + W - R) / 2, y: H - 6, "text-anchor": "middle", class: "lbl-s" }, svg, "epoch");
+    el("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), class: "axis" }, svg);
+    el("polyline", { points: `${x(0)},${y(2)} ${x(25)},${y(2)} ${x(50)},${y(0)}`, fill: "none", stroke: "var(--det)", "stroke-width": 2, "stroke-dasharray": "5 4" }, svg);
+    el("polyline", { points: `${x(0)},${y(2)} ${x(100)},${y(2)} ${x(200)},${y(0)}`, fill: "none", stroke: "var(--ink)", "stroke-width": 2.4 }, svg);
+    el("text", { x: x(52), y: y(0.45), class: "tick", style: "fill:var(--det)" }, svg, "probe, 50 epochs");
+    el("text", { x: x(104), y: y(2) - 8, class: "tick", style: "fill:var(--ink)" }, svg, "campaign: decay starts at 100");
+  })();
+})();
+</script>
+</html>
