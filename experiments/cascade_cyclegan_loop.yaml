@@ -58,11 +58,14 @@ coupling:
   # The loop arm: one stage with the detector on. lambda_det is fixed at 1.0, so grad_scale
   # below sets the whole dose (the effective weight is task_weights[stage] * grad_scale).
   task_weights: [1.0]
-  # PLACEHOLDER. Inherited from the pix2pix campaigns (e3b). CYCLEGAN-CASCADE-05 replaces it,
-  # in both files, from this file's loss_share.py probe, so the detection term is 20-30% of
-  # the objective. Too low and the loop arm is a second control; too high and the detector's
-  # gradient wins over the cycle term, producing adversarial texture.
-  grad_scale: 0.15
+  # Set from this file's 50-epoch probe, read over its first 25 epochs (CYCLEGAN-CASCADE-05):
+  # at 0.15 the detection term was 8.2% of the objective (raw loss_det ~2.28 against 3.81 for
+  # gan + cycle + identity). A straight-line projection puts the 20-30% band at ~0.42-0.72;
+  # 0.6 projects to 26%, in the upper half on purpose, since a stronger dose drives the raw
+  # loss down and the share the run reaches lands below the projection (record 006 F29).
+  # Too low and the loop arm is a second control; too high and the detector's gradient wins
+  # over the cycle term, producing adversarial texture. Must match the control file.
+  grad_scale: 0.6
   reward_target: null
 
 detector:

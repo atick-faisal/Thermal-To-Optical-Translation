@@ -65,10 +65,10 @@ coupling:
   # The control arm: one stage at lambda_det = 0. No in-loop detector is ever built
   # (coupling/schedule.py), so nothing here sees a detector.
   task_weights: [0.0]
-  # PLACEHOLDER. Inherited from the pix2pix campaigns (e3b). CYCLEGAN-CASCADE-05 replaces it
-  # from the loop config's loss_share.py probe, in both files. It has no effect in this arm,
-  # but it must match the loop arm's value, or the differ-only test fails.
-  grad_scale: 0.15
+  # The loop arm's dose, set from its probe (CYCLEGAN-CASCADE-05; the reasoning is in that
+  # file). It has no effect in this arm, but it must match the loop arm's value, or the
+  # differ-only test fails.
+  grad_scale: 0.6
   reward_target: null
 
 detector:
