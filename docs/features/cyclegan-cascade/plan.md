@@ -1,7 +1,7 @@
 ---
 slug: cyclegan-cascade
 title: Paired→unpaired cascade (pix2pix → CycleGAN)
-status: in-progress
+status: shipped
 created: 2026-11-13
 ---
 
@@ -97,6 +97,11 @@ passes a faithfulness gate fixed before its first score.
   window that matches the campaign's own constant-rate start. The runbook stops after the probe
   until -05 is pulled; both campaign runs start after that. The record also states that stage 2
   trains on pix2pix's in-sample train outputs but is scored on its out-of-sample val outputs.
+  The probe measured 8.2% at 0.15 (raw `loss_det` ≈ 2.28). -05 applies record 006 F29's rule,
+  a straight-line projection picked from the upper half of the band (≈0.6 projects 26%). It also
+  adds a post-run `loss_share.py` step on `runs/cascade-cyclegan-loop` to the runbook, read over
+  all 200 epochs and over `--first-epochs 25`, so the record states the share the run reached,
+  not only the projection.
 
 ## Open Questions
 
