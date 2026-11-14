@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>E3 Fidelity by Stage</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Standalone copy of the claude.ai "E3 fidelity by stage" dashboard. The page markup and drawing
+   code are the dashboard's own; these tokens stand in for the ones its viewer supplies, in the
+   palette of t2o-field-guide.html. Blue = control arm, orange = loop arm. */
+:root {
+  --color-bg: #f3f5f8; --color-panel: #ffffff; --color-fg: #141a24; --color-fg-muted: #586374;
+  --color-border-line: #d5dce6; --color-ok: #1b7f48; --color-warn: #a86400; --color-bad: #c0362b;
+  --series-control: #1f63c4; --series-loop: #c9500c;
+  --cds-chart-grid: #e4e9f0; --cds-chart-axis: #c5cdd8; --cds-chart-reference: #8a95a5; --cds-chart-muted: #8a95a5;
+  --cds-text-secondary: #586374; --cds-surface-popover: #ffffff; --cds-border: #d5dce6;
+  --cds-shadow-popover: 0 6px 20px rgba(16, 24, 40, .12);
+  --font-anthropic-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-anthropic-serif: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --cds-font-size-caption: 13px; --cds-font-size-body: 16px; --cds-font-size-heading: 21px; --cds-font-size-title: 34px;
+  --cds-font-weight-medium: 600;
+  --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 16px; --cds-gap-lg: 24px; --cds-gap-xl: 44px;
+  --cds-pad-sm: 6px; --cds-pad-md: 10px; --cds-pad-lg: 18px; --cds-radius: 8px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --color-bg: #0d1117; --color-panel: #151b24; --color-fg: #e5eaf1; --color-fg-muted: #9aa6b6;
+  --color-border-line: #2a3442; --color-ok: #43c27e; --color-warn: #e0a040; --color-bad: #ff6f62;
+  --series-control: #3f86ea; --series-loop: #e2662a;
+  --cds-chart-grid: #1f2834; --cds-chart-axis: #344051; --cds-chart-reference: #6b7788; --cds-chart-muted: #6b7788;
+  --cds-text-secondary: #9aa6b6; --cds-surface-popover: #1c2430; --cds-border: #2a3442;
+  --cds-shadow-popover: 0 6px 20px rgba(0, 0, 0, .45);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --color-bg: #0d1117; --color-panel: #151b24; --color-fg: #e5eaf1; --color-fg-muted: #9aa6b6;
+  --color-border-line: #2a3442; --color-ok: #43c27e; --color-warn: #e0a040; --color-bad: #ff6f62;
+  --series-control: #3f86ea; --series-loop: #e2662a;
+  --cds-chart-grid: #1f2834; --cds-chart-axis: #344051; --cds-chart-reference: #6b7788; --cds-chart-muted: #6b7788;
+  --cds-text-secondary: #9aa6b6; --cds-surface-popover: #1c2430; --cds-border: #2a3442;
+  --cds-shadow-popover: 0 6px 20px rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); font-size: 16px; line-height: 1.5; }
+.e3-page { max-width: 1120px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.e3-title { font-stretch: 112%; letter-spacing: -.01em; }
+.e3 code { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
+:focus-visible { outline: 2px solid var(--series-control); outline-offset: 2px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script type="application/json" id="e3-data">{"e3_stats":[{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":0,"n":6,"mean":0.7579,"std":0.0372,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":0,"n":6,"mean":0.7182,"std":0.0907,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":1,"n":6,"mean":0.7519,"std":0.0238,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":1,"n":6,"mean":0.7799,"std":0.0887,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":2,"n":6,"mean":0.8071,"std":0.0263,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":2,"n":6,"mean":0.8427,"std":0.0215,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":3,"n":6,"mean":0.7975,"std":0.033,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":3,"n":6,"mean":0.8487,"std":0.014,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":0,"n":6,"mean":0.3304,"std":0.0364,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":0,"n":6,"mean":0.3272,"std":0.0299,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":1,"n":6,"mean":0.3165,"std":0.015,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":1,"n":6,"mean":0.323,"std":0.0414,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":2,"n":6,"mean":0.2992,"std":0.0101,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":2,"n":6,"mean":0.2997,"std":0.0205,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":3,"n":6,"mean":0.2905,"std":0.0054,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":3,"n":6,"mean":0.3002,"std":0.0106,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":0,"n":6,"mean":14.1339,"std":0.7299,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":0,"n":6,"mean":14.0174,"std":1.1474,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":1,"n":6,"mean":13.5671,"std":0.9102,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":1,"n":6,"mean":13.8623,"std":1.7506,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":2,"n":6,"mean":15.2118,"std":0.8955,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":2,"n":6,"mean":14.7811,"std":1.2446,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":3,"n":6,"mean":15.4522,"std":0.613,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":3,"n":6,"mean":14.9938,"std":0.448,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"pix2pix","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":0,"n":6,"mean":-0.0397,"std":null,"control_gain":null,"loop_gain":null,"p":0.4688,"ci_lo":-0.1265,"ci_hi":0.0373},{"translator":"pix2pix","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":1,"n":6,"mean":0.028,"std":null,"control_gain":null,"loop_gain":null,"p":0.5,"ci_lo":-0.0513,"ci_hi":0.0783},{"translator":"pix2pix","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":2,"n":6,"mean":0.0357,"std":null,"control_gain":null,"loop_gain":null,"p":0.0625,"ci_lo":0.0133,"ci_hi":0.0549},{"translator":"pix2pix","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":3,"n":6,"mean":0.0512,"std":null,"control_gain":null,"loop_gain":null,"p":0.0312,"ci_lo":0.0248,"ci_hi":0.0809},{"translator":"pix2pix","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":0,"n":6,"mean":-0.0033,"std":null,"control_gain":null,"loop_gain":null,"p":0.8438,"ci_lo":-0.0491,"ci_hi":0.0366},{"translator":"pix2pix","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":1,"n":6,"mean":0.0065,"std":null,"control_gain":null,"loop_gain":null,"p":0.8438,"ci_lo":-0.03,"ci_hi":0.0454},{"translator":"pix2pix","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":2,"n":6,"mean":0.0005,"std":null,"control_gain":null,"loop_gain":null,"p":0.9375,"ci_lo":-0.0174,"ci_hi":0.0175},{"translator":"pix2pix","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":3,"n":6,"mean":0.0097,"std":null,"control_gain":null,"loop_gain":null,"p":0.125,"ci_lo":0.0017,"ci_hi":0.0171},{"translator":"pix2pix","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":0,"n":6,"mean":-0.1165,"std":null,"control_gain":null,"loop_gain":null,"p":0.9062,"ci_lo":-1.3364,"ci_hi":1.0443},{"translator":"pix2pix","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":1,"n":6,"mean":0.2952,"std":null,"control_gain":null,"loop_gain":null,"p":0.75,"ci_lo":-1.288,"ci_hi":1.8428},{"translator":"pix2pix","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":2,"n":6,"mean":-0.4307,"std":null,"control_gain":null,"loop_gain":null,"p":0.6562,"ci_lo":-1.7969,"ci_hi":0.7491},{"translator":"pix2pix","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":3,"n":6,"mean":-0.4583,"std":null,"control_gain":null,"loop_gain":null,"p":0.2812,"ci_lo":-1.1273,"ci_hi":0.2968},{"translator":"pix2pix","kind":"trajectory","metric":"zero_shot.map50","arm":"loop-control","stage":1,"n":6,"mean":0.0677,"std":null,"control_gain":-0.006,"loop_gain":0.0617,"p":0.3125,"ci_lo":-0.0607,"ci_hi":0.1842},{"translator":"pix2pix","kind":"trajectory","metric":"zero_shot.map50","arm":"loop-control","stage":2,"n":6,"mean":0.0754,"std":null,"control_gain":0.0491,"loop_gain":0.1245,"p":0.1562,"ci_lo":0.0031,"ci_hi":0.1596},{"translator":"pix2pix","kind":"trajectory","metric":"zero_shot.map50","arm":"loop-control","stage":3,"n":6,"mean":0.0909,"std":null,"control_gain":0.0396,"loop_gain":0.1305,"p":0.0938,"ci_lo":0.0192,"ci_hi":0.1812},{"translator":"pix2pix","kind":"trajectory","metric":"fidelity.lpips","arm":"loop-control","stage":1,"n":6,"mean":0.0098,"std":null,"control_gain":-0.0139,"loop_gain":-0.0042,"p":0.6562,"ci_lo":-0.0404,"ci_hi":0.0529},{"translator":"pix2pix","kind":"trajectory","metric":"fidelity.lpips","arm":"loop-control","stage":2,"n":6,"mean":0.0037,"std":null,"control_gain":-0.0312,"loop_gain":-0.0274,"p":0.7812,"ci_lo":-0.0368,"ci_hi":0.0362},{"translator":"pix2pix","kind":"trajectory","metric":"fidelity.lpips","arm":"loop-control","stage":3,"n":6,"mean":0.0129,"std":null,"control_gain":-0.0399,"loop_gain":-0.027,"p":0.5625,"ci_lo":-0.0248,"ci_hi":0.0538},{"translator":"pix2pix","kind":"trajectory","metric":"fidelity.psnr","arm":"loop-control","stage":1,"n":6,"mean":0.4116,"std":null,"control_gain":-0.5667,"loop_gain":-0.1551,"p":0.75,"ci_lo":-1.6174,"ci_hi":2.6227},{"translator":"pix2pix","kind":"trajectory","metric":"fidelity.psnr","arm":"loop-control","stage":2,"n":6,"mean":-0.3143,"std":null,"control_gain":1.078,"loop_gain":0.7637,"p":0.5938,"ci_lo":-1.5591,"ci_hi":0.9622},{"translator":"pix2pix","kind":"trajectory","metric":"fidelity.psnr","arm":"loop-control","stage":3,"n":6,"mean":-0.3419,"std":null,"control_gain":1.3183,"loop_gain":0.9764,"p":0.8125,"ci_lo":-1.6776,"ci_hi":1.3412},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":0,"n":3,"mean":0.8599,"std":0.0293,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":0,"n":3,"mean":0.8576,"std":0.0286,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":1,"n":3,"mean":0.8474,"std":0.0093,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":1,"n":3,"mean":0.8748,"std":0.0093,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":2,"n":3,"mean":0.8439,"std":0.0138,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":2,"n":3,"mean":0.8674,"std":0.007,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"control","stage":3,"n":3,"mean":0.8326,"std":0.0161,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"zero_shot.map50","arm":"loop","stage":3,"n":3,"mean":0.8632,"std":0.0115,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":0,"n":3,"mean":0.2602,"std":0.0131,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":0,"n":3,"mean":0.2485,"std":0.0205,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":1,"n":3,"mean":0.2613,"std":0.0062,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":1,"n":3,"mean":0.2527,"std":0.0167,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":2,"n":3,"mean":0.2669,"std":0.0114,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":2,"n":3,"mean":0.2598,"std":0.003,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"control","stage":3,"n":3,"mean":0.2767,"std":0.011,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.lpips","arm":"loop","stage":3,"n":3,"mean":0.257,"std":0.0044,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":0,"n":3,"mean":16.0922,"std":0.176,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":0,"n":3,"mean":16.6189,"std":0.7446,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":1,"n":3,"mean":16.2927,"std":0.5205,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":1,"n":3,"mean":16.7967,"std":0.5078,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":2,"n":3,"mean":16.0602,"std":0.1949,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":2,"n":3,"mean":16.4798,"std":0.3479,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"control","stage":3,"n":3,"mean":16.2836,"std":0.5953,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"arm","metric":"fidelity.psnr","arm":"loop","stage":3,"n":3,"mean":16.498,"std":0.0938,"control_gain":null,"loop_gain":null,"p":null,"ci_lo":null,"ci_hi":null},{"translator":"turbo","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":0,"n":3,"mean":-0.0023,"std":null,"control_gain":null,"loop_gain":null,"p":1.0,"ci_lo":-0.0601,"ci_hi":0.0276},{"translator":"turbo","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":1,"n":3,"mean":0.0274,"std":null,"control_gain":null,"loop_gain":null,"p":0.25,"ci_lo":0.01,"ci_hi":0.0383},{"translator":"turbo","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":2,"n":3,"mean":0.0235,"std":null,"control_gain":null,"loop_gain":null,"p":0.25,"ci_lo":0.0048,"ci_hi":0.0359},{"translator":"turbo","kind":"paired","metric":"zero_shot.map50","arm":"loop-control","stage":3,"n":3,"mean":0.0306,"std":null,"control_gain":null,"loop_gain":null,"p":0.25,"ci_lo":0.0121,"ci_hi":0.0459},{"translator":"turbo","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":0,"n":3,"mean":-0.0117,"std":null,"control_gain":null,"loop_gain":null,"p":0.25,"ci_lo":-0.0221,"ci_hi":-0.0028},{"translator":"turbo","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":1,"n":3,"mean":-0.0086,"std":null,"control_gain":null,"loop_gain":null,"p":0.5,"ci_lo":-0.0192,"ci_hi":0.0019},{"translator":"turbo","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":2,"n":3,"mean":-0.0071,"std":null,"control_gain":null,"loop_gain":null,"p":0.25,"ci_lo":-0.0164,"ci_hi":-0.0004},{"translator":"turbo","kind":"paired","metric":"fidelity.lpips","arm":"loop-control","stage":3,"n":3,"mean":-0.0197,"std":null,"control_gain":null,"loop_gain":null,"p":0.25,"ci_lo":-0.032,"ci_hi":-0.0065},{"translator":"turbo","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":0,"n":3,"mean":0.5267,"std":null,"control_gain":null,"loop_gain":null,"p":0.5,"ci_lo":-0.3796,"ci_hi":1.3493},{"translator":"turbo","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":1,"n":3,"mean":0.504,"std":null,"control_gain":null,"loop_gain":null,"p":0.5,"ci_lo":-0.0896,"ci_hi":1.4892},{"translator":"turbo","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":2,"n":3,"mean":0.4196,"std":null,"control_gain":null,"loop_gain":null,"p":0.5,"ci_lo":-0.1576,"ci_hi":0.7976},{"translator":"turbo","kind":"paired","metric":"fidelity.psnr","arm":"loop-control","stage":3,"n":3,"mean":0.2144,"std":null,"control_gain":null,"loop_gain":null,"p":0.5,"ci_lo":-0.5276,"ci_hi":0.6046},{"translator":"turbo","kind":"trajectory","metric":"zero_shot.map50","arm":"loop-control","stage":1,"n":3,"mean":0.0297,"std":null,"control_gain":-0.0124,"loop_gain":0.0172,"p":0.25,"ci_lo":0.0063,"ci_hi":0.0701},{"translator":"turbo","kind":"trajectory","metric":"zero_shot.map50","arm":"loop-control","stage":2,"n":3,"mean":0.0258,"std":null,"control_gain":-0.0159,"loop_gain":0.0098,"p":0.25,"ci_lo":0.0042,"ci_hi":0.0648},{"translator":"turbo","kind":"trajectory","metric":"zero_shot.map50","arm":"loop-control","stage":3,"n":3,"mean":0.0329,"std":null,"control_gain":-0.0273,"loop_gain":0.0056,"p":0.75,"ci_lo":-0.0135,"ci_hi":0.106},{"translator":"turbo","kind":"trajectory","metric":"fidelity.lpips","arm":"loop-control","stage":1,"n":3,"mean":0.0031,"std":null,"control_gain":0.0011,"loop_gain":0.0042,"p":0.75,"ci_lo":-0.0056,"ci_hi":0.0121},{"translator":"turbo","kind":"trajectory","metric":"fidelity.lpips","arm":"loop-control","stage":2,"n":3,"mean":0.0046,"std":null,"control_gain":0.0067,"loop_gain":0.0114,"p":0.75,"ci_lo":-0.0137,"ci_hi":0.0177},{"translator":"turbo","kind":"trajectory","metric":"fidelity.lpips","arm":"loop-control","stage":3,"n":3,"mean":-0.008,"std":null,"control_gain":0.0166,"loop_gain":0.0085,"p":0.5,"ci_lo":-0.0179,"ci_hi":0.0037},{"translator":"turbo","kind":"trajectory","metric":"fidelity.psnr","arm":"loop-control","stage":1,"n":3,"mean":-0.0227,"std":null,"control_gain":0.2005,"loop_gain":0.1777,"p":1.0,"ci_lo":-0.7,"ci_hi":0.492},{"translator":"turbo","kind":"trajectory","metric":"fidelity.psnr","arm":"loop-control","stage":2,"n":3,"mean":-0.1071,"std":null,"control_gain":-0.032,"loop_gain":-0.1391,"p":1.0,"ci_lo":-0.7679,"ci_hi":0.9984},{"translator":"turbo","kind":"trajectory","metric":"fidelity.psnr","arm":"loop-control","stage":3,"n":3,"mean":-0.3123,"std":null,"control_gain":0.1914,"loop_gain":-0.1209,"p":0.25,"ci_lo":-0.7831,"ci_hi":-0.0058}],"e3b_seeds":[{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7421519675949261"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3127667307853699"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"13.5139741897583"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7501580188701578"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.301246702671051"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"12.940557479858398"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8237010823282351"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2844001054763794"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"15.330728530883789"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8128402906700233"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2829286754131317"},{"run":"e3b-control-s0","path":"runs\\e3b-control-s0","seed":"0","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"16.058637619018555"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7974415787800223"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.33255282044410706"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"13.859832763671875"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7372568744091819"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3065545856952667"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"14.868733406066895"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8336737857398901"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.29319289326667786"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"15.815852165222168"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8441498794294119"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2893581986427307"},{"run":"e3b-control-s1","path":"runs\\e3b-control-s1","seed":"1","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"15.860516548156738"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.6937798040378812"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.32774895429611206"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"13.566692352294922"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7603131900614049"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.30287015438079834"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"13.344771385192871"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7628803176292229"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3082382082939148"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"13.438620567321777"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7576454698987364"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.29550594091415405"},{"run":"e3b-control-s2","path":"runs\\e3b-control-s2","seed":"2","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"14.867419242858887"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7846637200676123"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3070865273475647"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"14.768314361572266"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7620796242111713"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.32359129190444946"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"13.191275596618652"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8135913348903908"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.30276229977607727"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"15.698075294494629"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7680947851238659"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.28730180859565735"},{"run":"e3b-control-s3","path":"runs\\e3b-control-s3","seed":"3","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"14.520112991333008"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7745951797648921"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.40067800879478455"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"13.792668342590332"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7856573708132106"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3375287353992462"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"14.49357795715332"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7890474354970431"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.31118571758270264"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"15.280912399291992"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7843855761288185"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2902548611164093"},{"run":"e3b-control-s4","path":"runs\\e3b-control-s4","seed":"4","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"15.641945838928223"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7549329813621454"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3017273247241974"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"15.301628112792969"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7159790604815274"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3271883428096771"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"12.563907623291016"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8194245565563442"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2956903278827667"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"15.706772804260254"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8179749368503605"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2975403070449829"},{"run":"e3b-control-s5","path":"runs\\e3b-control-s5","seed":"5","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"15.76429557800293"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.715952305308064"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3044123947620392"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"14.91219425201416"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.8154192123409509"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.2939086854457855"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"15.376011848449707"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8736202787918563"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.2814876139163971"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"15.606976509094238"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8547938638426396"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.3025718629360199"},{"run":"e3b-loop-s0","path":"runs\\e3b-loop-s0","seed":"0","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"15.320601463317871"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.6540014663283281"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3359002470970154"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"13.280037879943848"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.7929654393538437"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.3659374415874481"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"11.936149597167969"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8239581848786801"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.3248697817325592"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"12.534512519836426"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8475402463498627"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.3015083968639374"},{"run":"e3b-loop-s1","path":"runs\\e3b-loop-s1","seed":"1","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"14.555007934570312"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.7544674525096504"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.326637327671051"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"14.213277816772461"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.6011650699933663"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.38220086693763733"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"11.572456359863281"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8275678512638792"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.31386223435401917"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"15.045408248901367"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8692232659519413"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.29210034012794495"},{"run":"e3b-loop-s2","path":"runs\\e3b-loop-s2","seed":"2","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"15.238167762756348"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.5747279967849542"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.3816603124141693"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"12.282367706298828"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.8158113228825667"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.30114981532096863"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"15.530099868774414"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8665324474119778"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.29064688086509705"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"15.396932601928711"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8473979197736736"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.29764094948768616"},{"run":"e3b-loop-s3","path":"runs\\e3b-loop-s3","seed":"3","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"15.519208908081055"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8020288412206216"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2997811734676361"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"15.494095802307129"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.8366007196582657"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.2799895703792572"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"14.996907234191895"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8331389984857838"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.2739241123199463"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"15.894275665283203"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8260504687506377"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.28840357065200806"},{"run":"e3b-loop-s4","path":"runs\\e3b-loop-s4","seed":"4","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"14.940824508666992"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8083205458656868"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.31454750895500183"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"13.922428131103516"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.8175917148953966"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.314729243516922"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"13.762116432189941"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8315984904528957"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.31352055072784424"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"14.208395004272461"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8473956210400941"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.3187248408794403"},{"run":"e3b-loop-s5","path":"runs\\e3b-loop-s5","seed":"5","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"14.38916301727295"}],"e3t_seeds":[{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8302903736164027"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2598688006401062"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"16.21333122253418"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8383970171509723"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.26144006848335266"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"16.85613250732422"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8293786340525277"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2796050012111664"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"16.237289428710938"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8184094244827931"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.28165704011917114"},{"run":"e3t-control-s0","path":"runs\\e3t-control-s0","seed":"0","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"15.849250793457031"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8578770134487312"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.25708526372909546"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"16.8237247467041"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.8723047189939366"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.2530457377433777"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"16.766510009765625"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8652342425679822"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.2631666958332062"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"16.07973861694336"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8522506023318381"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.26097753643989563"},{"run":"e3t-loop-s0","path":"runs\\e3t-loop-s0","seed":"0","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"16.453845977783203"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.860377491557635"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.24723581969738007"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"15.890339851379395"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8467863222276322"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2549748122692108"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"15.829705238342285"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8454611753112322"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.26357218623161316"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"15.851431846618652"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8501035623672061"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.28438952565193176"},{"run":"e3t-control-s1","path":"runs\\e3t-control-s1","seed":"1","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"16.03951644897461"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8860246275287305"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.22510769963264465"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"17.23968505859375"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.8850780156218855"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.23581057786941528"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"17.318878173828125"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8753010466021821"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.25915461778640747"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"16.648996353149414"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8622155266083098"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.25234082341194153"},{"run":"e3t-loop-s1","path":"runs\\e3t-loop-s1","seed":"1","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"16.605737686157227"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8888861726373862"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2734799087047577"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"16.173025131225586"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"1","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8570250383068554"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2673781216144562"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"1","task_weight":"0.0","metric":"fidelity.psnr","value":"16.192256927490234"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"2","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8569460530160347"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.lpips","value":"0.25759127736091614"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"2","task_weight":"0.0","metric":"fidelity.psnr","value":"16.091989517211914"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"3","task_weight":"0.0","metric":"zero_shot.map50","value":"0.8292772816109224"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.lpips","value":"0.2641894519329071"},{"run":"e3t-control-s3","path":"runs\\e3t-control-s3","seed":"3","arm":"control","stage":"3","task_weight":"0.0","metric":"fidelity.psnr","value":"16.96217155456543"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"0","task_weight":"0.0","metric":"zero_shot.map50","value":"0.82883354773454"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.lpips","value":"0.263271689414978"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"0","task_weight":"0.0","metric":"fidelity.psnr","value":"15.79339599609375"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"1","task_weight":"1.0","metric":"zero_shot.map50","value":"0.8670717559338712"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.lpips","value":"0.2692422866821289"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"1","task_weight":"1.0","metric":"fidelity.psnr","value":"16.304643630981445"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"2","task_weight":"2.0","metric":"zero_shot.map50","value":"0.8617432104808916"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.lpips","value":"0.2572004497051239"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"2","task_weight":"2.0","metric":"fidelity.psnr","value":"16.710773468017578"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"3","task_weight":"3.0","metric":"zero_shot.map50","value":"0.8752003112222961"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.lpips","value":"0.25767651200294495"},{"run":"e3t-loop-s3","path":"runs\\e3t-loop-s3","seed":"3","arm":"loop","stage":"3","task_weight":"3.0","metric":"fidelity.psnr","value":"16.434526443481445"}]}</script>
+<script>
+  // A minimal stand-in for the dashboard viewer's `dash` object: every source is already loaded,
+  // and drawings rerun when the window width changes.
+  window.dash = (() => {
+    const DATA = JSON.parse(document.getElementById('e3-data').textContent);
+    const drawings = [];
+    const run = () => drawings.forEach(([name, fn]) =>
+      document.querySelectorAll(`[data-draw="${name}"]`).forEach((el) => fn(el)));
+    let width = window.innerWidth, frame = 0;
+    window.addEventListener('resize', () => {
+      if (window.innerWidth === width) return;
+      width = window.innerWidth;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(run);
+    });
+    return {
+      colors: ['var(--series-control)', 'var(--series-loop)'],
+      data: (id) => (id in DATA ? { status: 'ok', data: DATA[id] } : { status: 'missing', data: [] }),
+      draw: (name, fn) => drawings.push([name, fn]),
+      run,
+    };
+  })();
+</script>
+<body>
+<main class="e3-page">
+<style>
+  .e3 { display: grid; gap: var(--cds-gap-xl); color: var(--color-fg); }
+  .e3-head { display: grid; gap: var(--cds-gap-sm); }
+  .e3-title { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); text-wrap: balance; }
+  .e3-lede { margin: 0; max-width: 70ch; line-height: 1.5; }
+  .e3-lede b { font-weight: var(--cds-font-weight-medium); font-variant-numeric: tabular-nums; }
+  .e3-scope { margin: 0; max-width: 70ch; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); line-height: 1.5; }
+  .e3-section { display: grid; gap: var(--cds-gap-md); min-width: 0; }
+  .e3-h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); text-wrap: balance; }
+  .e3-h3 { margin: 0; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .e3-h3 span, .e3-dir { color: var(--color-fg-muted); font-weight: 400; }
+  .e3-p { margin: 0; max-width: 70ch; line-height: 1.5; }
+  .e3-group { display: grid; gap: var(--cds-gap-sm); min-width: 0; }
+  .e3-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--cds-gap-md); }
+  .e3-tile { display: grid; gap: var(--cds-gap-xs); align-content: start; min-width: 0; background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); }
+  .e3-tile-k { margin: 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--cds-gap-xs); font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); letter-spacing: .02em; }
+  .e3-tile-v { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; }
+  .e3-unit { margin-left: .25em; font-family: var(--font-anthropic-sans); font-size: var(--cds-font-size-body); color: var(--color-fg-muted); }
+  .e3-small { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+  .is-good { color: var(--color-ok); }
+  .is-bad { color: var(--color-bad); }
+  .e3-pill { margin: var(--cds-gap-xs) 0 0; display: inline-flex; align-items: center; gap: .45em; font-size: var(--cds-font-size-caption); color: var(--color-fg); }
+  .e3-pill::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-fg-muted); }
+  .e3-pill.tone-good::before { background: var(--color-ok); }
+  .e3-pill.tone-bad::before { background: var(--color-bad); }
+  .e3-read { margin: 0; padding-left: 1.2em; display: grid; gap: var(--cds-gap-xs); max-width: 72ch; line-height: 1.5; }
+  .e3-legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-xs) var(--cds-gap-lg); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .e3-legend > span { display: inline-flex; align-items: center; gap: .45em; }
+  .e3-sw { display: inline-block; width: 16px; height: 3px; border-radius: 2px; background: var(--color-fg-muted); }
+  .e3-key-band { display: inline-block; width: 16px; height: 10px; border-radius: 2px; background: var(--cds-chart-muted); opacity: .5; }
+  .e3-key-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--cds-chart-muted); }
+  .e3-metric { display: grid; gap: var(--cds-gap-sm); min-width: 0; }
+  .e3-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--cds-gap-md); }
+  .e3-panel { display: grid; gap: var(--cds-gap-xs); min-width: 0; }
+  .e3-panel-k { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .e3-chart { position: relative; min-height: 230px; }
+  .e3-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .e3-chart text { font-size: var(--cds-font-size-caption); fill: var(--cds-text-secondary); font-variant-numeric: tabular-nums; }
+  .e3-chart .e3-end { fill: var(--color-fg); }
+  .e3-msg { margin: 0; padding-top: var(--cds-pad-lg); color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+  .e3-tip { position: absolute; z-index: 2; pointer-events: none; display: grid; gap: 2px; white-space: nowrap; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); box-shadow: var(--cds-shadow-popover); border-radius: var(--cds-radius); padding: var(--cds-pad-sm) var(--cds-pad-md); font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; color: var(--color-fg); }
+  .e3-tip[hidden] { display: none; }
+  .e3-tip b { font-weight: var(--cds-font-weight-medium); }
+  .e3-tip .e3-tip-row { display: flex; align-items: center; gap: .5em; }
+  .e3-tip .e3-muted { color: var(--cds-text-secondary); }
+  .e3-tablewrap { overflow-x: auto; min-width: 0; }
+  .e3-table { border-collapse: collapse; width: 100%; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .e3-table th, .e3-table td { padding: 6px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--color-border-line); }
+  .e3-table th { font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); vertical-align: bottom; }
+  .e3-table .l { text-align: left; }
+  .e3-table .grp { border-left: 1px solid var(--color-border-line); }
+  .e3-table .null td { color: var(--color-fg-muted); }
+  .e3-details { display: grid; gap: var(--cds-gap-sm); }
+  .e3-details summary { cursor: pointer; font-weight: var(--cds-font-weight-medium); }
+  .e3-details[open] summary { margin-bottom: var(--cds-gap-sm); }
+  .e3-notes { margin: 0; padding-left: 1.2em; display: grid; gap: var(--cds-gap-xs); max-width: 72ch; line-height: 1.5; }
+  .e3 code { font-size: .92em; }
+  .e3 [data-dash-source-state=refreshing] { opacity: .5; }
+</style>
+
+<div class="e3">
+  <header class="e3-head" id="summary">
+    <h1 class="e3-title">E3 fidelity by stage</h1>
+    <p class="e3-lede">At stage 3 the detection loop changes PSNR by
+      <b data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</b> dB on pix2pix
+      (95% CI <b data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</b> to
+      <b data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</b>) and by
+      <b data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</b> dB on pix2pix-turbo
+      (<b data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</b> to
+      <b data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</b>).
+      Over the same runs, zero-shot mAP50 changes by
+      <b data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</b> and
+      <b data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</b>.</p>
+    <p class="e3-scope">Experiment E3 on the custom set's validation split. Each translator trains in two arms: a control with the detection weight at 0, and a loop that raises it 0, 1, 2, 3 over four stages. Loop and control share a seed, so every difference is paired: pix2pix has 6 seed pairs, pix2pix-turbo has 3. PSNR is new on this page; LPIPS and mAP50 are re-read from the same run files and match the published records.</p>
+  </header>
+
+  <section class="e3-section" id="stage3">
+    <h2 class="e3-h2">Stage 3: loop minus control</h2>
+    <p class="e3-p">Each tile is the paired loop − control difference at the last stage, with its 95% bootstrap interval and exact sign-flip p. The stage-0 gap below it is the same difference before the detector had any weight, which is the noise the stage-3 number has to beat.</p>
+
+    <div class="e3-group" id="stage3-pix2pix">
+      <h3 class="e3-h3">pix2pix <span>· 6 seed pairs</span></h3>
+      <div class="e3-tiles">
+        <article class="e3-tile" id="tile-pix2pix-psnr">
+          <h4 class="e3-tile-k">PSNR <span class="e3-dir">higher is better</span></h4>
+          <p class="e3-tile-v"><span data-draw="stat" data-tone="1" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span><span class="e3-unit">dB</span></p>
+          <p class="e3-small">95% CI [<span data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span>, <span data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span>] · p = <span data-draw="stat" data-source="e3_stats" data-field="p" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span></p>
+          <p class="e3-small">Stage-0 gap <span data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=0">—</span> dB</p>
+          <p class="e3-pill" data-draw="verdict" data-source="e3_stats" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</p>
+        </article>
+        <article class="e3-tile" id="tile-pix2pix-lpips">
+          <h4 class="e3-tile-k">LPIPS <span class="e3-dir">lower is better</span></h4>
+          <p class="e3-tile-v"><span data-draw="stat" data-tone="1" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span></p>
+          <p class="e3-small">95% CI [<span data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span>, <span data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span>] · p = <span data-draw="stat" data-source="e3_stats" data-field="p" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span></p>
+          <p class="e3-small">Stage-0 gap <span data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=0">—</span></p>
+          <p class="e3-pill" data-draw="verdict" data-source="e3_stats" data-where="translator=pix2pix&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</p>
+        </article>
+        <article class="e3-tile" id="tile-pix2pix-map50">
+          <h4 class="e3-tile-k">Zero-shot mAP50 <span class="e3-dir">higher is better</span></h4>
+          <p class="e3-tile-v"><span data-draw="stat" data-tone="1" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span></p>
+          <p class="e3-small">95% CI [<span data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=pix2pix&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span>, <span data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=pix2pix&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span>] · p = <span data-draw="stat" data-source="e3_stats" data-field="p" data-where="translator=pix2pix&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span></p>
+          <p class="e3-small">Stage-0 gap <span data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=pix2pix&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=0">—</span></p>
+          <p class="e3-pill" data-draw="verdict" data-source="e3_stats" data-where="translator=pix2pix&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="e3-group" id="stage3-turbo">
+      <h3 class="e3-h3">pix2pix-turbo <span>· 3 seed pairs</span></h3>
+      <div class="e3-tiles">
+        <article class="e3-tile" id="tile-turbo-psnr">
+          <h4 class="e3-tile-k">PSNR <span class="e3-dir">higher is better</span></h4>
+          <p class="e3-tile-v"><span data-draw="stat" data-tone="1" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span><span class="e3-unit">dB</span></p>
+          <p class="e3-small">95% CI [<span data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span>, <span data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span>] · p = <span data-draw="stat" data-source="e3_stats" data-field="p" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</span></p>
+          <p class="e3-small">Stage-0 gap <span data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=0">—</span> dB</p>
+          <p class="e3-pill" data-draw="verdict" data-source="e3_stats" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.psnr&amp;stage=3">—</p>
+        </article>
+        <article class="e3-tile" id="tile-turbo-lpips">
+          <h4 class="e3-tile-k">LPIPS <span class="e3-dir">lower is better</span></h4>
+          <p class="e3-tile-v"><span data-draw="stat" data-tone="1" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span></p>
+          <p class="e3-small">95% CI [<span data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span>, <span data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span>] · p = <span data-draw="stat" data-source="e3_stats" data-field="p" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</span></p>
+          <p class="e3-small">Stage-0 gap <span data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=0">—</span></p>
+          <p class="e3-pill" data-draw="verdict" data-source="e3_stats" data-where="translator=turbo&amp;kind=paired&amp;metric=fidelity.lpips&amp;stage=3">—</p>
+        </article>
+        <article class="e3-tile" id="tile-turbo-map50">
+          <h4 class="e3-tile-k">Zero-shot mAP50 <span class="e3-dir">higher is better</span></h4>
+          <p class="e3-tile-v"><span data-draw="stat" data-tone="1" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span></p>
+          <p class="e3-small">95% CI [<span data-draw="stat" data-source="e3_stats" data-field="ci_lo" data-where="translator=turbo&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span>, <span data-draw="stat" data-source="e3_stats" data-field="ci_hi" data-where="translator=turbo&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span>] · p = <span data-draw="stat" data-source="e3_stats" data-field="p" data-where="translator=turbo&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</span></p>
+          <p class="e3-small">Stage-0 gap <span data-draw="stat" data-source="e3_stats" data-field="mean" data-where="translator=turbo&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=0">—</span></p>
+          <p class="e3-pill" data-draw="verdict" data-source="e3_stats" data-where="translator=turbo&amp;kind=paired&amp;metric=zero_shot.map50&amp;stage=3">—</p>
+        </article>
+      </div>
+    </div>
+
+    <ul class="e3-read" id="reading">
+      <li><b>pix2pix:</b> PSNR points the same way as LPIPS. The loop arm ends a little further from the real visible frames. The LPIPS interval excludes zero, but the PSNR interval is wide and crosses it.</li>
+      <li><b>pix2pix-turbo:</b> the loop arm leads on PSNR and LPIPS at every stage, including stage 0, where the detector has no weight yet. Its PSNR lead shrinks from stage 0 to stage 3, so the stage-3 gap is mostly a seed draw carried forward, not something the loop added.</li>
+      <li><b>Both:</b> PSNR rewards blur, so a flat PSNR does not show that fine structure survived. That is the job of the faithfulness check (the false-object, missed-object and consistency rates). pix2pix passed all three. Turbo failed on the false-object rate: its 3-seed interval reaches +0.054, past the 0.0315 margin. So turbo's good PSNR and LPIPS here do not clear it.</li>
+    </ul>
+  </section>
+
+  <section class="e3-section" id="by-stage">
+    <h2 class="e3-h2">Each stage, each arm</h2>
+    <p class="e3-p">The line is the arm's mean over seeds, the band is ±1 sd, and the small dots are single seeds. Each metric shares one y-axis across both translators, so you can compare their levels directly. Point at a stage to read its values.</p>
+    <div class="e3-legend" aria-label="Legend">
+      <span><i class="e3-sw" data-arm="control"></i>control (detection weight 0)</span>
+      <span><i class="e3-sw" data-arm="loop"></i>loop (weight 0 → 3)</span>
+      <span><i class="e3-key-band"></i>±1 sd</span>
+      <span><i class="e3-key-dot"></i>one seed</span>
+    </div>
+
+    <div class="e3-metric" id="chart-psnr">
+      <h3 class="e3-h3">PSNR, dB <span>· higher is better</span></h3>
+      <div class="e3-panels">
+        <div class="e3-panel"><p class="e3-panel-k">pix2pix · 6 seeds</p><div class="e3-chart" data-draw="traj" data-tr="pix2pix" data-metric="fidelity.psnr" data-source="e3_stats e3b_seeds e3t_seeds"></div></div>
+        <div class="e3-panel"><p class="e3-panel-k">pix2pix-turbo · 3 seeds</p><div class="e3-chart" data-draw="traj" data-tr="turbo" data-metric="fidelity.psnr" data-source="e3_stats e3b_seeds e3t_seeds"></div></div>
+      </div>
+    </div>
+    <div class="e3-metric" id="chart-lpips">
+      <h3 class="e3-h3">LPIPS <span>· lower is better</span></h3>
+      <div class="e3-panels">
+        <div class="e3-panel"><p class="e3-panel-k">pix2pix · 6 seeds</p><div class="e3-chart" data-draw="traj" data-tr="pix2pix" data-metric="fidelity.lpips" data-source="e3_stats e3b_seeds e3t_seeds"></div></div>
+        <div class="e3-panel"><p class="e3-panel-k">pix2pix-turbo · 3 seeds</p><div class="e3-chart" data-draw="traj" data-tr="turbo" data-metric="fidelity.lpips" data-source="e3_stats e3b_seeds e3t_seeds"></div></div>
+      </div>
+    </div>
+    <div class="e3-metric" id="chart-map50">
+      <h3 class="e3-h3">Zero-shot mAP50 <span>· higher is better</span></h3>
+      <div class="e3-panels">
+        <div class="e3-panel"><p class="e3-panel-k">pix2pix · 6 seeds</p><div class="e3-chart" data-draw="traj" data-tr="pix2pix" data-metric="zero_shot.map50" data-source="e3_stats e3b_seeds e3t_seeds"></div></div>
+        <div class="e3-panel"><p class="e3-panel-k">pix2pix-turbo · 3 seeds</p><div class="e3-chart" data-draw="traj" data-tr="turbo" data-metric="zero_shot.map50" data-source="e3_stats e3b_seeds e3t_seeds"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="e3-section" id="arm-means">
+    <h2 class="e3-h2">Per-arm mean ± sd</h2>
+    <p class="e3-p">The numbers behind the charts. PSNR is in dB.</p>
+    <div class="e3-tablewrap">
+      <table class="e3-table" data-source="e3_stats">
+        <thead><tr><th class="l">Metric</th><th class="l">Translator</th><th class="l">Arm</th><th>Stage 0</th><th>Stage 1</th><th>Stage 2</th><th>Stage 3</th></tr></thead>
+        <tbody data-draw="arm-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="e3-section" id="paired">
+    <h2 class="e3-h2">Loop minus control, every stage</h2>
+    <p class="e3-p">Paired by seed. Stage 0 is the null: the detector has no weight yet in either arm. With 3 pairs, the smallest possible p is 0.25; with 6 it is 0.031.</p>
+    <div class="e3-tablewrap">
+      <table class="e3-table" data-source="e3_stats">
+        <thead>
+          <tr><th class="l" rowspan="2">Metric</th><th class="l" rowspan="2">Stage</th><th class="grp" colspan="3">pix2pix (n = 6)</th><th class="grp" colspan="3">pix2pix-turbo (n = 3)</th></tr>
+          <tr><th class="grp">Δ</th><th>p</th><th>95% CI</th><th class="grp">Δ</th><th>p</th><th>95% CI</th></tr>
+        </thead>
+        <tbody data-draw="paired-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="e3-details" id="trajectory">
+    <summary>Gain over stage 0 within each arm (sensitivity analysis)</summary>
+    <p class="e3-p">Each arm's change from its own stage 0, then loop minus control. This removes the stage-0 seed draw, which matters most for turbo. It is a secondary read; the registered endpoint is the stage-3 paired difference above.</p>
+    <div class="e3-tablewrap">
+      <table class="e3-table" data-source="e3_stats">
+        <thead><tr><th class="l">Metric</th><th class="l">Translator</th><th>Stage</th><th>Control gain</th><th>Loop gain</th><th>Loop − control</th><th>p</th><th>95% CI</th></tr></thead>
+        <tbody data-draw="traj-table"></tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="e3-details" id="method">
+    <summary>How these numbers were made</summary>
+    <ul class="e3-notes">
+      <li><b>Runs.</b> pix2pix: <code>runs/e3b-{control,loop}-s0…s5</code>, at the detection-gradient scale 0.15, 400 translator epochs per run. pix2pix-turbo: <code>runs/e3t-{control,loop}-s{0,1,3}</code>, cut to three seeds after out-of-memory crashes. Nothing was retrained for this page.</li>
+      <li><b>Read.</b> <code>t2o aggregate</code> on the server on 2026-11-14, at commit e11380b. It read each run's <code>metrics.json</code>, which the loop writes after every stage. PSNR had been saved there all along; it had just never been asked for.</li>
+      <li><b>PSNR.</b> Scored on the exported 8-bit PNGs against the real visible frames, with torchmetrics at data range 1.0. The squared error is pooled over the whole split, then turned into one PSNR. It is not an average of per-image PSNRs.</li>
+      <li><b>LPIPS</b> uses the AlexNet backbone. <b>mAP50</b> is zero-shot: the fixed reference detector scores the translated images with no fine-tuning.</li>
+      <li><b>Tests.</b> p is an exact two-sided sign-flip test over all 2ⁿ sign assignments. The CI is a 10,000-resample bootstrap. With 3 pairs, the bootstrap interval is little more than the range of the three differences, so read turbo's intervals as "do all three seeds agree", not as a precise range.</li>
+      <li><b>Sources.</b> The three files behind this page are the two server logs and their CSVs, kept in the repo's <code>logs/</code> folder as <code>2026-11-14-no-task-e3{b,t}-psnr*</code>. Their values are embedded in this file; nothing is fetched.</li>
+    </ul>
+  </details>
+</div>
+
+<script>
+  const METRICS = {
+    'fidelity.psnr': { label: 'PSNR', unit: ' dB', dec: 2, tick: '.0f', better: 1 },
+    'fidelity.lpips': { label: 'LPIPS', unit: '', dec: 4, tick: '.2f', better: -1 },
+    'zero_shot.map50': { label: 'mAP50', unit: '', dec: 4, tick: '.2f', better: 1 },
+  };
+  const ORDER = ['fidelity.psnr', 'fidelity.lpips', 'zero_shot.map50'];
+  const TRANSLATORS = [
+    { key: 'pix2pix', label: 'pix2pix', seeds: 'e3b_seeds' },
+    { key: 'turbo', label: 'pix2pix-turbo', seeds: 'e3t_seeds' },
+  ];
+  const ARMS = ['control', 'loop'];
+  const STAGES = [0, 1, 2, 3];
+  const BAD_STATUS = ['error', 'missing', 'declined'];
+  const armColor = (arm) => dash.colors[arm === 'control' ? 0 : 1];
+
+  function parseWhere(text) {
+    const out = {};
+    (text || '').split('&').forEach((pair) => {
+      const i = pair.indexOf('=');
+      if (i > 0) out[decodeURIComponent(pair.slice(0, i))] = decodeURIComponent(pair.slice(i + 1));
+    });
+    return out;
+  }
+  const whereOf = (r) => {
+    const keys = r.kind === 'arm' ? ['translator', 'kind', 'metric', 'arm', 'stage'] : ['translator', 'kind', 'metric', 'stage'];
+    return keys.map((k) => k + '=' + encodeURIComponent(String(r[k]))).join('&');
+  };
+  const findRow = (rows, where) => rows.find((r) => Object.keys(where).every((k) => String(r[k]) === where[k]));
+  const fmt = (v, metric, signed) => {
+    if (v === null || v === undefined || !isFinite(v)) return '—';
+    const s = Number(v).toFixed(METRICS[metric].dec);
+    return signed && v > 0 ? '+' + s : s;
+  };
+  const fmtP = (v) => (v === null || v === undefined ? '—' : Number(v).toFixed(3));
+  const excludesZero = (r) => r.ci_lo > 0 || r.ci_hi < 0;
+  const tone = (r) => (!excludesZero(r) ? 'neutral' : Math.sign(r.mean) * METRICS[r.metric].better > 0 ? 'good' : 'bad');
+  const seedRows = (d) => d.data.map((r) => ({ seed: Number(r.seed), arm: r.arm, stage: Number(r.stage), metric: r.metric, value: Number(r.value) }));
+
+  function mark(r, field, text, signed) {
+    const span = document.createElement('span');
+    span.setAttribute('data-source', 'e3_stats');
+    span.setAttribute('data-field', field);
+    span.setAttribute('data-where', whereOf(r));
+    span.textContent = text !== undefined ? text : field === 'p' ? fmtP(r[field]) : fmt(r[field], r.metric, signed);
+    return span;
+  }
+  function td(cls, ...children) {
+    const cell = document.createElement('td');
+    if (cls) cell.className = cls;
+    children.forEach((c) => cell.append(c));
+    return cell;
+  }
+  function ciCell(r, cls) {
+    return td(cls, '[', mark(r, 'ci_lo', undefined, true), ', ', mark(r, 'ci_hi', undefined, true), ']');
+  }
+
+  document.querySelectorAll('.e3-sw[data-arm]').forEach((sw) => {
+    sw.style.background = armColor(sw.getAttribute('data-arm'));
+  });
+
+  dash.draw('stat', (el) => {
+    const s = dash.data('e3_stats');
+    el.classList.remove('is-good', 'is-bad');
+    if (s.status !== 'ok') { el.textContent = '—'; return; }
+    const r = findRow(s.data, parseWhere(el.getAttribute('data-where')));
+    const field = el.getAttribute('data-field');
+    if (!r) { el.textContent = '—'; return; }
+    el.textContent = field === 'p' ? fmtP(r.p) : fmt(r[field], r.metric, r.kind !== 'arm');
+    if (el.hasAttribute('data-tone')) {
+      const t = tone(r);
+      if (t !== 'neutral') el.classList.add('is-' + t);
+    }
+  });
+
+  dash.draw('verdict', (el) => {
+    const s = dash.data('e3_stats');
+    el.classList.remove('tone-good', 'tone-bad');
+    if (s.status !== 'ok') { el.textContent = '—'; return; }
+    const r = findRow(s.data, parseWhere(el.getAttribute('data-where')));
+    if (!r) { el.textContent = '—'; return; }
+    const t = tone(r);
+    el.textContent = t === 'neutral' ? 'Interval crosses zero' : t === 'good' ? 'Loop better, interval excludes zero' : 'Loop worse, interval excludes zero';
+    if (t !== 'neutral') el.classList.add('tone-' + t);
+  });
+
+  function chartMessage(el, text) {
+    const p = document.createElement('p');
+    p.className = 'e3-msg';
+    p.textContent = text;
+    el.replaceChildren(p);
+  }
+
+  dash.draw('traj', (el) => {
+    const tr = el.getAttribute('data-tr');
+    const metric = el.getAttribute('data-metric');
+    const m = METRICS[metric];
+    const S = dash.data('e3_stats');
+    const own = dash.data(TRANSLATORS.find((t) => t.key === tr).seeds);
+    if ([S, own].some((d) => BAD_STATUS.includes(d.status))) { chartMessage(el, 'Failed to load'); return; }
+    if (S.status !== 'ok' || own.status !== 'ok') { chartMessage(el, '—'); return; }
+
+    const seeds = seedRows(own).filter((r) => r.metric === metric);
+    const means = S.data.filter((r) => r.kind === 'arm' && r.translator === tr && r.metric === metric);
+    const paired = S.data.filter((r) => r.kind === 'paired' && r.translator === tr && r.metric === metric);
+
+    // One y-domain per metric across both translators, so the two panels compare by eye.
+    const allSeeds = TRANSLATORS.map((t) => dash.data(t.seeds)).filter((d) => d.status === 'ok')
+      .flatMap((d) => seedRows(d)).filter((r) => r.metric === metric).map((r) => r.value);
+    const allBands = S.data.filter((r) => r.kind === 'arm' && r.metric === metric).flatMap((r) => [r.mean - r.std, r.mean + r.std]);
+    const lo = d3.min([...allSeeds, ...allBands]);
+    const hi = d3.max([...allSeeds, ...allBands]);
+    const pad = (hi - lo) * 0.05;
+
+    const W = Math.max(240, Math.floor(el.clientWidth));
+    const H = 230;
+    const mt = 10, mb = 38;
+    const y = d3.scaleLinear().domain([lo - pad, hi + pad]).range([H - mb, mt]).nice(4);
+    const ticks = y.ticks(4);
+    const tickFmt = d3.format(m.tick);
+
+    el.replaceChildren();
+    const svg = d3.select(el).append('svg')
+      .attr('viewBox', `0 0 ${W} ${H}`).attr('width', '100%')
+      .attr('role', 'img')
+      .attr('aria-label', `${m.label} by stage for ${tr === 'turbo' ? 'pix2pix-turbo' : 'pix2pix'}: control and loop means with ±1 sd bands and per-seed values`);
+
+    // Measure the widest tick and end label as drawn, then set margins from them.
+    const yAxis = svg.append('g');
+    const tickText = yAxis.selectAll('text').data(ticks).join('text').text(tickFmt);
+    let tickW = 0;
+    tickText.each(function () { tickW = Math.max(tickW, this.getComputedTextLength()); });
+    const probe = svg.append('text').attr('class', 'e3-end').text('control');
+    const endW = probe.node().getComputedTextLength() || 44;
+    probe.remove();
+    const ml = Math.ceil(tickW) + 12;
+    const mr = Math.ceil(endW) + 18;
+
+    const x = d3.scalePoint().domain(STAGES).range([ml, W - mr]).padding(0.3);
+    const off = { control: -5, loop: 5 };
+
+    svg.insert('g', ':first-child').selectAll('line').data(ticks).join('line')
+      .attr('x1', ml).attr('x2', W - mr).attr('y1', (t) => y(t)).attr('y2', (t) => y(t))
+      .style('stroke', 'var(--cds-chart-grid)').style('stroke-width', 1);
+    tickText.attr('x', ml - 8).attr('y', (t) => y(t)).attr('dy', '0.32em').attr('text-anchor', 'end');
+
+    svg.append('g').selectAll('text').data(STAGES).join('text')
+      .attr('x', (s) => x(s)).attr('y', H - mb + 16).attr('text-anchor', 'middle').text((s) => s);
+    svg.append('text').attr('x', (ml + W - mr) / 2).attr('y', H - 4).attr('text-anchor', 'middle').text('stage');
+
+    const seedIds = [...new Set(seeds.map((r) => r.seed))].sort((a, b) => a - b);
+    const jitter = (seed) => (seedIds.indexOf(seed) - (seedIds.length - 1) / 2) * 1.6;
+
+    ARMS.forEach((arm) => {
+      const rows = means.filter((r) => r.arm === arm).sort((a, b) => a.stage - b.stage);
+      const c = armColor(arm);
+      svg.append('path').datum(rows)
+        .attr('d', d3.area().x((r) => x(r.stage) + off[arm]).y0((r) => y(r.mean - r.std)).y1((r) => y(r.mean + r.std)))
+        .style('fill', c).style('fill-opacity', 0.13).style('stroke', 'none');
+      svg.append('g').selectAll('circle').data(seeds.filter((r) => r.arm === arm)).join('circle')
+        .attr('cx', (r) => x(r.stage) + off[arm] + jitter(r.seed)).attr('cy', (r) => y(r.value)).attr('r', 2.5)
+        .style('fill', c).style('fill-opacity', 0.45);
+      svg.append('path').datum(rows)
+        .attr('d', d3.line().x((r) => x(r.stage) + off[arm]).y((r) => y(r.mean)))
+        .style('fill', 'none').style('stroke', c).style('stroke-width', 2);
+      svg.append('g').selectAll('circle').data(rows).join('circle')
+        .attr('cx', (r) => x(r.stage) + off[arm]).attr('cy', (r) => y(r.mean)).attr('r', 4)
+        .style('fill', c).style('stroke', 'var(--color-panel)').style('stroke-width', 2);
+    });
+
+    // Direct end labels at stage 3, pushed apart when they would touch.
+    const ends = ARMS.map((arm) => {
+      const r = means.find((d) => d.arm === arm && d.stage === 3);
+      return { arm, y: r ? y(r.mean) : 0 };
+    }).sort((a, b) => a.y - b.y);
+    if (ends.length === 2 && ends[1].y - ends[0].y < 13) {
+      const mid = (ends[0].y + ends[1].y) / 2;
+      ends[0].y = mid - 6.5;
+      ends[1].y = mid + 6.5;
+    }
+    svg.append('g').selectAll('text').data(ends).join('text').attr('class', 'e3-end')
+      .attr('x', x(3) + 12).attr('y', (d) => d.y).attr('dy', '0.32em').text((d) => d.arm);
+
+    // Hover: a crosshair on the stage, and a tooltip with both arms and the paired difference.
+    const cross = svg.append('line').attr('y1', mt).attr('y2', H - mb)
+      .style('stroke', 'var(--cds-chart-reference)').style('stroke-width', 1).style('visibility', 'hidden');
+    const tip = document.createElement('div');
+    tip.className = 'e3-tip';
+    tip.hidden = true;
+    el.append(tip);
+    const row = (...parts) => {
+      const div = document.createElement('div');
+      div.className = 'e3-tip-row';
+      parts.forEach((p) => div.append(p));
+      return div;
+    };
+    const showStage = (s) => {
+      const px = x(s);
+      cross.attr('x1', px).attr('x2', px).style('visibility', 'visible');
+      const head = document.createElement('b');
+      head.textContent = 'Stage ' + s;
+      const lines = [row(head)];
+      ARMS.forEach((arm) => {
+        const r = means.find((d) => d.arm === arm && d.stage === s);
+        const sw = document.createElement('i');
+        sw.className = 'e3-sw';
+        sw.style.background = armColor(arm);
+        const label = document.createElement('span');
+        label.className = 'e3-muted';
+        label.textContent = arm;
+        lines.push(row(sw, label, `${fmt(r.mean, metric)} ± ${fmt(r.std, metric)}${m.unit}`));
+      });
+      const p = paired.find((d) => d.stage === s);
+      if (p) {
+        const label = document.createElement('span');
+        label.className = 'e3-muted';
+        label.textContent = 'loop − control';
+        lines.push(row(label, `${fmt(p.mean, metric, true)}${m.unit}`, ` (p ${fmtP(p.p)})`));
+      }
+      tip.replaceChildren(...lines);
+      tip.hidden = false;
+      const box = el.getBoundingClientRect();
+      const scale = box.width / W;
+      const tw = tip.offsetWidth;
+      let left = px * scale + 12;
+      if (left + tw > box.width) left = px * scale - tw - 12;
+      tip.style.left = Math.max(0, left) + 'px';
+      tip.style.top = mt * scale + 'px';
+    };
+    const step = x.step();
+    svg.append('g').selectAll('rect').data(STAGES).join('rect')
+      .attr('x', (s) => x(s) - step / 2).attr('y', mt).attr('width', step).attr('height', H - mb - mt)
+      .style('fill', 'transparent').style('pointer-events', 'all')
+      .on('pointerenter', (event, s) => showStage(s))
+      .on('pointerdown', (event, s) => showStage(s));
+    svg.on('pointerleave', () => { tip.hidden = true; cross.style('visibility', 'hidden'); });
+  });
+
+  dash.draw('arm-table', (tbody) => {
+    const s = dash.data('e3_stats');
+    tbody.replaceChildren();
+    if (s.status !== 'ok') return;
+    ORDER.forEach((metric) => TRANSLATORS.forEach((t) => ARMS.forEach((arm) => {
+      const tr = document.createElement('tr');
+      const sw = document.createElement('i');
+      sw.className = 'e3-sw';
+      sw.style.background = armColor(arm);
+      tr.append(td('l', METRICS[metric].label), td('l', t.label), td('l', sw, ' ', arm));
+      STAGES.forEach((stage) => {
+        const r = s.data.find((d) => d.kind === 'arm' && d.translator === t.key && d.metric === metric && d.arm === arm && d.stage === stage);
+        tr.append(r ? td('', mark(r, 'mean'), ' ± ', mark(r, 'std')) : td('', '—'));
+      });
+      tbody.append(tr);
+    })));
+  });
+
+  dash.draw('paired-table', (tbody) => {
+    const s = dash.data('e3_stats');
+    tbody.replaceChildren();
+    if (s.status !== 'ok') return;
+    ORDER.forEach((metric) => STAGES.forEach((stage) => {
+      const tr = document.createElement('tr');
+      if (stage === 0) tr.className = 'null';
+      tr.append(td('l', METRICS[metric].label), td('l', stage === 0 ? '0 (null)' : String(stage)));
+      TRANSLATORS.forEach((t) => {
+        const r = s.data.find((d) => d.kind === 'paired' && d.translator === t.key && d.metric === metric && d.stage === stage);
+        if (!r) { tr.append(td('grp', '—'), td('', '—'), td('', '—')); return; }
+        const delta = mark(r, 'mean', undefined, true);
+        const tn = tone(r);
+        if (stage > 0 && tn !== 'neutral') delta.className = 'is-' + tn;
+        tr.append(td('grp', delta), td('', mark(r, 'p')), ciCell(r));
+      });
+      tbody.append(tr);
+    }));
+  });
+
+  dash.draw('traj-table', (tbody) => {
+    const s = dash.data('e3_stats');
+    tbody.replaceChildren();
+    if (s.status !== 'ok') return;
+    ORDER.forEach((metric) => TRANSLATORS.forEach((t) => [1, 2, 3].forEach((stage) => {
+      const r = s.data.find((d) => d.kind === 'trajectory' && d.translator === t.key && d.metric === metric && d.stage === stage);
+      if (!r) return;
+      const tr = document.createElement('tr');
+      tr.append(
+        td('l', METRICS[metric].label), td('l', t.label), td('', String(stage)),
+        td('', mark(r, 'control_gain', undefined, true)), td('', mark(r, 'loop_gain', undefined, true)),
+        td('', mark(r, 'mean', undefined, true)), td('', mark(r, 'p')), ciCell(r),
+      );
+      tbody.append(tr);
+    })));
+  });
+</script>
+
+<script>dash.run();</script>
+</main>
+</body>
+</html>
