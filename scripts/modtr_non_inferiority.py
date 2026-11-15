@@ -42,8 +42,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
-import numpy as np
-
 from t2o.analysis.resolvability import (
     NON_INFERIORITY_MARGIN,
     SeedAveragedInterval,
@@ -52,7 +50,7 @@ from t2o.analysis.resolvability import (
 )
 from t2o.data.manifest import DatasetManifest
 from t2o.metrics import task
-from t2o.metrics.task import ImageStats, map50_from_stats
+from t2o.metrics.task import ImageStats, map50_from_stats, restrict_classes
 
 logger = logging.getLogger(__name__)
 
@@ -114,21 +112,6 @@ def _class_ids(classes: Sequence[str], manifests: Mapping[str, DatasetManifest])
             f"the exports: {sorted(orders)}"
         )
     return list(orders.pop())
-
-
-def _restrict(records: dict[str, ImageStats], ids: Sequence[int]) -> dict[str, ImageStats]:
-    """Every image, holding only the predictions and labels of the classes in `ids`."""
-    restricted: dict[str, ImageStats] = {}
-    for stem, record in records.items():
-        kept = np.isin(record.pred_cls, ids)
-        restricted[stem] = replace(
-            record,
-            tp=record.tp[kept],
-            conf=record.conf[kept],
-            pred_cls=record.pred_cls[kept],
-            target_cls=record.target_cls[np.isin(record.target_cls, ids)],
-        )
-    return restricted
 
 
 def _collect(args: argparse.Namespace, data_yaml: Path) -> dict[str, ImageStats]:
@@ -284,8 +267,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     modtr: dict[int, dict[str, ImageStats]] = {}
     for seed in args.seeds:
         logger.info("seed %d: scoring the loop and ModTr", seed)
-        loop[seed] = _restrict(_collect(args, loops[seed].path), ids)
-        modtr[seed] = _restrict(_collect(args, modtrs[seed].path), ids)
+        loop[seed] = restrict_classes(_collect(args, loops[seed].path), ids)
+        modtr[seed] = restrict_classes(_collect(args, modtrs[seed].path), ids)
 
     interval = seed_averaged_bootstrap(
         loop, modtr, resamples=args.resamples, seed=args.bootstrap_seed

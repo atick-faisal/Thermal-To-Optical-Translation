@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -260,3 +260,27 @@ def map50_from_stats(records: Sequence[ImageStats]) -> float:
         np.concatenate([r.target_cls for r in records]),
     )[5]
     return float(ap[:, 0].mean()) if len(ap) else 0.0
+
+
+def restrict_classes(
+    records: Mapping[str, ImageStats], ids: Sequence[int]
+) -> dict[str, ImageStats]:
+    """Every image, holding only the predictions and labels of the classes in `ids`.
+
+    Each image stays in the pool, even one left with no labels, so a bootstrap still draws over
+    the whole split. `map50_from_stats` over the result equals `primary_mean` over per-class AP:
+    ultralytics matches a prediction only to a label of its own class
+    (`engine/validator.py:335-336`) and computes AP one class at a time
+    (`utils/metrics.py:838-848`), so dropping a class leaves every other class's AP unchanged.
+    """
+    restricted: dict[str, ImageStats] = {}
+    for stem, record in records.items():
+        kept = np.isin(record.pred_cls, ids)
+        restricted[stem] = replace(
+            record,
+            tp=record.tp[kept],
+            conf=record.conf[kept],
+            pred_cls=record.pred_cls[kept],
+            target_cls=record.target_cls[np.isin(record.target_cls, ids)],
+        )
+    return restricted
