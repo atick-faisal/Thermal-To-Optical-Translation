@@ -1,7 +1,7 @@
 ---
 slug: registration-axis
 title: Registration-error axis (C2)
-status: in-progress
+status: shipped
 created: 2026-11-08
 ---
 
