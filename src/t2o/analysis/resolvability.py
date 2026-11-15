@@ -145,6 +145,27 @@ def paired_image_bootstrap(
     return PairedInterval(low=float(low), high=float(high), half_width=float(high - low) / 2)
 
 
+def image_bootstrap(
+    records: Mapping[str, ImageStats],
+    resamples: int = 10000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float]:
+    """Percentile CI ``(low, high)`` of one arm's mAP@50 over its own images, in mAP points.
+
+    The single-arm sibling of `paired_image_bootstrap`, for a point that has no partner to be
+    differenced against -- a registration level's own mAP. Draws n-out-of-n. It measures which
+    images were scored, never which training seed was drawn. Records are sorted by stem so a
+    fixed seed draws the same images whatever order the val loader produced.
+    """
+    ordered = [records[stem] for stem in sorted(records)]
+    rng = np.random.default_rng(seed)
+    draws = rng.integers(0, len(ordered), size=(resamples, len(ordered)))
+    values = np.array([map50_from_stats([ordered[i] for i in draw]) for draw in draws])
+    low, high = _POINTS_PER_UNIT * np.quantile(values, [alpha / 2, 1 - alpha / 2])
+    return float(low), float(high)
+
+
 def _pair_seeds(
     candidate: Mapping[int, Mapping[str, ImageStats]],
     baseline: Mapping[int, Mapping[str, ImageStats]],
