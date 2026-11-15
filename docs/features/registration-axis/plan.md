@@ -87,6 +87,16 @@ metrics keep visible-side boxes; they are not on this curve.
 pixels by the expected amount; level zero is the identity, byte for byte; the default config
 hash is unchanged; val is untouched; a tiny sweep runs end to end under the `slow` marker.
 
+**The degradation report (-07)** runs on the server: `metrics.json` holds only stage scalars, so
+each translation point is re-scored per image over its stage-3 export (`collect_image_stats`, as
+`scripts/margin_resolvability.py`). Both translation arms are reported, zero-shot as the
+headline, each with an n-out-of-n image-bootstrap CI and a paired CI of its delta to the 0 px
+run (`paired_image_bootstrap` at n = pool); the custom 0 px is `e3b-loop-s0`, with e3b's six-seed
+sd beside it, and a zero-shot re-score that misses `metrics.json`'s value stops the script. FLIR
+is scored on its 3-class primary in both halves (a class-subset helper beside
+`map50_from_stats`); a stage-3 FID above 200 marks a collapse (F231), and its identical
+label-transfer seeds print as n = 1 (F227). Output is a text block plus a tidy CSV; no figure.
+
 ## Open Questions
 
 ### Q6: Which boxes score FLIR's translation half at val, once its train targets are de-rolled?
