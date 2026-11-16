@@ -259,6 +259,32 @@ def _copy_split(manifest: DatasetManifest, images_dir: Path, out_split: Path) ->
     return copied_labels
 
 
+def _write_manifest(manifest: DatasetManifest, out_dir: Path) -> Path:
+    """Write the ``data.yaml`` of a tree that :func:`_copy_split` built into ``out_dir``."""
+    infrared_train = manifest.pairing.infrared_path(manifest.train_images)
+    split_root = Path(os.path.commonpath([manifest.train_images, infrared_train]))
+    visible_images = manifest.train_images.relative_to(split_root).as_posix()
+    destination = out_dir / DATA_FILENAME
+    destination.write_text(
+        yaml.safe_dump(
+            {
+                # Absolute: ultralytics honours `path:` literally (CLAUDE.md).
+                "path": str(out_dir.resolve()),
+                "train": f"train/{visible_images}",
+                "val": f"val/{visible_images}",
+                "nc": manifest.nc,
+                "names": manifest.class_names,
+                RGBT_BLOCK: {
+                    "visible_token": manifest.pairing.visible_token,
+                    "infrared_token": manifest.pairing.infrared_token,
+                },
+            },
+            sort_keys=False,
+        )
+    )
+    return destination
+
+
 def write_misaligned_tree(
     manifest: DatasetManifest, misalignment: Misalignment, out_dir: Path | str
 ) -> Path:
@@ -326,26 +352,7 @@ def write_misaligned_tree(
         + "\n"
     )
 
-    split_root = Path(os.path.commonpath([manifest.train_images, infrared_train]))
-    visible_images = manifest.train_images.relative_to(split_root).as_posix()
-    destination = out_dir / DATA_FILENAME
-    destination.write_text(
-        yaml.safe_dump(
-            {
-                # Absolute: ultralytics honours `path:` literally (CLAUDE.md).
-                "path": str(out_dir.resolve()),
-                "train": f"train/{visible_images}",
-                "val": f"val/{visible_images}",
-                "nc": manifest.nc,
-                "names": manifest.class_names,
-                RGBT_BLOCK: {
-                    "visible_token": manifest.pairing.visible_token,
-                    "infrared_token": manifest.pairing.infrared_token,
-                },
-            },
-            sort_keys=False,
-        )
-    )
+    destination = _write_manifest(manifest, out_dir)
     level = logger.warning if dropped else logger.info
     level(
         "misaligned tree %s: %d train label file(s) at %.2f px (digest %s), %d box(es) dropped",
