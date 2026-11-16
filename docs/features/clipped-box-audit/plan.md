@@ -1,7 +1,7 @@
 ---
 slug: clipped-box-audit
 title: Clipped-box audit
-status: in-progress
+status: shipped
 created: 2026-11-16
 ---
 
