@@ -82,6 +82,15 @@ No frozen tree is touched, no record is edited, and no detector is retrained.
    evaluation path (`detection/evaluation.py`, ultralytics `val`). Those are the E8 arm A
    thermal baseline (record 011), the label-transfer sweep (036), the translation arms (037)
    and the registration-axis levels (040).
+
+   Translation arms score on their own stage export (`<run>/stage<N>/translated/data.yaml`),
+   a plain YOLO tree whose val labels are a verbatim copy of the frozen labels
+   (`engine/export.py` `_mirror_label`). The drop-tree builder therefore gets an export mode
+   that drops by the same audit line index from `val/labels`, and the re-score takes each
+   arm's original and drop `data.yaml` explicitly. Lost matches are the fall in true positives
+   at IoU 0.5 from the original to the drop tree, from `collect_image_stats` on the same
+   `model.val()`. The count is near-exact, since removing a box can rarely let a prediction
+   re-match another.
 4. **Record it** with `/log-experiment`, then apply the decision rule from Q3. The effect on
    earlier claims goes in the findings ledger's `Status` and `Acts on` cells, never in an
    edited record.
