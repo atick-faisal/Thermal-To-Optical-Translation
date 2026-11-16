@@ -46,3 +46,6 @@ reports/
 .idea/
 .vscode/
 .claude/
+
+# Server runbooks name the server and its paths, so they stay off this public remote
+runbooks/
