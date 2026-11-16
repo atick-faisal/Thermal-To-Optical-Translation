@@ -13,11 +13,18 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 from scripts.clipped_box_audit import BoxRow, write_csv
-from scripts.clipped_box_drop_tree import DropTreeError, main, write_drop_tree
+from scripts.clipped_box_drop_tree import (
+    DropTreeError,
+    main,
+    write_drop_tree,
+    write_export_drop_tree,
+)
 
 from t2o.data.manifest import DatasetManifest
 from t2o.data.mirror import PROVENANCE_FILENAME, mirror_labels_onto_infrared
+from t2o.engine.export import write_data_yaml
 
 LOOSE, TIGHT = 0.4, 0.9
 THRESHOLD = 0.5
@@ -164,3 +171,57 @@ def test_a_non_empty_destination_is_refused(source: DatasetManifest, tmp_path: P
 
     with pytest.raises(DropTreeError, match="not empty"):
         write_drop_tree(source, audit, THRESHOLD, tmp_path / "taken")
+
+
+@pytest.fixture
+def export(source: DatasetManifest, tmp_path: Path) -> DatasetManifest:
+    """A translated export of `source`, laid out and described as `engine/export.py` writes it.
+
+    The visible images stand in for translations; the labels are the thermal ones, verbatim.
+    """
+    root = tmp_path / "translated"
+    for split in ("train", "val"):
+        shutil.copytree(source.root / split / "visible" / "images", root / split / "images")
+        shutil.copytree(source.root / split / "infrared" / "labels", root / split / "labels")
+    (root / "val" / "labels.cache").write_bytes(b"stale")
+    return DatasetManifest.load(write_data_yaml(root, source))
+
+
+def test_export_mode_drops_only_the_loose_val_lines(
+    source: DatasetManifest, export: DatasetManifest, tmp_path: Path
+) -> None:
+    audit = _audit_csv(source, tmp_path / "audit.csv")
+    out = write_export_drop_tree(export, audit, THRESHOLD, tmp_path / "drop").parent
+
+    before, after = _files(export.root), _files(out)
+    assert after.keys() == before.keys()
+    changed = {name for name in before if before[name] != after[name]}
+    assert changed, "no file changed; the fixture would not catch a skipped drop"
+    for name in changed:
+        assert name.startswith("val/labels/")
+        assert after[name].decode() == "".join(before[name].decode().splitlines(True)[1:])
+
+
+def test_export_mode_has_no_cache_an_absolute_path_and_the_provenance(
+    source: DatasetManifest, export: DatasetManifest, tmp_path: Path
+) -> None:
+    audit = _audit_csv(source, tmp_path / "audit.csv")
+    out = tmp_path / "drop"
+    args = ["--data", str(export.path), "--audit-csv", str(audit), "--threshold", str(THRESHOLD)]
+
+    assert main([*args, "--out", str(out), "--export"]) == 0
+
+    assert not list(out.rglob("*.cache"))
+    assert yaml.safe_load((out / "data.yaml").read_text())["path"] == str(out.resolve())
+    assert DatasetManifest.load(out / "data.yaml").val_images == out.resolve() / "val" / "images"
+    provenance = json.loads((out / "val" / PROVENANCE_FILENAME).read_text())
+    assert provenance["min_retained_fraction"] == THRESHOLD
+    assert provenance["audit_csv_sha256"] == hashlib.sha256(audit.read_bytes()).hexdigest()
+    assert provenance["boxes_dropped"] == provenance["files_changed"] > 0
+
+
+def test_export_mode_refuses_a_paired_tree(source: DatasetManifest, tmp_path: Path) -> None:
+    audit = _audit_csv(source, tmp_path / "audit.csv")
+
+    with pytest.raises(DropTreeError, match="translated export"):
+        write_export_drop_tree(source, audit, THRESHOLD, tmp_path / "drop")
