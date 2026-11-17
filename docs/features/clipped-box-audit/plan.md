@@ -121,6 +121,8 @@ Existing code reused: `t2o.data.misalignment` (`Misalignment`, `misalign_label_l
 - [ ] A fixed absolute change, e.g. 0.01 mAP50 on any headline number — simple and easy to state, but it ignores how noisy each arm already is
 - [ ] No preset rule; decide after seeing the numbers — flexible, but a threshold picked after scoring is exactly what the goal's "gate fixed before its first score" habit guards against
 
+> Superseded by ADR-01 (2026-11-17)
+
 ## Out of Scope
 
 - **Relabelling by hand**, or any annotation tooling. `docs/goal.md` Non-Goal: "no labelling tools".
