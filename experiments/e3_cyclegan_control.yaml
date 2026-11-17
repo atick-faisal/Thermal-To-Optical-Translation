@@ -1,0 +1,126 @@
+# The e3 control arm with CycleGAN as the only translator, on FLIR thermal (cyclegan-direct-flir,
+# CYCLEGAN-DIRECT-FLIR-01): two stages at lambda_det = 0.
+#
+# The question is the professor's: does unpaired learning suit thermal -> visible better than
+# paired? The frozen detector needs a plausible object, not a pixel-accurate one. This pair runs
+# CycleGAN in pix2pix's place in e3, on FLIR, and is read against e3f's stages 0 and 1
+# (record 016; plan Q1). The read is CycleGAN vs pix2pix only, never vs raw thermal. Paper-2
+# exploration, not a TIM claim.
+#
+# Not "trained the same way": CycleGAN's objective, batch size, schedule and precision all
+# differ from pix2pix's. The comparison is recipe A vs recipe B.
+#
+# The two files are identical except `coupling.task_weights` and `runtime.name`, pinned by
+# tests/test_e3_cyclegan_experiments.py. That test stops a stray edit becoming a second,
+# unrecorded difference between the arms.
+#
+# The runbook passes --data, --max-train-images 600 and --val-loss-images 153 on every run, as
+# e3f did; none of them is fixed here.
+
+data:
+  # Left at the schema default on purpose, as in e3f (record 016): FLIR arrives through --data.
+  # A forgotten flag reads the custom-set default path, not FLIR.
+  annotation_fraction: 1.0
+  annotation_seed: 0
+  # Off, CycleGAN trains against each input's own visible frame, so "unpaired" is in name only,
+  # and nothing refuses it.
+  unpaired_visible: true
+  # Plan Q3: thermal as grey, the same input pix2pix got in e3f. At 3 the input becomes a
+  # confound between the two recipes.
+  infrared_channels: 1
+
+train:
+  # e3f's stage length (plan Q5). The schedule spans the whole run: the rate holds over stage 0
+  # and decays to zero over stage 1, so changing this moves the decay too.
+  epochs_per_stage: 100
+  # Upstream's batch size. At 8 the same epochs are an eighth of the updates, and the GAN may
+  # stop before it settles.
+  batch_size: 1
+  # Upstream CycleGAN's rate. Doubling it destabilises the adversarial game. Halving it leaves
+  # the GAN undertrained, since the decay still ends at the last epoch.
+  lr: 2.0e-4
+  # Not read by `cyclegan`, whose schedule is fixed in translators/cyclegan.py. Kept at E3's
+  # value because it is still inside config_hash().
+  lr_gamma: 0.95
+  # Neither is read by `cyclegan`, which trains in float32. Kept for the same reason.
+  amp: true
+  amp_dtype: bfloat16
+  # Applied to input and target together, so it never moves a box off its object.
+  hflip: 0.5
+  # Full frames. A crop must stay stride-32, or the in-loop detector rejects it.
+  crop: null
+  # Overridden per run by --seed (0-2, e3f's first three). Also seeds the unpaired draw, so a
+  # changed seed is a different pairing too.
+  seed: 0
+
+loss:
+  # Paired terms. `unpaired_visible` makes them score against a random frame, so
+  # build_translator refuses `cyclegan` with either above 0.
+  l2: 0.0
+  lpips: 0.0
+  # Both adversarial directions. At 0 nothing pulls the output toward optical, and
+  # build_translator refuses it.
+  gan: 1.0
+
+coupling:
+  # The control arm: both stages at weight 0, so stage 1 runs the same machinery with the
+  # coupling term absent. The effective weight is task_weights[stage] * grad_scale.
+  task_weights: [0.0, 0.0]
+  # PLACEHOLDER, the cascade's value (record 039). CYCLEGAN-DIRECT-FLIR-02 replaces it from the
+  # FLIR probe's loss_share.py, holding the detection term at 20-30% of the objective. Too low
+  # and the loop arm is a second control; too high and the detector's gradient wins over the
+  # cycle term, producing adversarial texture. Must match the control file.
+  grad_scale: 0.6
+  reward_target: null
+
+detector:
+  in_loop:
+    # e3f's FLIR yolo11n. It must not be reference.weights below.
+    weights: runs/inloop-flir-yolo11n/weights/best.pt
+    imgsz: 640
+  evaluation:
+    init_weights: runs/inloop-flir-yolo11n/weights/best.pt
+    epochs: 50
+    imgsz: 640
+    batch: 16
+  reference:
+    # e3f's independently trained FLIR judge (yolo11s). A concrete path so a forgotten flag
+    # cannot fall back to evaluation.init_weights, the detector that supplies the gradient.
+    weights: runs/reference-flir-yolo11s/weights/best.pt
+    imgsz: 640
+    batch: 16
+
+translator:
+  backbone: cyclegan
+  # Upstream CycleGAN's defaults. The unet variants fail on 640x480.
+  net_g: resnet_9blocks
+  net_d: basic
+  ngf: 64
+  ndf: 64
+  # Upstream's lambda_A = lambda_B. Lower lets the output invent content; higher pins it to the
+  # thermal input's structure.
+  lambda_cycle: 10.0
+  # Plan Q3. Identity feeds a visible frame to G_AB, which reads 1 channel, so build_translator
+  # refuses anything above 0 here.
+  lambda_identity: 0.0
+
+metrics:
+  lpips_net: alex
+  kid_subset_size: 50
+  iou_threshold: 0.5
+  conf_threshold: 0.25
+
+export:
+  normalize: clamp
+
+runtime:
+  device: null
+  # 4, not E3's 16. Each loader worker is its own Windows process, about 2 GB of commit, and the
+  # 2026-11-10 crash (error 1455) was the commit limit. Outside config_hash().
+  workers: 4
+  wandb: false
+  wandb_project: thermal-to-optical
+  group: e3f-cyclegan
+  run_dir: runs
+  # Always overridden by --name (`e3f-cyclegan-control-s$s`), or the seeds overwrite each other.
+  name: e3f-cyclegan-control
